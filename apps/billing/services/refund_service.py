@@ -247,6 +247,16 @@ def _record_intent(invoice, *, amount, reason, requested_by, payment_attempt, cr
     return refund, True
 
 
+def _publish_failed(refund):
+    """An inbox outage must never alter the recorded financial outcome."""
+    try:
+        with transaction.atomic():
+            from apps.notifications.services import admin_events
+            admin_events.subscription_refund_failed(refund)
+    except Exception:  # notification savepoint is rolled back; the refund remains authoritative
+        logger.exception("subscription refund %s: failure inbox publication failed", refund.pk)
+
+
 def _execute_with_provider(refund_pk, *, now=None):
     """Steps 2 and 3. At most one provider call per refund row, ever (the caller only gets here for a newly created row)."""
     now = now or timezone.now()
@@ -322,6 +332,8 @@ def _record_outcome(refund_pk, outcome, *, provider_refund_id="", failure_code="
         after={"invoice": invoice.number, "amount": str(refund.amount), "status": refund.status, "outcome": outcome},
         metadata={"detail": detail} if detail else None,
     )
+    if refund.status == SubscriptionRefund.Status.FAILED:
+        _publish_failed(refund)
     return refund
 
 
@@ -470,4 +482,5 @@ def fail_refund_manually(refund, *, actor, reference, note="", now=None):
         object_type="SubscriptionRefund", object_id=locked.pk, object_label=str(locked.amount),
         metadata={"reference": reference, "note": (note or "")[:200]},
     )
+    _publish_failed(locked)
     return locked

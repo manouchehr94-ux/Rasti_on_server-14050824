@@ -1,0 +1,4 @@
+{
+  "_policy": "Known vulnerabilities block CI. No exception is pre-approved. Prior inherited Pillow/cryptography exceptions were removed after upgrading to the stated fixed major versions; see dependency review.",
+  "exceptions": []
+}

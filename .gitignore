@@ -12,3 +12,23 @@ __pycache__/
 *.tar.gz
 *.zip
 node_modules/
+
+# CI-only build outputs and local runtime data
+/.ci-deps/
+/dist/
+/build.json
+/db.sqlite3
+/media/
+/private_media/
+/staticfiles/
+/fast-tier.log
+/tenant-tier.log
+/security-pg.log
+/finance-pg.log
+/.coverage
+/htmlcov/
+
+# Restored byte-for-byte by tools/ci/qa_assets.py from reviewed repository archives.
+/apps/stores/demo_assets/rasti_mode_demo/raw_user_catalog/[1-5]/*.jpg
+!/tools/ci/assets/rasti-mode-demo-raw-1.zip
+!/tools/ci/assets/rasti-mode-demo-raw-2.zip

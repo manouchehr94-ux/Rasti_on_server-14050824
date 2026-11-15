@@ -1,0 +1,78 @@
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from apps.stores.models import Store, StoreMembership
+
+User = get_user_model()
+
+
+class StaffRequiredDecoratorTests(TestCase):
+    def test_anonymous_user_is_redirected_to_admin_login(self):
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("/admin-portal/login/", response.url)
+        self.assertIn("admin_return=", response.url)
+    def test_anonymous_redirect_carries_a_signed_return_token(self):
+        """The destination is embedded in a signed admin_return token
+        (Section 4), not a raw ``next=`` query parameter."""
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertIn("admin_return=", response.url)
+        self.assertNotIn("next=", response.url)
+
+    def test_authenticated_non_staff_is_redirected_home(self):
+        user = User.objects.create_user(username="09121119900", password="pass12345", is_staff=False)
+        self.client.login(username="09121119900", password="pass12345")
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertRedirects(response, reverse("catalog:home"))
+
+    def test_staff_user_can_access(self):
+        user = User.objects.create_user(username="09121119902", password="pass12345", is_staff=True)
+        StoreMembership.objects.create(
+            store=Store.objects.get(slug="akhlaghi"),
+            user=user,
+            role=StoreMembership.Role.OWNER,
+            status=StoreMembership.MembershipStatus.ACTIVE,
+            accepted_at=timezone.now(),
+        )
+        self.client.login(username="09121119902", password="pass12345")
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_user_without_membership_is_redirected_home(self):
+        """is_staff alone must no longer grant dashboard access — an
+        active StoreMembership for the resolved Store is required."""
+        user = User.objects.create_user(username="09121119903", password="pass12345", is_staff=True)
+        self.client.login(username="09121119903", password="pass12345")
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertRedirects(response, reverse("catalog:home"))
+
+    def test_real_merchant_owner_without_django_is_staff_flag_can_access(self):
+        """Regression test for the post-deploy production bug: a real
+        merchant owner — created via the phone+OTP registration flow
+        (``apps.portal.services.owner_auth_service.get_or_create_owner_by_phone``),
+        which never sets Django's ``is_staff`` flag — must still reach their
+        own Store's dashboard. ``staff_required`` used to additionally
+        require ``request.user.is_staff``, a stray leftover of the
+        "historical, tenant-blind ``user.is_staff`` check" that
+        ``apps.stores.authorization``'s own docstring says this decorator
+        was supposed to have replaced with ``StoreMembership`` — but the
+        ``is_staff`` condition was never actually removed from the code, so
+        every real owner (always ``is_staff=False``) was redirected away
+        from ``/admin-portal/`` to the public storefront instead of ever
+        reaching their dashboard. Every *other* test in this file happened
+        to set ``is_staff=True`` on its fixture user, which is exactly why
+        this was never caught before production."""
+        user = User.objects.create_user(username="09121119904", password="pass12345")
+        self.assertFalse(user.is_staff)
+        StoreMembership.objects.create(
+            store=Store.objects.get(slug="akhlaghi"),
+            user=user,
+            role=StoreMembership.Role.OWNER,
+            status=StoreMembership.MembershipStatus.ACTIVE,
+            accepted_at=timezone.now(),
+        )
+        self.client.login(username="09121119904", password="pass12345")
+        response = self.client.get(reverse("dashboard:dashboard"))
+        self.assertEqual(response.status_code, 200)

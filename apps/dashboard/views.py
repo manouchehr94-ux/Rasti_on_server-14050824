@@ -4325,8 +4325,8 @@ def _settings_context(
         }),
         "smsrasti_device_token": shop.smsrasti_device_token,
         "sms_status": SimpleLazyObject(lambda: get_sms_delivery_status(store)),  # lazy: queries only when the SMS section renders
-        "sms_balance": balance_service.get_or_create_balance(store=store),
-        "sms_billing_policy": SmsBillingPolicy.load(),
+        "sms_balance": SimpleLazyObject(lambda: balance_service.get_or_create_balance(store=store)),
+        "sms_billing_policy": SimpleLazyObject(SmsBillingPolicy.load),
         "sms_packages": balance_service.list_active_packages(),
         "sms_package_purchase_form": SmsPackagePurchaseForm(),
         "platform_gateway_options": SimpleLazyObject(lambda: _platform_gateway_options("sms_package", store)),

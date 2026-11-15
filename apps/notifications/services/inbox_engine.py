@@ -135,7 +135,8 @@ def publish(
         plans.append((user, d))
     InboxItem.objects.bulk_create(items)
     saved = {i.user_id: i for i in InboxItem.objects.filter(event=event)}
-    _create_deliveries(event, etype, scope_key, [(saved[u.pk], d) for u, d in plans if u.pk in saved], now)
+    if not etype.inbox_only:
+        _create_deliveries(event, etype, scope_key, [(saved[u.pk], d) for u, d in plans if u.pk in saved], now)
     return event
 
 

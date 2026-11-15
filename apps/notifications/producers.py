@@ -14,6 +14,8 @@ SP = "safe_publish"
 
 #: کلید → فهرستِ حلقه‌ها ``(module, function, callee)``؛ حلقه‌ی اول نقطه‌ی ورودِ سرویسِ تولیدی است.
 CHAINS = {
+    "payment.refund_failed": [("apps.billing.services.refund_service", "fail_refund_manually", "_publish_failed"), ("apps.billing.services.refund_service", "_publish_failed", "subscription_refund_failed"), (AE, "subscription_refund_failed", SP)],
+    "platform.refund_failed": [("apps.billing.services.refund_service", "fail_refund_manually", "_publish_failed"), ("apps.billing.services.refund_service", "_publish_failed", "subscription_refund_failed"), (AE, "subscription_refund_failed", SP)],
     "order.created": [(OS, "create_order_from_cart", "order_created"), (BE, "order_created", "order_created"), (AE, "order_created", SP)],
     "order.canceled": [(OS, "change_order_status", "order_status_changed"), (BE, "order_status_changed", "order_canceled"), (AE, "order_canceled", SP)],
     "payment.failed": [(GW, "process_callback_and_verify", "payment_attempt_failed"), (AE, "payment_attempt_failed", SP)],
