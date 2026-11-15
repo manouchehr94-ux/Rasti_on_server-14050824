@@ -507,6 +507,8 @@ class SchemaEnablementRegistryGuardTests(SimpleTestCase):
     # fixed/static disposition).
     EXPECTED_SCHEMA_ENABLED = frozenset({
         "hero_banner",
+        "hero_stage",
+        "featured_products",
         "brand_carousel",
         "rich_text",
         "product_section",
@@ -1157,12 +1159,12 @@ class BackgroundCapabilityProjectionTests(SimpleTestCase):
             self.assertEqual(fields[-1].key, "background", key)
 
     def test_documented_non_schema_background_aware_sections_have_no_schema(self):
-        # These 8 background-aware sections are context/media-only (no schema)
+        # These remaining background-aware sections are context/media-only (no schema)
         # — the documented exception. They must remain schema-less so the
         # projection correctly skips them.
         # (``product_description`` left this set in V5 PDP بستهٔ ۱ and ``related_products`` in the six-site kit: both now have a schema — the generic ``background`` field is projected onto them)
         documented_non_schema = {
-            "catalog_product_wall", "collection_header", "featured_products",
+            "catalog_product_wall", "collection_header",
             "product_video",
             "single_banner", "story_rail",
         }

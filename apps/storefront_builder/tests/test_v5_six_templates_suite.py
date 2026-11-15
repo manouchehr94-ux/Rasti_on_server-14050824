@@ -8,6 +8,7 @@ be installed on a Store through the canonical path, published and rendered (Home
 
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -181,7 +182,9 @@ class StrandedStoreFixture(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.store, cls.owner, cls.products = rc.seed_store("lilikacosmetics", image_mode="none", preset_key=None, host=HOST)
+        # Non-visual fixtures must not depend on third-party captured files.
+        with patch.object(rc, "_read", side_effect=AssertionError("reference read in image_mode=none")):
+            cls.store, cls.owner, cls.products = rc.seed_store("lilikacosmetics", image_mode="none", preset_key=None, host=HOST)
         from apps.catalog.models import Category
         from apps.stores.models import Store
 

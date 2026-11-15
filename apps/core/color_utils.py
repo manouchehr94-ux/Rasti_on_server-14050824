@@ -290,13 +290,17 @@ def ensure_contrast(fg, backdrops, min_ratio: float = AA_NORMAL_TEXT) -> str:
     backdrops = list(backdrops)
     start = to_hex(fg)
 
+    # Candidates are opaque normalized hex colours. Flatten the backdrops
+    # once; their luminances do not change during the search. Re-parsing and
+    # compositing the same CSS backgrounds for every candidate dominated CPU.
+    lums = _backdrop_luminances(backdrops)
+
     def worst(color):
-        return min(ratio_between(color, b) for b in backdrops)
+        luminance = relative_luminance(color)
+        return min((max(luminance, lb) + 0.05) / (min(luminance, lb) + 0.05) for lb in lums)
 
     if worst(start) >= min_ratio:
         return start.upper()
-
-    lums = _backdrop_luminances(backdrops)
     l_start = relative_luminance(start)
     paths = []
     for end in ("#000000", "#FFFFFF"):

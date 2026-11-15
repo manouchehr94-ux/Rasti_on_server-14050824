@@ -25,14 +25,22 @@ from apps.stores.models import Store, StoreMembership
 
 def _grant_akhlaghi_membership(user):
     StoreMembership.objects.create(
-        store=Store.objects.get(slug="akhlaghi"), user=user,
+        store=_akhlaghi(), user=user,
         role=StoreMembership.Role.OWNER, status=StoreMembership.MembershipStatus.ACTIVE,
         accepted_at=timezone.now(),
     )
 
 
 def _akhlaghi():
-    return Store.objects.get(slug="akhlaghi")
+    # TransactionTestCase flushes migration seed data between classes.
+    from apps.content.models import FooterSettings
+    from apps.core.models import ShopSettings
+    store, _ = Store.objects.get_or_create(
+        slug="akhlaghi", defaults={"name": "Akhlaghi", "status": Store.Status.ACTIVE}
+    )
+    ShopSettings.provision_for(store)
+    FooterSettings.provision_for(store)
+    return store
 
 User = get_user_model()
 

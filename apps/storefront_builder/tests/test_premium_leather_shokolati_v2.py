@@ -9,7 +9,7 @@ from apps.storefront_builder import section_registry
 
 class PremiumLeatherShokolatiV2ContractTests(SimpleTestCase):
     def setUp(self):
-        self.preset = presets.get_layout_preset("premium_leather")
+        self.preset = presets.get_layout_preset_version("premium_leather", "2")
         self.home = self.preset.pages["home"]
 
     def test_identity_and_shell(self):

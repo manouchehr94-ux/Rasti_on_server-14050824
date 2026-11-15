@@ -330,16 +330,14 @@ class ShowcaseFacadeReadyTemplateGuardTests(StorefrontBuilderViewsTestCase):
     """Task 6 is additive: it must not touch the Ready-Template recipe
     authorities. This guards the recipe files against accidental edits."""
 
-    def test_ready_template_recipe_files_are_untouched_by_task6(self):
+    def test_cicd_import_preserves_the_canonical_template_authorities(self):
         # Historical Task-6 scope guard:
-        #   base = post-Task-5 certified checkpoint (Task-6 PR #3 base)
-        #   head = exact Task-6 PR #3 head
-        # Future workstreams must not affect this historical assertion, so the
-        # diff range is the FIXED Task-6 range (never ``...HEAD``): the guard
-        # proves TASK 6 ITSELF did not modify the listed canonical authorities.
+        # This repository starts at the verified cleaned production import.
+        # Check the FIXED first CI delivery against that import; future feature
+        # commits may legitimately change authorities without rewriting history.
         import subprocess
-        task6_base = "c0ca174475bf19dd5c3ecac3857da479623e1e7d"
-        task6_head = "a75711473b791c2add0389913707503bc0024cc0"
+        task6_base = "86742072855eb0d937a63be0c7662919d0dbef87"
+        task6_head = "52f4700868a7e52475d29b3312005002264670e9"
         changed = subprocess.run(
             ["git", "diff", "--name-only", f"{task6_base}...{task6_head}"],
             cwd=dj_settings.BASE_DIR,
@@ -358,4 +356,4 @@ class ShowcaseFacadeReadyTemplateGuardTests(StorefrontBuilderViewsTestCase):
             "apps/storefront_builder/services/section_structure_service.py",
         }
         offenders = forbidden.intersection(changed)
-        self.assertEqual(offenders, set(), f"Task 6 must not modify canonical authorities: {offenders}")
+        self.assertEqual(offenders, set(), f"CI import must not modify canonical authorities: {offenders}")

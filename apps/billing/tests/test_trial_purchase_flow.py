@@ -398,17 +398,26 @@ class ConcurrentPurchaseTests(TransactionTestCase):
         self.assertEqual(SubscriptionInvoice.objects.filter(store=self.store, kind="plan_change").count(), 1)
 
     def test_parallel_verified_callbacks_activate_exactly_once(self):
-        from apps.billing.services import plan_change_billing_service as pcb
-        from apps.subscriptions.services import plan_change_service as pcs
-
-        sub = ent.get_current_subscription(self.store)
-        _kind, invoice = pcb.start_plan_change(sub, self.pro, preview_token=pcs._preview_token(sub, self.pro), actor=self.owner, billing_interval="monthly")
         client = Client(HTTP_HOST=f"{self.store.admin_subdomain}.{settings.RASTISI_ADMIN_DOMAIN_SUFFIX}")
         self.assertTrue(client.login(username=self.owner.username, password=PW))
+        # Follow the actual merchant flow: request middleware resolves current
+        # subscription state BEFORE a preview/invoice is created. A pre-login
+        # service-only invoice can correctly become stale on the first request.
+        preview = client.post(reverse("dashboard:subscription-plan-preview"),
+                              {"version_id": self.pro.pk, "billing_interval": "monthly"})
+        self.assertEqual(preview.status_code, 200)
+        executed = client.post(reverse("dashboard:subscription-plan-execute"),
+                               {"version_id": self.pro.pk, "billing_interval": "monthly",
+                                "preview_token": preview.context["preview"]["token"]})
+        self.assertEqual(executed.status_code, 302)
+        invoice = SubscriptionInvoice.objects.get(store=self.store, kind="plan_change")
         response = client.post(reverse("dashboard:platform-checkout-pay", args=["subscription", invoice.pk]), {"method": "zibal"})
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(SubscriptionPaymentAttempt.objects.filter(invoice=invoice).exists(),
-                        f"checkout did not create an attempt: status={response.status_code}, location={response.get('Location', '')}")
+        if not SubscriptionPaymentAttempt.objects.filter(invoice=invoice).exists():
+            from django.contrib.messages import get_messages
+            feedback = " | ".join(str(message) for message in get_messages(response.wsgi_request))
+            self.fail(f"checkout did not create an attempt: status={response.status_code}, "
+                      f"location={response.get('Location', '')}, messages={feedback}")
         attempt = SubscriptionPaymentAttempt.objects.get(invoice=invoice)
         self.fake.paid(amount_rial=EXPECTED["monthly"] * 10, order_id=attempt.public_token)
         barrier = threading.Barrier(6)

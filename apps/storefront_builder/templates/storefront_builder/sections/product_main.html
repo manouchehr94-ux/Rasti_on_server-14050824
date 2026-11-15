@@ -65,7 +65,7 @@ Preview بدونِ هیچ محصولی در این فروشگاه — چیزی �
            @touchstart.passive="touchX = $event.touches[0].clientX" @touchend="swipeEnd($event)">
         <button type="button" class="pdp-lb-close" @click="lb = false; zoomed = false" aria-label="بستن">×</button>
         <button type="button" class="pdp-lb-nav pdp-lb-prev" @click="go(-1)" aria-label="تصویر قبلی" x-show="urls().length > 1">‹</button>
-        <img class="pdp-lb-img" :class="{ 'is-zoomed': zoomed }" :src="urls()[activeSlide]" alt="" @click="zoomed = !zoomed">
+        <img data-img-role="product" class="pdp-lb-img" :class="{ 'is-zoomed': zoomed }" :src="urls()[activeSlide]" alt="" @click="zoomed = !zoomed">
         <button type="button" class="pdp-lb-nav pdp-lb-next" @click="go(1)" aria-label="تصویر بعدی" x-show="urls().length > 1">›</button>
       </div>
       {% endif %}
@@ -247,7 +247,7 @@ Preview بدونِ هیچ محصولی در این فروشگاه — چیزی �
         <div class="pdp-satc"{% if pdp.show_desktop_sticky_bar %} data-satc="{% if pdp.show_mobile_sticky_bar %}md{% else %}d{% endif %}" x-init="pdpSatcWatch($el)"{% endif %} x-cloak aria-label="خرید سریع">
           {% if pdp.show_desktop_sticky_bar %}
           <div class="pdp-satc-id">
-            {% with cover=gallery_slides.0 %}{% if cover and cover.type == "image" %}<img src="{{ cover.url }}" alt="" width="40" height="40" loading="lazy">{% endif %}{% endwith %}
+            {% with cover=gallery_slides.0 %}{% if cover and cover.type == "image" %}<img data-img-role="thumb" src="{{ cover.url }}" alt="" width="40" height="40" loading="lazy">{% endif %}{% endwith %}
             <b>{{ product.name }}</b>
           </div>
           {% endif %}

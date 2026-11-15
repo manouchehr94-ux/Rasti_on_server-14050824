@@ -187,7 +187,8 @@ def seed_store(site: str, *, image_mode: str = "reference", preset_key: str | No
         shop.gift_wrap_price = pack["gift_wrap_price"]
         shop.gift_wrap_title = pack.get("gift_wrap_title", shop.gift_wrap_title)
     if pack.get("logo_file"):                      # local comparison only: a picture from the reference kit, never shipped
-        shop.logo = uploaded(REFERENCE_ROOT / site / "capture" / pack["logo_file"], "logo.jpg", max_side=900)
+        logo_path = REFERENCE_ROOT / site / "capture" / pack["logo_file"] if image_mode == "reference" else None
+        shop.logo = uploaded(logo_path, "logo.jpg", max_side=900)
     shop.save()
     footer = FooterSettings.provision_for(store)
     footer.is_enabled = True

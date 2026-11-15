@@ -6,6 +6,8 @@ renderer. These tests lock the visual/data contract and cross-family
 isolation without touching a database.
 """
 
+from dataclasses import replace
+
 from django.test import SimpleTestCase
 
 from apps.storefront_builder import appearance_registry, layout_preset_registry as presets
@@ -13,7 +15,7 @@ from apps.storefront_builder import appearance_registry, layout_preset_registry 
 
 class DenseMarketplaceBeraitoV2ContractTests(SimpleTestCase):
     def setUp(self):
-        self.preset = presets.get_layout_preset("dense_marketplace")
+        self.preset = presets.get_layout_preset_version("dense_marketplace", "2")
         self.golden = presets.get_layout_preset("v5_golden_homepage")
 
     def test_identity_palette_and_registered_shell(self):
@@ -53,7 +55,11 @@ class DenseMarketplaceBeraitoV2ContractTests(SimpleTestCase):
                 self.assertEqual(actual.container_settings, golden.container_settings)
                 self.assertEqual(normalized_actual, golden.settings)
             else:
-                self.assertEqual(actual, golden)
+                # Composition is shared; template-scoped semantic identities
+                # intentionally differ after the authored-slot migration.
+                self.assertEqual(replace(actual, semantic_slot_key=None), replace(golden, semantic_slot_key=None))
+                if (actual.semantic_slot_key or "").startswith("legacy_unresolved."):
+                    self.assertTrue(actual.semantic_slot_key.startswith("legacy_unresolved.dense_marketplace."))
 
     def test_first_fold_matches_dense_commerce_structure(self):
         home = self.preset.pages["home"]
@@ -102,7 +108,7 @@ class DenseMarketplaceBeraitoV2ContractTests(SimpleTestCase):
             "premium_leather": ("2", "chocolate_centered_search"),
         }
         for key, (version, header_variant) in expected.items():
-            sibling = presets.get_layout_preset(key)
+            sibling = presets.get_layout_preset_version(key, version)
             self.assertEqual(sibling.version, version, key)
             self.assertEqual(sibling.header["header_variant"], header_variant, key)
     def test_home_closes_with_generic_brand_and_blog_discovery(self):

@@ -64,16 +64,21 @@ for rollback; its cleaned tree is not claimed to equal the old Git commit.
 
 - Final fast tier: **2096 tests, zero failures/tolerated/flaky**.
 - Final real PostgreSQL/Redis security tier: **646 tests, zero failures/tolerated/flaky**.
-- Finance full run: **2292 tests, one unexpected setup error** in the concurrent
-  purchase test (checkout did not create a payment attempt). The six earlier
-  fixture/consent problems and generated pricing document issue are fixed. A
-  focused two-test PostgreSQL run passed; this alone does not resolve the full-run
-  issue. Stronger login/checkout setup assertions now expose the cause on CI.
+- Final finance PostgreSQL run: **2292 tests, zero failures/tolerated/flaky**.
+  The fixture now follows the real authenticated HTTP preview/execute flow
+  before checkout. Its two focused concurrency tests also passed; financial
+  production services and stale-decision guards were not changed.
   No failure exemption/retry was added. The earlier tenant run completed **10056 tests with 38 failing IDs** (30
   failures and 10 errors including subtests). Several known query/demo/retention
   issues are already fixed in this candidate; other failures include missing
   captured reference images, old-repository Git history and stale v2 template
-  expectations. These are unresolved blockers, not accepted exceptions.
+  expectations. All 38 previously failing IDs were then rechecked together (40 tests
+  including the affected setup class) and passed. Fixes pin retained v2/v7
+  recipes explicitly, preserve template-specific semantic namespaces, align
+  editor checks with the loaded R3 stylesheet, repair image-role metadata,
+  remove three unreferenced retired templates/scripts, and fix no-reference QA
+  mode and transaction seed fixtures. Full CI still must pass; no failure is
+  accepted as an exception.
 - CI-gate/archive unit suite: **43 passed**. Final complete release-tooling suite: **144 passed**,
   no skips. The 17 focused receipt/packaging tests also passed.
 - Disposable flat bootstrap success and deliberately failed-health rollback tests
@@ -89,6 +94,15 @@ for rollback; its cleaned tree is not claimed to equal the old Git commit.
 - Production DB validation by the laptop helper is pg_restore readability, not a
   full production restore. No DB/media cross-resource transaction is claimed;
   media changing during transfer fails verification.
+- Real GitHub CI run 43725188769 passed source completeness, dependencies,
+  static checks/audit, migration upgrades, and the installed/runtime rehearsal.
+  Its initial fast job exposed 2.229 seconds CPU for 200 contrast calculations against
+  the unchanged 2-second budget. Backdrop luminances are now computed once per
+  search. All 65 colour tests and 120 differential cases passed with identical
+  outputs; local benchmark improved from 0.673 to 0.401 CPU seconds.
+- The fixed-history guard references import 8674207 and first CI delivery
+  52f4700, never HEAD, so later template development is not forbidden. The
+  tenant checkout fetches full history for this guard. Its focused test passed.
 - Actionlint and production configuration checks passed; pinned Action commit
   URLs were checked. Committed source scanner: 2606 files, zero findings. Native
   Gitleaks 8.30.1 (upstream checksum verified) scanned the integration commits with

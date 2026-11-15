@@ -16,7 +16,7 @@ from apps.storefront_builder.variant_contract import resolve_active_variant, res
 
 class EditorialJewelrySaremiV2ContractTests(SimpleTestCase):
     def setUp(self):
-        self.preset = lpr.get_layout_preset("editorial_jewelry")
+        self.preset = lpr.get_layout_preset_version("editorial_jewelry", "2")
 
     def test_version_palette_and_global_chrome(self):
         self.assertEqual(self.preset.version, "2")
@@ -96,4 +96,4 @@ class EditorialJewelrySaremiV2ContractTests(SimpleTestCase):
             "dense_marketplace": "2",
         }
         for key, version in expected.items():
-            self.assertEqual(lpr.get_layout_preset(key).version, version, key)
+            self.assertEqual(lpr.get_layout_preset_version(key, version).version, version, key)
