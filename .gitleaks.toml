@@ -1,12 +1,215 @@
 [extend]
 useDefault = true
-[[allowlists]]
-description = "Exact UI component identifier matches in families.py"
+
+# Exact reviewed synthetic values, scoped to individual paths AND rules.
+# No directory/file exclusion; different credential values still trigger.
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/billing/tests/test_phase2_hardening.py"
+condition = "AND"
+paths = ['''(^|/)apps/billing/tests/test_phase2_hardening\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^Zx9\-QpL2vB7nR4tYw8Ke3Hc6Jm1Ud5Fs0GaXiNoPrTz$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/customers/tests/test_auth_service.py"
+condition = "AND"
+paths = ['''(^|/)apps/customers/tests/test_auth_service\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^StrongPass123$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/customers/tests/test_auth_views.py"
+condition = "AND"
+paths = ['''(^|/)apps/customers/tests/test_auth_views\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^StrongPass123$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/customers/tests/test_promotional_consent.py"
+condition = "AND"
+paths = ['''(^|/)apps/customers/tests/test_promotional_consent\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^Str0ng\-pass\-91$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/dashboard/tests/test_integration_views.py"
+condition = "AND"
+paths = ['''(^|/)apps/dashboard/tests/test_integration_views\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^94MqMPJEnuahlSHjb9kP$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/dashboard/tests/test_integrations_redesign.py"
+condition = "AND"
+paths = ['''(^|/)apps/dashboard/tests/test_integrations_redesign\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^94MqMPJEnuahlSHjb9kP$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/dashboard/tests/test_integrations_visibility_page.py"
+condition = "AND"
+paths = ['''(^|/)apps/dashboard/tests/test_integrations_visibility_page\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^94MqMPJEnuahlSHjb9kP$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/dashboard/tests/test_search_presence.py"
+condition = "AND"
+paths = ['''(^|/)apps/dashboard/tests/test_search_presence\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^94MqMPJEnuahlSHjb9kP$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/notifications/tests/test_inbox_engine.py"
+condition = "AND"
+paths = ['''(^|/)apps/notifications/tests/test_inbox_engine\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^tBHItJI5svbpez7KI4CCXg$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/orders/tests/test_sadad_adapter.py"
+condition = "AND"
+paths = ['''(^|/)apps/orders/tests/test_sadad_adapter\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^c2lnbmluZy1rZXk=$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/storefront_builder/storefront_appearance/families.py"
 condition = "AND"
 paths = ['''(^|/)apps/storefront_builder/storefront_appearance/families\.py$''']
-regexTarget = "match"
+regexTarget = "secret"
 regexes = [
-    '''^safe_default_component_key="header\.legacy_default\.v1"$''',
-    '''^safe_default_component_key="footer\.legacy_default\.v1"$''',
-    '''^safe_default_component_key="bottom_nav\.hidden\.v1"$''',
+    '''^bottom_nav\.hidden\.v1$''',
+    '''^footer\.legacy_default\.v1$''',
+    '''^header\.legacy_default\.v1$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/storefront_builder/tests/test_r4_store_appearance_contracts.py"
+condition = "AND"
+paths = ['''(^|/)apps/storefront_builder/tests/test_r4_store_appearance_contracts\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^header\.legacy_default\.v1$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/storefront_builder/tests/test_r4_store_appearance_registry.py"
+condition = "AND"
+paths = ['''(^|/)apps/storefront_builder/tests/test_r4_store_appearance_registry\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^header\.legacy_default\.v1$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/storefront_builder/tests/test_r4_store_appearance_rendering.py"
+condition = "AND"
+paths = ['''(^|/)apps/storefront_builder/tests/test_r4_store_appearance_rendering\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^bottom_nav\.hidden\.v1$''',
+    '''^footer\.legacy_default\.v1$''',
+    '''^header\.legacy_default\.v1$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/storefront_builder/tests/test_u1b2_capability_metadata_wiring.py"
+condition = "AND"
+paths = ['''(^|/)apps/storefront_builder/tests/test_u1b2_capability_metadata_wiring\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^synthetic_section_u1b2$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/stores/tests/test_enamad_verification.py"
+condition = "AND"
+paths = ['''(^|/)apps/stores/tests/test_enamad_verification\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^94MqMPJEnuahlSHjb9kP$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: deploy/backup/tests/test_backup_e2e.py"
+condition = "AND"
+paths = ['''(^|/)deploy/backup/tests/test_backup_e2e\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^CANARY\-db\-pw\-93f1$''',
+    '''^CANARY\-secret\-key\-0000$''',
+    '''^CANARY\-wrong\-pw\-7741$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: deploy/release/tests/harness.py"
+condition = "AND"
+paths = ['''(^|/)deploy/release/tests/harness\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^CANARY\-secret\-key\-7f3a91c2d8e54b60$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: deploy/release/tests/test_interruption_and_security.py"
+condition = "AND"
+paths = ['''(^|/)deploy/release/tests/test_interruption_and_security\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^abcdef123456$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: tools/ci/test_secret_scan.py"
+condition = "AND"
+paths = ['''(^|/)tools/ci/test_secret_scan\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^a\-placeholder\-for\-the\-docs\-123$''',
+]
+
+[[rules]]
+id = "stripe-access-token"
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/notifications/tests/test_inbox_engine.py"
+condition = "AND"
+paths = ['''(^|/)apps/notifications/tests/test_inbox_engine\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^sk_live_ABCDEF1234567890$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed UI identifier or synthetic test fixture: apps/notifications/tests/test_inbox_wiring.py"
+condition = "AND"
+paths = ['''(^|/)apps/notifications/tests/test_inbox_wiring\.py$''']
+regexTarget = "secret"
+regexes = [
+    '''^sk_live_ABCDEF1234567890$''',
 ]

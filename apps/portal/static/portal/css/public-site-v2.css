@@ -24,6 +24,7 @@
   --rs-danger:#9d3434;
   --rs-success:#446537;
   --rs-warning:#8e632f;
+  --rs-needs-confirm:#f4b740;
   /* Disabled controls: explicit colours (>=3:1), never element opacity — opacity halves the text contrast too. */
   --rs-disabled-ink:#6a7771;
   --rs-disabled-bg:#e4e9e1;
@@ -1013,4 +1014,4 @@ input::placeholder,textarea::placeholder{color:var(--rs-muted);opacity:1}
 .r-hint-list li,.r-error-list li{margin-bottom:3px}
 @media(max-width:720px){.r-auth-tabs{grid-template-columns:1fr 1fr}.r-auth-tab{font-size:14px;padding:0 6px}}
 
-.needs-confirm{display:inline-block;padding:0 8px;border-radius:6px;background:color-mix(in srgb,#f4b740 28%,transparent);border:1px dashed #f4b740;font-weight:700;font-size:.92em;line-height:1.7}
+.needs-confirm{display:inline-block;padding:0 8px;border-radius:6px;background:color-mix(in srgb,var(--rs-needs-confirm) 28%,transparent);border:1px dashed var(--rs-needs-confirm);font-weight:700;font-size:.92em;line-height:1.7}

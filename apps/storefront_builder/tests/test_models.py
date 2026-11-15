@@ -1,0 +1,149 @@
+from django.db import IntegrityError
+from django.test import TestCase
+
+from apps.storefront_builder.models import StorefrontLayout, StorefrontLayoutVersion, StorefrontSection
+from apps.stores.models import Store
+
+
+def _akhlaghi():
+    return Store.objects.get(slug="akhlaghi")
+
+
+class StorefrontLayoutModelTests(TestCase):
+    def test_provision_for_creates_row(self):
+        layout = StorefrontLayout.provision_for(_akhlaghi())
+        self.assertTrue(layout.pk)
+        self.assertFalse(layout.uses_visual_storefront_layout)
+
+    def test_provision_for_idempotent(self):
+        a = StorefrontLayout.provision_for(_akhlaghi())
+        b = StorefrontLayout.provision_for(_akhlaghi())
+        self.assertEqual(a.pk, b.pk)
+
+    def test_one_layout_per_store(self):
+        StorefrontLayout.objects.create(store=_akhlaghi())
+        with self.assertRaises(IntegrityError):
+            StorefrontLayout.objects.create(store=_akhlaghi())
+
+
+class StorefrontLayoutVersionModelTests(TestCase):
+    def setUp(self):
+        self.layout = StorefrontLayout.provision_for(_akhlaghi())
+
+    def test_version_number_unique_per_layout(self):
+        StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        with self.assertRaises(IntegrityError):
+            StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+
+    def test_default_status_draft(self):
+        version = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        self.assertEqual(version.status, StorefrontLayoutVersion.Status.DRAFT)
+
+    def test_fingerprint_stable_for_same_content(self):
+        v1 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        StorefrontSection.objects.create(version=v1, section_key="hero_banner", order=0, settings={"a": 1})
+        fp1 = v1.compute_fingerprint()
+        fp2 = v1.compute_fingerprint()
+        self.assertEqual(fp1, fp2)
+
+    def test_fingerprint_changes_with_content(self):
+        v1 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        fp_before = v1.compute_fingerprint()
+        StorefrontSection.objects.create(version=v1, section_key="hero_banner", order=0)
+        fp_after = v1.compute_fingerprint()
+        self.assertNotEqual(fp_before, fp_after)
+
+    def test_effective_header_config_defaults_true_when_unset(self):
+        version = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        self.assertEqual(version.header_config, {})
+        config = version.effective_header_config()
+        self.assertTrue(config["show_search"])
+        self.assertTrue(config["show_cart"])
+        self.assertTrue(config["sticky"])
+
+    def test_effective_header_config_preserves_explicit_false(self):
+        """رگرسیون: فیلتر Django ``|default:True`` مقدار صریح False را هم
+        falsy می‌گیرد و override می‌کند — effective_header_config باید
+        False صریح را دست‌نخورده نگه دارد."""
+        version = StorefrontLayoutVersion.objects.create(
+            layout=self.layout, version_number=1, header_config={"show_cart": False},
+        )
+        config = version.effective_header_config()
+        self.assertFalse(config["show_cart"])
+        self.assertTrue(config["show_search"])
+
+    def test_effective_footer_config_preserves_explicit_false(self):
+        version = StorefrontLayoutVersion.objects.create(
+            layout=self.layout, version_number=1, footer_config={"show_copyright": False},
+        )
+        config = version.effective_footer_config()
+        self.assertFalse(config["show_copyright"])
+        self.assertTrue(config["show_about"])
+
+    def test_fingerprint_independent_of_section_insertion_order(self):
+        v1 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        StorefrontSection.objects.create(version=v1, section_key="hero_banner", order=0)
+        StorefrontSection.objects.create(version=v1, section_key="newest_products", order=1)
+        fp1 = v1.compute_fingerprint()
+
+        v2 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=2)
+        StorefrontSection.objects.create(version=v2, section_key="newest_products", order=1)
+        StorefrontSection.objects.create(version=v2, section_key="hero_banner", order=0)
+        fp2 = v2.compute_fingerprint()
+        self.assertEqual(fp1, fp2)
+
+    def test_fingerprint_changes_when_row_key_changes(self):
+        """Phase 1 correction: row_key/row_span واقعاً خروجیِ رندرِ عمومی را
+        تغییر می‌دهند (کدام section در کدام ردیف است)، پس باید بخشی از
+        drift-detection باشند."""
+        v1 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        section = StorefrontSection.objects.create(version=v1, section_key="hero_banner", order=0)
+        fp_before = v1.compute_fingerprint()
+        section.row_key = "r1"
+        section.row_span = 8
+        section.save(update_fields=["row_key", "row_span"])
+        fp_after = v1.compute_fingerprint()
+        self.assertNotEqual(fp_before, fp_after)
+
+    def test_fingerprint_unaffected_by_lock_state(self):
+        """تصمیمِ صریح: قفل فقط رفتارِ ادیتور را کنترل می‌کند، هیچ اثری روی
+        HTMLِ عمومیِ منتشرشده ندارد — پس نباید نسخه را «متفاوت» نشان دهد."""
+        v1 = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+        section = StorefrontSection.objects.create(version=v1, section_key="hero_banner", order=0)
+        fp_before = v1.compute_fingerprint()
+        section.is_locked = True
+        section.save(update_fields=["is_locked"])
+        fp_after = v1.compute_fingerprint()
+        self.assertEqual(fp_before, fp_after)
+
+
+class StorefrontSectionModelTests(TestCase):
+    def setUp(self):
+        self.layout = StorefrontLayout.provision_for(_akhlaghi())
+        self.version = StorefrontLayoutVersion.objects.create(layout=self.layout, version_number=1)
+
+    def test_ordering(self):
+        StorefrontSection.objects.create(version=self.version, section_key="b", order=2)
+        StorefrontSection.objects.create(version=self.version, section_key="a", order=1)
+        keys = list(self.version.sections.values_list("section_key", flat=True))
+        self.assertEqual(keys, ["a", "b"])
+
+    def test_settings_default_empty_dict(self):
+        section = StorefrontSection.objects.create(version=self.version, section_key="x", order=0)
+        self.assertEqual(section.settings, {})
+
+    def test_cascade_delete_with_version(self):
+        section = StorefrontSection.objects.create(version=self.version, section_key="x", order=0)
+        self.version.delete()
+        self.assertFalse(StorefrontSection.objects.filter(pk=section.pk).exists())
+
+    def test_row_and_lock_defaults_reproduce_pre_phase1_behavior(self):
+        """Phase 1 (معماریِ Universal Block/Data): ``row_key``/``row_span``/
+        ``is_locked`` باید برایِ هر section از‌قبل‌موجود (که هرگز این
+        قابلیت را لمس نکرده) دقیقاً همان چیزی باشند که رفتارِ پیش از این
+        فاز را بازتولید می‌کنند — section مستقل، عرضِ کامل، باز — تا
+        Migration ``0012`` هیچ فروشگاهی را تغییر ندهد."""
+        section = StorefrontSection.objects.create(version=self.version, section_key="x", order=0)
+        self.assertEqual(section.row_key, "")
+        self.assertEqual(section.row_span, 12)
+        self.assertFalse(section.is_locked)

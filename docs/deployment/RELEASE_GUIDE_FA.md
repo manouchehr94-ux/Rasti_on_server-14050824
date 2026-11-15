@@ -1,0 +1,41 @@
+> Historical assessment from the prepared repository. Current integration, dependency upgrades and resolved blockers are recorded in [INTEGRATION_STATUS_20261115.md](INTEGRATION_STATUS_20261115.md). This document does not describe the current candidate.
+
+# راهنمای نسخهٔ دوم زیرساخت انتشار
+
+این نسخه فقط نامزد بررسی است؛ روی Production نصب نشده و تنظیمات واقعی GitHub
+را تغییر نداده است. راهنمای فنی مرجع: [RELEASE_PIPELINE.md](RELEASE_PIPELINE.md).
+
+- انتشار آنلاین فقط برای تغییر بدون migration یا migration افزایشیِ قابل تحلیل
+  و تراکنشی مجاز است. عملیات ناشناخته، غیراتمیک، حذف داده/قید و تغییر migration
+  منتشرشده مسدود می‌شوند. عبارت تأیید دستی این محدودیت را برنمی‌دارد.
+- شکست migration یا قطع انتشار، وضعیت دیتابیس را نامعلوم می‌کند. Incident و
+  نشانگر انتشار حفظ می‌شوند؛ انتشار بعدی و Rollback خودکار متوقف می‌شوند.
+  ابتدا schema، رکورد migration، داده‌ها و فرایندهای باقی‌مانده بررسی شوند.
+- Rollback فقط کد را برمی‌گرداند؛ دیتابیس را Restore یا reverse-migrate نمی‌کند.
+  وجود in_progress حتی با عبارت قبول خطر مانع Rollback است.
+- فایل‌های برنامه، دیتابیس، بارگذاری‌های مشتریان و Secretها جدا هستند. حساب
+  برنامه باید غیر root و جدا از RastiService.ir باشد.
+- وب و jobها باید از یک release و venv استفاده کنند. همهٔ cron/timerها باید
+  wrapper نصب‌شدهٔ run_current_job.sh را به‌کار ببرند. این wrapper قفل مشترک
+  می‌گیرد؛ انتشار قفل انحصاری دارد. وضعیت jobs_follow_current پیش‌فرض false است.
+- حساب SSH شِل اجرایی دارد، ولی فرمان اجباری در کلید و Match User دسترسی آن را
+  محدود می‌کند. nologin اجرای forced command را هم مسدود می‌کند. پیش از reload
+  تنظیمات، sshd -t و آزمون فرمان‌های مجاز/غیرمجاز الزامی است.
+- همان wheelhouse دارای hash که منتشر می‌شود در CI نصب و تست می‌شود. نسخهٔ
+  interpreter واقعی، Linux x86_64 و glibc کنترل می‌شوند. اختلاف tooling مانع انتشار است.
+- بررسی سلامت علاوه بر برنامه، TLS/Nginx محلی و فایل static واقعی را بررسی می‌کند؛
+  اتصال TLS به loopback پین می‌شود ولی گواهی دامنه اعتبارسنجی می‌شود.
+- Backup باید در مقصد مستقل، رمزگذاری‌شده و با کلید بازیابی مستقل تنظیم شود.
+  آزمون کانتینر از مقصد محلی استفاده می‌کند و پایداری مقصد خارج سرور را ثابت نمی‌کند.
+  Verify کامل است؛ شکست هشدار نیز marker قابل پایش ایجاد می‌کند.
+- بازفعال‌سازی نسخهٔ فعلی migration اجرا نمی‌کند. بازیابی و ارتقای schema باید
+  در maintenance، با توقف وب و jobهای نویسنده و آزمایش روی دیتابیس scratch انجام شود.
+- شناسهٔ Known Failure به‌تنهایی معافیت نیست؛ امضای دقیق خطا نیز باید برابر باشد.
+  خطای جدید در همان تست مسدود می‌شود. مشکل refund_failed یک مانع مستقل مالی است
+  و منطق مالی در این مأموریت تغییر نکرده است.
+- استثناهای امنیتی وابستگی‌ها بدون سند بررسی پذیرفته نمی‌شوند. گزارش
+  [DEPENDENCY_SECURITY_REVIEW.md](DEPENDENCY_SECURITY_REVIEW.md) را بخوانید.
+
+تنظیم reviewers محیط production، محدودیت شاخه، CODEOWNERS، Secret و host key
+هنوز اقدام مالک است. هیچ Merge یا اتصال به Production بخشی از این تغییر نیست.
+معماری فعلی یک Gunicorn را restart می‌کند؛ انتشار بدون قطعی را تضمین نمی‌کند.

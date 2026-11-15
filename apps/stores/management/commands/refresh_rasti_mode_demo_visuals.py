@@ -227,6 +227,18 @@ class Command(BaseCommand):
                     category.save(update_fields=["image", "updated_at"])
                 counts["categories"] += 1
 
+            # The seeder now nests the ten curated leaves under three group
+            # parents. Give an empty group the same real photo as its first
+            # curated child; preserve existing group artwork and avoid copies.
+            group_images = {}
+            for category in category_by_name.values():
+                if category.parent_id and category.image:
+                    group_images.setdefault(category.parent_id, category.image.name)
+            for group in Category.objects.filter(store=store, pk__in=group_images, image=""):
+                group.image = group_images[group.pk]
+                group.save(update_fields=["image", "updated_at"])
+                counts["categories"] += 1
+
             for name, rel_path in manifest["brands"].items():
                 brand = Brand.objects.get(store=store, name=name)
                 if _set_file_if_changed(brand, "logo", CURATED_DIR / rel_path, f"rasti-{brand.slug}.webp"):

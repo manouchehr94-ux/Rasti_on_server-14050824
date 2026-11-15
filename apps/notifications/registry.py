@@ -58,6 +58,7 @@ class EventType:
     #: چرخه‌ی تولیدکننده: production (مسیرِ تولیدیِ فعال) | feature_flagged (فقط وقتی پرچمِ پلتفرم روشن شود) | cron_dependent (نیازمندِ Cron نصب‌شده)
     #: | dormant (تولیدکننده هست اما هیچ فراخوانِ تولیدی ندارد) | test_only (دکمه‌ی اعلانِ آزمایشی). زنجیره‌ی تولید در ``producers.py`` با AST راستی‌آزمایی می‌شود.
     lifecycle: str = "production"
+    inbox_only: bool = False        # Operational notices may explicitly forbid external delivery.
 
 
 def _t(*types: EventType) -> dict:
@@ -73,6 +74,9 @@ EVENT_TYPES: dict[str, EventType] = _t(
     EventType("return.requested", "درخواست مرجوعی", "orders", IMPORTANT, permission=A.RETURN_VIEW, link_name="return-detail",
               source="orders.return_service.create_return_request → business_events.return_event(requested)"),
     # ---------------------------------------------------------------- پرداخت و مالی
+    EventType("payment.refund_failed", "بازپرداخت اشتراک انجام نشد", "finance", IMPORTANT,
+              permission=A.SUBSCRIPTION_VIEW, link_name="subscription-overview", inbox_only=True,
+              source="billing.refund_service._record_outcome(declined) / fail_refund_manually → admin_events.subscription_refund_failed"),
     EventType("payment.failed", "تلاش پرداخت ناموفق", "finance", NORMAL, permission=A.ORDER_VIEW, link_name="order-detail", groupable=True, retention_days=30,
               source="orders.gateway_payment_service.process_callback_and_verify (تأییدِ server-to-server ناموفق؛ on_commit، dedupe روی PaymentAttempt) + simulate_payment (فقط توسعه)"),
     EventType("payment.suspicious", "پرداخت مشکوک / مغایرت", "finance", CRITICAL, permission=A.REFUND_MANAGE, link_name="payment-reconciliations",
@@ -115,6 +119,9 @@ EVENT_TYPES: dict[str, EventType] = _t(
     EventType("system.test", "اعلان آزمایشی", "system", NORMAL, link_name="inbox-home", urgent=True, retention_days=7, lifecycle="test_only",
               source="inbox_views.send_test (فقط به خودِ درخواست‌دهنده)"),
     # ================================================================ پلتفرم
+    EventType("platform.refund_failed", "شکست قطعی بازپرداخت اشتراک", "finance", IMPORTANT,
+              scope=PLATFORM, link_name="home", inbox_only=True,
+              source="billing.refund_service._record_outcome(declined) / fail_refund_manually → admin_events.subscription_refund_failed"),
     EventType("platform.store_created", "فروشگاه جدید ساخته شد", "account", NORMAL, scope=PLATFORM, link_name="stores",
               source="portal.provisioning_service (ساخت Store)"),
     EventType("platform.store_status_changed", "تغییر وضعیت فروشگاه", "account", IMPORTANT, scope=PLATFORM, link_name="stores",
@@ -130,7 +137,6 @@ EVENT_TYPES: dict[str, EventType] = _t(
 #: رویدادهایی که منبعِ واقعی ندارند (قابلیتِ متناظر ساخته نشده) — فقط مستندسازی؛ هیچ اعلانی ساخته نمی‌شود.
 PLANNED = {
     "payment.gateway_error": "خطای درگاه — لاگ/وضعیتِ ساختاریافته‌ای که برای مدیر قابل‌اطلاع باشد وجود ندارد (فقط ``PaymentTransaction`` با پیامِ خام).",
-    "payment.refund_failed": "شکستِ بازپرداخت — ``refund_service`` وضعیتِ نهایی FAILED را به‌عنوان رویداد جدا نمی‌دهد.",
     "settlement.status": "وضعیتِ تسویه — دادهٔ معتبرِ تسویه از درگاه دریافت نمی‌شود.",
     "security.suspicious_login": "تلاشِ ورودِ مشکوکِ مدیر — شمارنده‌ی rate-limit هست اما رویدادِ ساختاریافته برای مدیر نیست.",
     "security.password_changed_admin": "تغییرِ رمزِ مدیر — مسیرِ مستقلِ تغییرِ رمزِ ادمین ثبت‌شده‌ی رویداد نیست (فقط مشتری: ``account.sensitive_changed`` در Outbox).",

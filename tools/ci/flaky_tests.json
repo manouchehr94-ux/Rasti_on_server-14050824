@@ -1,0 +1,4 @@
+{
+  "_policy": "A test listed here is known to depend on something other than its own code (wall-clock timing, or the order in which the parallel test runner schedules classes). When it fails inside a tier run it is re-run ONCE, alone and serially: if it passes it is reported as FLAKY and does not block; if it fails again the gate fails. Tests that are not listed are never retried, so an intermittent failure of a concurrency or data test is always a hard failure. Entries expire (60 days at most) and need an owner and a reason. Exact reviewed expected_failure_sha256 signatures are mandatory; an unreviewed or changed diagnostic blocks, including before any flaky retry.",
+  "entries": []
+}

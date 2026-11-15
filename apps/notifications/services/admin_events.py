@@ -134,3 +134,21 @@ def platform_contact_message(message):
 def platform_jobs_unhealthy(problems: list[str]):
     safe_publish("platform.jobs_unhealthy", title="کارهای زمان‌بندی‌شده مشکل دارند", summary="، ".join(problems)[:250],
                  dedupe_key=f"jobs:{timezone.now():%Y%m%d%H}", severity=CRITICAL)
+
+
+def subscription_refund_failed(refund):
+    """Definitive subscription-refund failure only; inbox notices never send external messages.
+
+    No bank reference, raw provider diagnostic, user identity or customer data
+    is included. Both notices participate in the caller's business transaction.
+    """
+    if refund.status != "failed":
+        return
+    summary = "بازپرداخت اشتراک انجام نشد؛ وضعیت در بخش مالی قابل بررسی است."
+    safe_publish("payment.refund_failed", store=refund.store,
+                 title="بازپرداخت اشتراک انجام نشد", summary=summary,
+                 entity=("SubscriptionRefund", refund.pk),
+                 dedupe_key=f"subscription-refund-failed:{refund.pk}")
+    safe_publish("platform.refund_failed", title="شکست قطعی بازپرداخت اشتراک",
+                 summary=summary, entity=("SubscriptionRefund", refund.pk),
+                 dedupe_key=f"platform-subscription-refund-failed:{refund.pk}")
