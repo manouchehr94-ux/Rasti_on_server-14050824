@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+{% load static storefront_builder_extras %}
+
+{% block title %}پیش‌نمایش — {{ SHOP_NAME }}{% endblock %}
+{% block robots_meta %}<meta name="robots" content="noindex,nofollow">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% sfb_static 'css/product_card.css' %}">
+<link rel="stylesheet" href="{% sfb_static 'css/home.css' %}">
+<link rel="stylesheet" href="{% sfb_static 'css/storefront_builder.css' %}">
+<link rel="stylesheet" href="{% sfb_static 'css/storefront_builder_preview_v22.css' %}">
+{% endblock %}
+
+{% block header %}
+{% if not header_embedded %}{% include header_variant_template with header_config=version.effective_header_config is_live_storefront=False is_builder_preview=True %}{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if page_type != "home" %}<div class="storefront-page-title"><div class="wrap"><h1>{{ SHOP_NAME }}</h1></div></div>{% endif %}
+<div class="wrap sfb-preview-sections">
+  {% if use_container_layout or rows %}
+{% with is_builder_preview=True %}
+  {% include "storefront_builder/partials/render_rows.html" %}
+  {% endwith %}
+  {% else %}
+  <div class="sfb-empty-preview" style="padding:60px 20px;text-align:center;color:var(--muted)">
+    هنوز هیچ بخش فعالی در این چیدمان وجود ندارد.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block footer %}
+{% include footer_variant_template with footer_config=version.effective_footer_config is_live_storefront=False is_builder_preview=True %}
+{% include "storefront_builder/partials/global_footer/_shared/floating_actions.html" with footer_config=version.effective_footer_config %}
+{% if mobile_bottom_nav_template %}{% include mobile_bottom_nav_template with footer_config=version.effective_footer_config is_live_storefront=False is_builder_preview=True %}{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var inParentFrame = window.parent && window.parent !== window;
+  var justDragged = false;
+  var builderMode = 'edit';
+
+  function applyBuilderMode(mode) {
+    builderMode = mode === 'preview' ? 'preview' : 'edit';
+    document.documentElement.setAttribute('data-sfb-builder-mode', builderMode);
+    if (document.body) document.body.setAttribute('data-sfb-builder-mode', builderMode);
+    if (builderMode === 'preview') applyBuilderSelection({});
+  }
+
+  function applyBuilderSelection(data) {
+    data = data || {};
+    document.querySelectorAll('.sfb-rsec-selected').forEach(function (el) {
+      el.classList.remove('sfb-rsec-selected');
+      el.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('.sfb-builder-container-selected').forEach(function (el) { el.classList.remove('sfb-builder-container-selected'); });
+    document.querySelectorAll('.sfb-cell-selected').forEach(function (el) { el.classList.remove('sfb-cell-selected'); });
+
+    if (data.containerId) {
+      var containerEl = document.querySelector('.sfb-builder-container[data-container-id="' + data.containerId + '"]');
+      if (containerEl && containerEl.classList.contains('sfb-builder-container')) containerEl.classList.add('sfb-builder-container-selected');
+    }
+    if (data.cellId) {
+      var cellEl = document.querySelector('.rcontainer-cell[data-cell-id="' + data.cellId + '"]');
+      if (cellEl) cellEl.classList.add('sfb-cell-selected');
+    }
+    if (data.sectionId) {
+      var sectionEl = document.querySelector('[data-section-id="' + data.sectionId + '"]');
+      if (sectionEl) {
+        sectionEl.classList.add('sfb-rsec-selected');
+        sectionEl.setAttribute('aria-current', 'true');
+      }
+    }
+  }
+
+  window.addEventListener('message', function (evt) {
+    if (!inParentFrame || evt.origin !== window.location.origin || !evt.data) return;
+    if (evt.data.type === 'sfb:setSelection') applyBuilderSelection(evt.data);
+    if (evt.data.type === 'sfb:setMode') applyBuilderMode(evt.data.mode);
+  });
+
+  // V3 direct visual editing — one click selects the exact Block/Cell and
+  // the parent opens the persistent Inspector immediately.  No second gear
+  // click is required; the settings button remains only as an explicit shortcut.
+  function selectSectionElement(el) {
+    if (!el || !inParentFrame || builderMode !== 'edit') return;
+    applyBuilderSelection({
+      sectionId: el.getAttribute('data-section-id'),
+      cellId: el.getAttribute('data-cell-id'),
+      containerId: el.getAttribute('data-container-id'),
+    });
+    window.parent.postMessage({
+      type: 'sfb:selectSection',
+      sectionId: el.getAttribute('data-section-id'),
+      sectionKey: el.getAttribute('data-section-key'),
+      cellId: el.getAttribute('data-cell-id'),
+      containerId: el.getAttribute('data-container-id'),
+    }, window.location.origin);
+  }
+
+  // Phase 2.6D — The embedded Builder preview is an editing surface, not a
+  // navigation surface. Storefront anchors/forms must stay fully functional in
+  // standalone Preview and on the live storefront, but while this document is
+  // inside the Builder iframe they must never replace the iframe document.
+  // Capture phase runs before section-specific link handlers/default navigation.
+  // The R4 Design Studio edits entities (slides, categories, products …) through the section's own settings, so inside ITS frame
+  // an entity element is ordinary section surface (it must take part in the direct-edit gestures). Only the legacy editor, which
+  // implements sfb:openEntityEditor, still gets the entity-editor behaviour.
+  var isStudioHost = false;
+  try { isStudioHost = inParentFrame && window.frameElement && window.frameElement.id === 'r4PreviewFrame'; } catch (err) { isStudioHost = false; }
+  // marker on <body> (not <html>): the html element's data-sfb-* tokens are part of the Preview/Published parity contract
+  if (isStudioHost && document.body) document.body.setAttribute('data-sfb-studio-host', '1');
+  function ownedByEntityEditor(target) {
+    return !isStudioHost && !!(target && target.closest && target.closest('[data-admin-edit-kind]'));
+  }
+
+  function openEntityEditor(target) {
+    if (!target || !inParentFrame || builderMode !== 'edit' || isStudioHost) return false;
+    var editable = target.closest ? target.closest('[data-admin-edit-kind]') : null;
+    if (!editable) return false;
+    var section = editable.closest('[data-section-id]');
+    window.parent.postMessage({
+      type: 'sfb:openEntityEditor',
+      entityKind: editable.getAttribute('data-admin-edit-kind') || '',
+      entityId: editable.getAttribute('data-admin-edit-id') || '',
+      entityTitle: editable.getAttribute('data-admin-edit-title') || '',
+      mediaKind: editable.getAttribute('data-admin-media-kind') || '',
+      sectionId: section ? section.getAttribute('data-section-id') : ''
+    }, window.location.origin);
+    return true;
+  }
+
+  // ---- Direct editing gestures (Preview-document layer) -------------------------------------------------------------
+  // Mouse: single click SELECTS a section, double-click opens its settings. Touch / pen: tap SELECTS, press-and-hold opens
+  // settings. Section identity is always the nearest [data-section-id] (never a CSS class); selection and "open settings" travel
+  // to the Studio over the existing origin-restricted messages (sfb:selectSection / sfb:openSectionSettings), and the Studio
+  // opens settings through the same R4.openSection() the structure drawer uses. Genuinely interactive storefront controls
+  // are never hijacked, so a merchant can still test them in the Preview.
+  var LONG_PRESS_MS = 550;      // hold this long (touch / pen) to open settings
+  var LONG_PRESS_SLOP = 10;     // px of movement that turns a hold into a drag/scroll and cancels it
+  var INTERACTIVE_TAGS = { A: 1, BUTTON: 1, INPUT: 1, SELECT: 1, TEXTAREA: 1, LABEL: 1, SUMMARY: 1, OPTION: 1, VIDEO: 1, AUDIO: 1, IFRAME: 1, FORM: 1 };
+  var INTERACTIVE_ROLES = /^(button|link|tab|menuitem|checkbox|radio|switch|slider|spinbutton|textbox|combobox|option|searchbox)$/;
+  var lastPointerType = 'mouse';
+  var press = null;
+  var suppressClickUntil = 0;
+
+  function hasClickBinding(el) {
+    var attrs = el.attributes;
+    for (var i = 0; i < attrs.length; i++) {
+      var name = attrs[i].name;
+      if (name === 'onclick' || name.indexOf('@click') === 0 || name.indexOf('x-on:click') === 0) return true;
+    }
+    return false;
+  }
+
+  // True when ``target`` is (inside) a control the storefront owns: form fields, buttons, links, media, contenteditable,
+  // ARIA widgets, Alpine/onclick-bound elements (quantity controls, carousel arrows, product-card actions, add-to-cart …).
+  function isInteractive(target, section) {
+    for (var el = target; el && el.nodeType === 1; el = el.parentElement) {
+      if (INTERACTIVE_TAGS[el.tagName] && !(el.tagName === 'A' && !el.hasAttribute('href')) && el.tagName !== 'FORM') return true;
+      if (el.isContentEditable || el.hasAttribute('data-no-edit-gesture')) return true;
+      var role = el.getAttribute('role');
+      if (role && INTERACTIVE_ROLES.test(role)) return true;
+      if (hasClickBinding(el)) return true;
+      if (el === section) break;
+    }
+    return false;
+  }
+
+  function sectionMessage(type, section) {
+    return {
+      type: type,
+      sectionId: section.getAttribute('data-section-id') || '',
+      sectionKey: section.getAttribute('data-section-key') || '',
+      containerId: section.getAttribute('data-container-id') || '',
+      cellId: section.getAttribute('data-cell-id') || ''
+    };
+  }
+
+  function acknowledgeEditGesture(section) {
+    section.classList.remove('sfb-rsec-hold');
+    section.classList.add('sfb-rsec-ack');
+    setTimeout(function () { section.classList.remove('sfb-rsec-ack'); }, 500);
+  }
+
+  function openSectionSettingsFor(section) {
+    applyBuilderSelection({
+      sectionId: section.getAttribute('data-section-id'),
+      cellId: section.getAttribute('data-cell-id'),
+      containerId: section.getAttribute('data-container-id')
+    });
+    window.parent.postMessage(sectionMessage('sfb:openSectionSettings', section), window.location.origin);
+  }
+
+  function cancelPress() {
+    if (!press) return;
+    clearTimeout(press.timer);
+    clearTimeout(press.cue);
+    if (press.section) press.section.classList.remove('sfb-rsec-hold');
+    press = null;
+  }
+
+  document.addEventListener('pointerdown', function (evt) {
+    lastPointerType = evt.pointerType || 'mouse';
+    cancelPress();
+    if (!inParentFrame || builderMode !== 'edit') return;
+    if (evt.pointerType === 'mouse' || evt.isPrimary === false) return;           // mouse: click / double-click
+    if (!evt.target || !evt.target.closest) return;
+    var section = evt.target.closest('[data-section-id]');
+    if (!section || isInteractive(evt.target, section) || ownedByEntityEditor(evt.target)) return;
+    var current = { section: section, x: evt.clientX, y: evt.clientY, id: evt.pointerId, timer: 0, cue: 0 };
+    current.cue = setTimeout(function () { if (press === current) section.classList.add('sfb-rsec-hold'); }, 140);
+    current.timer = setTimeout(function () {
+      if (press !== current) return;
+      cancelPress();
+      suppressClickUntil = Date.now() + 800;                                       // the release must not also "tap-select"
+      acknowledgeEditGesture(section);
+      openSectionSettingsFor(section);
+    }, LONG_PRESS_MS);
+    press = current;
+  }, true);
+
+  document.addEventListener('pointermove', function (evt) {
+    if (!press || evt.pointerId !== press.id) return;
+    if (Math.abs(evt.clientX - press.x) > LONG_PRESS_SLOP || Math.abs(evt.clientY - press.y) > LONG_PRESS_SLOP) cancelPress();
+  }, true);
+  ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'dragstart'].forEach(function (name) {
+    document.addEventListener(name, cancelPress, true);
+  });
+  window.addEventListener('scroll', cancelPress, true);                            // scrolling begins: it is not a hold
+  window.addEventListener('blur', cancelPress);
+
+  // no browser context menu / text-selection callout from a press on an editable surface
+  document.addEventListener('contextmenu', function (evt) {
+    if (!inParentFrame || builderMode !== 'edit' || lastPointerType === 'mouse') return;
+    var section = evt.target && evt.target.closest ? evt.target.closest('[data-section-id]') : null;
+    if (section && !isInteractive(evt.target, section)) evt.preventDefault();
+  }, true);
+
+  // the second press of a double-click must not start a word selection
+  document.addEventListener('mousedown', function (evt) {
+    if (!inParentFrame || builderMode !== 'edit' || evt.detail < 2) return;
+    var section = evt.target && evt.target.closest ? evt.target.closest('[data-section-id]') : null;
+    if (section && !isInteractive(evt.target, section)) evt.preventDefault();
+  }, true);
+
+  function interceptBuilderEditClick(evt) {
+    if (!inParentFrame || builderMode !== 'edit') return;
+    var target = evt.target;
+    if (!target || !target.closest) return;
+
+    if (openEntityEditor(target)) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      return;
+    }
+
+    // The Store header embedded INSIDE a Hero Stage is still «the header» for the merchant: ANY click on it opens the header settings
+    // (as a click on the shell header does) instead of selecting the whole stage.
+    // Links/buttons inside it (logo, menu, search, cart…) belong to the HEADER too: in the editor they must not navigate, and selecting the whole
+    // stage because the click landed on a menu link would hide the header picker from the merchant (menu-item editing is handled above).
+    var embeddedHeader = target.closest('.hs-header');
+    if (embeddedHeader) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      window.parent.postMessage({ type: 'sfb:openHeaderSettings' }, window.location.origin);
+      return;
+    }
+
+    var section = target.closest('[data-section-id]');
+    if (section) {
+      // a real storefront control (button, quantity, carousel arrow, add-to-cart, link …) keeps working: not hijacked
+      if (isInteractive(target, section)) return;
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      if (Date.now() < suppressClickUntil) return;       // the release that ends a long press
+      selectSectionElement(section);                      // single click / tap: SELECT only
+      return;
+    }
+
+    var footer = target.closest('footer');
+    if (footer) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      window.parent.postMessage({ type: 'sfb:openFooterSettings' }, window.location.origin);
+      return;
+    }
+
+    var header = target.closest('header');
+    if (header) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      window.parent.postMessage({ type: 'sfb:openHeaderSettings' }, window.location.origin);
+      return;
+    }
+
+    var interactive = target.closest('a,button,input,select,textarea,form,[role="button"]');
+    if (interactive) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+    }
+  }
+  document.addEventListener('click', interceptBuilderEditClick, true);
+
+  function blockEmbeddedNavigation(evt) {
+    if (!inParentFrame) return;
+    var target = evt.target && evt.target.nodeType === 3 ? evt.target.parentElement : evt.target;   // a text node (Firefox) has no .closest
+    target = target && target.closest ? target : null;
+    if (!target) return;
+    // any link-like element: <a href>, <area href>, an SVG <a>, role=link — whichever section / header / stage it sits in
+    var navigationTarget = target.closest('a[href], [role="link"]') || target.closest('a, area[href]');
+    if (!navigationTarget) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (builderMode === 'edit' && openEntityEditor(target)) return;
+    var section = navigationTarget.closest('[data-section-id]');
+    if (section) selectSectionElement(section);
+  }
+
+  document.addEventListener('click', blockEmbeddedNavigation, true);
+  document.addEventListener('auxclick', blockEmbeddedNavigation, true);
+  document.addEventListener('submit', function (evt) {
+    if (!inParentFrame) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    var form = evt.target;
+    var section = form && form.closest ? form.closest('[data-section-id]') : null;
+    if (section) selectSectionElement(section);
+  }, true);
+
+  document.addEventListener('click', function (evt) {
+    if (justDragged) { justDragged = false; return; }
+    if (!inParentFrame || builderMode !== 'edit') return;
+    if (openEntityEditor(evt.target)) { evt.preventDefault(); evt.stopPropagation(); return; }
+    var footerTarget = evt.target.closest('footer');
+    if (footerTarget) { window.parent.postMessage({ type: 'sfb:openFooterSettings' }, window.location.origin); return; }
+    var headerTarget = evt.target.closest('header');
+    if (headerTarget && !evt.target.closest('[data-section-id]')) { window.parent.postMessage({ type: 'sfb:openHeaderSettings' }, window.location.origin); return; }
+    var headerSettingsBtn = evt.target.closest('[data-open-header-settings]');
+    if (headerSettingsBtn) {
+      window.parent.postMessage({ type: 'sfb:openHeaderSettings' }, window.location.origin);
+      return;
+    }
+    var removeContainerBtn = evt.target.closest('[data-container-remove]');
+    if (removeContainerBtn) {
+      if (!window.confirm('این چیدمان خالی حذف شود؟')) return;
+      window.parent.postMessage({
+        type: 'sfb:containerCommand',
+        command: 'remove',
+        containerId: removeContainerBtn.getAttribute('data-container-remove'),
+      }, window.location.origin);
+      return;
+    }
+    var layoutBtn = evt.target.closest('[data-container-select]');
+    if (layoutBtn) {
+      var layoutContainerId = layoutBtn.getAttribute('data-container-select');
+      applyBuilderSelection({ containerId: layoutContainerId });
+      window.parent.postMessage({
+        type: 'sfb:selectContainer',
+        containerId: layoutContainerId,
+      }, window.location.origin);
+      return;
+    }
+    var settingsBtn = evt.target.closest('[data-open-settings]');
+    if (settingsBtn) {
+      var settingsSectionId = settingsBtn.getAttribute('data-open-settings');
+      var settingsCellId = settingsBtn.getAttribute('data-cell-id') || (settingsBtn.closest('[data-cell-id]') && settingsBtn.closest('[data-cell-id]').getAttribute('data-cell-id'));
+      var settingsContainerId = settingsBtn.getAttribute('data-container-id') || (settingsBtn.closest('[data-container-id]') && settingsBtn.closest('[data-container-id]').getAttribute('data-container-id'));
+      applyBuilderSelection({ sectionId: settingsSectionId, cellId: settingsCellId, containerId: settingsContainerId });
+      window.parent.postMessage({
+        type: 'sfb:openSectionSettings', sectionId: settingsSectionId,
+        cellId: settingsCellId, containerId: settingsContainerId,
+      }, window.location.origin);
+      return;
+    }
+    var addCellBtn = evt.target.closest('[data-empty-cell], [data-cell-add]');
+    if (addCellBtn) {
+      var addCellId = addCellBtn.getAttribute('data-empty-cell') || addCellBtn.getAttribute('data-cell-add');
+      var addContainerId = addCellBtn.getAttribute('data-container-id');
+      applyBuilderSelection({ cellId: addCellId, containerId: addContainerId });
+      window.parent.postMessage({
+        type: 'sfb:addToCell',
+        cellId: addCellId,
+        containerId: addContainerId,
+      }, window.location.origin);
+      return;
+    }
+    // Hidden content still occupies its Cell. Give hide/show and delete
+    // separate explicit actions so "hide" can never look like "delete".
+    var hiddenToggleBtn = evt.target.closest('[data-hidden-toggle]');
+    if (hiddenToggleBtn) {
+      window.parent.postMessage({
+        type: 'sfb:sectionCommand',
+        command: 'toggle',
+        sectionId: hiddenToggleBtn.getAttribute('data-hidden-toggle'),
+      }, window.location.origin);
+      return;
+    }
+    var blockRemoveBtn = evt.target.closest('[data-block-remove]');
+    if (blockRemoveBtn) {
+      if (blockRemoveBtn.disabled) return;
+      window.parent.postMessage({
+        type: 'sfb:blockCommand',
+        command: 'remove',
+        sectionId: blockRemoveBtn.getAttribute('data-block-remove'),
+      }, window.location.origin);
+      return;
+    }
+    var clearCellBtn = evt.target.closest('[data-cell-clear]');
+    if (clearCellBtn) {
+      if (clearCellBtn.disabled) return;
+      if (!window.confirm('محتوای این خانه حذف شود؟ خود خانه و چیدمان باقی می‌ماند.')) return;
+      window.parent.postMessage({
+        type: 'sfb:cellCommand',
+        command: 'clear',
+        cellId: clearCellBtn.getAttribute('data-cell-clear'),
+        sectionId: clearCellBtn.getAttribute('data-section-id'),
+      }, window.location.origin);
+      return;
+    }
+    // Content toolbar commands are placement-aware in Container mode.
+    var cmdBtn = evt.target.closest('[data-cmd]');
+    if (cmdBtn) {
+      if (cmdBtn.disabled) return;
+      var rsec = cmdBtn.closest('[data-section-id]');
+      if (!rsec) return;
+      var cmd = cmdBtn.getAttribute('data-cmd');
+      var containerId = rsec.getAttribute('data-container-id');
+      var cellId = rsec.getAttribute('data-cell-id');
+      if ((cmd === 'up' || cmd === 'down') && cellId) {
+        window.parent.postMessage({
+          type: 'sfb:blockCommand', command: cmd,
+          sectionId: rsec.getAttribute('data-section-id'),
+          cellId: cellId, containerId: containerId,
+        }, window.location.origin);
+        return;
+      }
+      if (cmd === 'remove' && !window.confirm('این بخش برای همیشه حذف شود؟')) return;
+      window.parent.postMessage({
+        type: 'sfb:sectionCommand', command: cmd, sectionId: rsec.getAttribute('data-section-id'),
+      }, window.location.origin);
+      return;
+    }
+    var hiddenCard = evt.target.closest('[data-hidden-section]');
+    if (hiddenCard) {
+      var hiddenSectionId = hiddenCard.getAttribute('data-hidden-section');
+      var hiddenCellId = hiddenCard.getAttribute('data-cell-id');
+      var hiddenContainerId = hiddenCard.getAttribute('data-container-id');
+      applyBuilderSelection({ sectionId: hiddenSectionId, cellId: hiddenCellId, containerId: hiddenContainerId });
+      window.parent.postMessage({
+        type: 'sfb:selectSection', sectionId: hiddenSectionId,
+        cellId: hiddenCellId, containerId: hiddenContainerId,
+      }, window.location.origin);
+      return;
+    }
+    var el = evt.target.closest('[data-section-id]');
+    if (!el) return;
+    selectSectionElement(el);
+  });
+
+  document.addEventListener('dblclick', function (evt) {
+    if (!inParentFrame || builderMode !== 'edit') return;
+    if (lastPointerType !== 'mouse') return;                  // touch / pen: press-and-hold opens settings, a double tap does not
+    var section = evt.target.closest ? evt.target.closest('[data-section-id]') : null;
+    if (!section || isInteractive(evt.target, section) || ownedByEntityEditor(evt.target)) return;
+    evt.preventDefault();
+    acknowledgeEditGesture(section);
+    openSectionSettingsFor(section);
+  });
+
+  // Library -> Cell drag/drop.  The Library lives in the parent document and
+  // this Canvas in a same-origin iframe; HTML5 DataTransfer safely crosses that
+  // boundary.  V3 Cells accept 0/1/N Blocks: dropping onto an occupied Cell
+  // appends a new Block and never overwrites the existing composition.
+  function clearLibraryDropState() {
+    document.querySelectorAll('.sfb-cell-library-drop').forEach(function (el) { el.classList.remove('sfb-cell-library-drop'); });
+  }
+  document.addEventListener('dragover', function (evt) {
+    if (!inParentFrame || !evt.dataTransfer) return;
+    var types = Array.prototype.slice.call(evt.dataTransfer.types || []);
+    if (types.indexOf('application/x-rastisi-section-key') === -1) return;
+    var cell = evt.target.closest('.rcontainer-cell[data-cell-id]');
+    clearLibraryDropState();
+    if (!cell) return;
+    evt.preventDefault();
+    evt.dataTransfer.dropEffect = 'copy';
+    cell.classList.add('sfb-cell-library-drop');
+  });
+  document.addEventListener('drop', function (evt) {
+    if (!inParentFrame || !evt.dataTransfer) return;
+    var sectionKey = evt.dataTransfer.getData('application/x-rastisi-section-key');
+    if (!sectionKey) return;
+    var cell = evt.target.closest('.rcontainer-cell[data-cell-id]');
+    clearLibraryDropState();
+    if (!cell) return;
+    evt.preventDefault();
+    window.parent.postMessage({
+      type: 'sfb:dropLibraryToCell',
+      sectionKey: sectionKey,
+      cellId: cell.getAttribute('data-cell-id'),
+      containerId: cell.getAttribute('data-container-id'),
+    }, window.location.origin);
+  });
+  document.addEventListener('dragleave', function (evt) {
+    if (!evt.relatedTarget) clearLibraryDropState();
+  });
+
+  // درگ مستقیم در Preview — چکپوینتِ Preview Drag/Reorder. درگ واقعی
+  // (dragstart→drop) کاملاً داخلِ همین iframe اتفاق می‌افتد (بدونِ نیازِ
+  // native drag-and-drop بینِ دو مبدأ که در مرورگرها قابل‌اعتماد نیست)؛
+  // فقط نتیجه‌ی نهایی (فهرستِ id به ترتیبِ جدید) با postMessage به والد
+  // فرستاده می‌شود — والد همان endpoint موجودِ reorder سایدبار را صدا
+  // می‌زند (تنها مسیرِ نوشتن، بدونِ منطقِ persistence تکراری اینجا).
+  // محدوده‌ی جستجو عمداً فقط ``.sfb-preview-sections`` است — هدر/فوتر
+  // اصلاً داخلِ آن نیستند، پس ساختاراً هرگز نمی‌توانند بخشی از این
+  // بازچینش شوند.
+  var container = document.querySelector('.sfb-preview-sections');
+  if (!container) return;
+
+  // Phase 2.7.3 — empty blocks remain editable in the Builder Canvas only.
+  // Standalone Preview and the public storefront are not given this class.
+  function markEmptyBuilderSections() {
+    if (!inParentFrame || !container) return;
+    container.querySelectorAll('[data-section-id]').forEach(function (section) {
+      section.classList.remove('sfb-rsec-builder-empty');
+      if (section.getBoundingClientRect().height < 1) {
+        section.classList.add('sfb-rsec-builder-empty');
+      }
+    });
+  }
+  markEmptyBuilderSections();
+
+  var dragId = null;
+  var dragBlock = null;
+
+  // Keyboard editing uses the exact same parent commands as the visual toolbar.
+  // Alt+Arrow moves a Block inside its Cell, while legacy standalone Sections
+  // keep the established page-level move behavior.
+  container.addEventListener('focusin', function (evt) {
+    var section = evt.target.matches('[data-section-id]') ? evt.target : null;
+    if (section) selectSectionElement(section);
+  });
+
+  container.addEventListener('keydown', function (evt) {
+    var section = evt.target.closest('[data-section-id]');
+    if (!section || !inParentFrame) return;
+    var editable = evt.target.matches('input, textarea, select, [contenteditable="true"]');
+    var modifier = evt.ctrlKey || evt.metaKey;
+    var key = String(evt.key || '').toLowerCase();
+    if (!editable && modifier && !evt.altKey && (key === 'z' || key === 'y')) {
+      evt.preventDefault();
+      var direction = (key === 'y' || (key === 'z' && evt.shiftKey)) ? 'redo' : 'undo';
+      window.parent.postMessage({ type: 'sfb:historyStep', direction: direction }, window.location.origin);
+      return;
+    }
+    if ((evt.key === 'Enter' || evt.key === ' ') && evt.target === section) {
+      evt.preventDefault();
+      selectSectionElement(section);
+      return;
+    }
+    if (evt.altKey && !evt.ctrlKey && !evt.metaKey && (evt.key === 'ArrowUp' || evt.key === 'ArrowDown')) {
+      if (section.getAttribute('data-section-locked') === '1') return;
+      evt.preventDefault();
+      var containerId = section.getAttribute('data-container-id');
+      var cellId = section.getAttribute('data-cell-id');
+      if (cellId) {
+        window.parent.postMessage({
+          type: 'sfb:blockCommand',
+          command: evt.key === 'ArrowUp' ? 'up' : 'down',
+          sectionId: section.getAttribute('data-section-id'),
+          cellId: cellId, containerId: containerId,
+        }, window.location.origin);
+      } else {
+        window.parent.postMessage({
+          type: 'sfb:sectionCommand',
+          command: evt.key === 'ArrowUp' ? 'up' : 'down',
+          sectionId: section.getAttribute('data-section-id'),
+        }, window.location.origin);
+      }
+    }
+  });
+
+  function clearBlockDropState() {
+    document.querySelectorAll('.sfb-rsec-drop-target, .sfb-cell-block-drop').forEach(function (el) {
+      el.classList.remove('sfb-rsec-drop-target');
+      el.classList.remove('sfb-cell-block-drop');
+      el.removeAttribute('data-drop-edge');
+    });
+  }
+
+  function blockDropIndex(cell, target, clientY) {
+    var blocks = Array.prototype.slice.call(cell.querySelectorAll(':scope > [data-section-id]'))
+      .filter(function (el) { return !dragBlock || el.getAttribute('data-section-id') !== dragBlock.sectionId; });
+    if (!target || target.getAttribute('data-section-id') === (dragBlock && dragBlock.sectionId)) return blocks.length;
+    var targetIndex = blocks.indexOf(target);
+    if (targetIndex < 0) return blocks.length;
+    var rect = target.getBoundingClientRect();
+    return targetIndex + (clientY > rect.top + (rect.height / 2) ? 1 : 0);
+  }
+
+  container.addEventListener('dragstart', function (evt) {
+    if (builderMode !== 'edit') { evt.preventDefault(); return; }
+    var handle = evt.target.closest('.sfb-rsec-drag-handle');
+    if (!handle) return;
+    var rsec = handle.closest('[data-section-id]');
+    if (!rsec || rsec.getAttribute('data-section-locked') === '1') { evt.preventDefault(); return; }
+    dragId = rsec.getAttribute('data-section-id');
+    var sourceCellId = rsec.getAttribute('data-cell-id');
+    dragBlock = sourceCellId ? { sectionId: dragId, sourceCellId: sourceCellId } : null;
+    rsec.classList.add('sfb-rsec-dragging');
+    evt.dataTransfer.effectAllowed = 'move';
+    evt.dataTransfer.setData(dragBlock ? 'application/x-rastisi-block-id' : 'text/plain', dragId);
+  });
+
+  container.addEventListener('dragover', function (evt) {
+    if (dragId === null) return;
+    if (dragBlock) {
+      var cell = evt.target.closest('.rcontainer-cell[data-cell-id]');
+      if (!cell) return;
+      evt.preventDefault();
+      evt.dataTransfer.dropEffect = 'move';
+      clearBlockDropState();
+      cell.classList.add('sfb-cell-block-drop');
+      var target = evt.target.closest('[data-section-id]');
+      if (target && target.getAttribute('data-section-id') !== dragBlock.sectionId) {
+        var rect = target.getBoundingClientRect();
+        target.classList.add('sfb-rsec-drop-target');
+        target.setAttribute('data-drop-edge', evt.clientY > rect.top + (rect.height / 2) ? 'after' : 'before');
+      }
+      return;
+    }
+    var target = evt.target.closest('[data-section-id]');
+    if (!target) return;
+    evt.preventDefault();
+    clearBlockDropState();
+    if (target.getAttribute('data-section-id') !== dragId) target.classList.add('sfb-rsec-drop-target');
+  });
+
+  container.addEventListener('drop', function (evt) {
+    if (dragId === null) return;
+    if (dragBlock) {
+      var targetCell = evt.target.closest('.rcontainer-cell[data-cell-id]');
+      if (!targetCell) { cleanupDrag(); return; }
+      evt.preventDefault();
+      var targetBlock = evt.target.closest('[data-section-id]');
+      var atIndex = blockDropIndex(targetCell, targetBlock, evt.clientY);
+      justDragged = true;
+      if (inParentFrame) {
+        window.parent.postMessage({
+          type: 'sfb:moveBlock',
+          sectionId: dragBlock.sectionId,
+          targetCellId: targetCell.getAttribute('data-cell-id'),
+          atIndex: atIndex,
+        }, window.location.origin);
+      }
+      cleanupDrag();
+      return;
+    }
+
+    var target = evt.target.closest('[data-section-id]');
+    if (!target) { cleanupDrag(); return; }
+    evt.preventDefault();
+    var from = container.querySelector('[data-section-id="' + dragId + '"]');
+    if (from && target !== from) {
+      var goesAfter = from.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING;
+      container.insertBefore(from, goesAfter ? target.nextSibling : target);
+      justDragged = true;
+      if (inParentFrame) {
+        var ids = Array.prototype.slice.call(container.querySelectorAll('[data-section-id]:not([data-cell-id])')).map(function (el) {
+          return el.getAttribute('data-section-id');
+        });
+        window.parent.postMessage({ type: 'sfb:reorderSections', sectionIds: ids }, window.location.origin);
+      }
+    }
+    cleanupDrag();
+  });
+
+  container.addEventListener('dragend', cleanupDrag);
+
+  function cleanupDrag() {
+    document.querySelectorAll('.sfb-rsec-dragging').forEach(function (el) { el.classList.remove('sfb-rsec-dragging'); });
+    clearBlockDropState();
+    dragId = null;
+    dragBlock = null;
+  }
+})();
+</script>
+{% endblock %}

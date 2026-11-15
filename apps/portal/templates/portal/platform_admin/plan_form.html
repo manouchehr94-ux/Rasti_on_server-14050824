@@ -1,0 +1,147 @@
+{% extends "portal/platform_admin/base.html" %}
+{% load static %}
+{% block title %}{% if plan %}ویرایشِ {{ plan.name }}{% else %}پلنِ تازه{% endif %} | پنل مدیریت پلتفرم{% endblock %}
+{% block page_class %}pa-narrow{% endblock %}
+{% block content %}
+<a class="pa-back" href="{% url 'portal_platform_admin:plans' %}">← پلن‌ها و نسخه‌ها</a>
+<div class="pa-pagehead">
+  <div>
+    <h1>{% if plan %}ویرایشِ «{{ plan.name }}»{% else %}پلنِ تازه{% endif %}</h1>
+    <p>{% if plan %}تغییرات روی <b>نسخه‌ی پیش‌نویس</b> ذخیره می‌شود (اگر نبود، از آخرین نسخه کپی ساخته می‌شود). نسخه‌ی منتشرشده هرگز تغییر نمی‌کند؛ برایِ اعمال، پیش‌نویس را در «پلن‌ها و نسخه‌ها» منتشر کنید.{% else %}پلن و نسخه‌ی پیش‌نویسِ اولِ آن ساخته می‌شود؛ پس از بازبینی، نسخه را منتشر کنید.{% endif %}</p>
+  </div>
+</div>
+
+<form method="post" class="pa-form" data-pa-dirty>
+  {% csrf_token %}
+  <input type="hidden" name="marketing_submitted" value="1">
+  <input type="hidden" name="public_selectable_submitted" value="1">
+  <input type="hidden" name="trial_once_submitted" value="1">
+
+  <fieldset class="pa-fieldset">
+    <legend>مشخصاتِ پلن</legend>
+    <div class="pa-fields">
+      <div class="pa-field"><label for="f-name">نامِ داخلی</label><input id="f-name" type="text" name="name" required value="{{ plan.name|default:'' }}"></div>
+      <div class="pa-field"><label for="f-code">کدِ پلن</label><input id="f-code" class="pa-ltr" type="text" name="code" {% if plan %}readonly{% endif %} required value="{{ plan.code|default:'' }}"><span class="pa-help">یکتا است و پس از ساخت تغییر نمی‌کند.</span></div>
+      <div class="pa-field"><label for="f-title">عنوانِ عمومی</label><input id="f-title" type="text" name="public_title" value="{{ plan.public_title|default:'' }}"><span class="pa-help">در کارتِ صفحه‌ی تعرفه نمایش داده می‌شود.</span></div>
+      <div class="pa-field"><label for="f-order">ترتیبِ نمایش</label><input id="f-order" type="number" min="0" step="1" name="display_order" value="{{ plan.display_order|default:0 }}"></div>
+      <div class="pa-field pa-full"><label for="f-desc">توضیحات</label><textarea id="f-desc" name="description" rows="2">{{ plan.description|default:"" }}</textarea></div>
+    </div>
+  </fieldset>
+
+  <fieldset class="pa-fieldset">
+    <legend>متنِ بازاریابی و نمایش</legend>
+    <p class="pa-help">متنِ بازاریابی غیرِ قراردادی است و زنده اعمال می‌شود؛ قیمت و حق‌دسترسی‌ها فقط با نسخه‌ی تازه تغییر می‌کنند.</p>
+    <div class="pa-fields">
+      <div class="pa-field"><label for="f-tagline">شعارِ کوتاهِ کارت</label><input id="f-tagline" type="text" name="tagline" maxlength="160" value="{{ plan.tagline|default:'' }}"></div>
+      <div class="pa-field"><label for="f-cta">متنِ دکمه‌یِ کارت</label><input id="f-cta" type="text" name="cta_label" maxlength="40" value="{{ plan.cta_label|default:'' }}"><span class="pa-help">اگر خالی باشد، متنِ پیش‌فرض نمایش داده می‌شود.</span></div>
+      <div class="pa-field"><label for="f-badge">متنِ نشانِ پیشنهادی</label><input id="f-badge" type="text" name="badge_text" maxlength="40" value="{{ plan.badge_text|default:'' }}"></div>
+      <div class="pa-field"><label for="f-promo">برچسبِ تبلیغاتیِ پلن</label><input id="f-promo" type="text" name="promo_label" maxlength="60" value="{{ plan.promo_label|default:'' }}"><span class="pa-help">مثلاً «۲ ماه رایگان در پرداخت سالانه»؛ فقط اگر مالک تعیین کند نمایش داده می‌شود.</span></div>
+      <label class="pa-check pa-full"><input class="pa-switch" type="checkbox" name="is_recommended" {% if plan.is_recommended %}checked{% endif %}> پیشنهادی (هایلایت در صفحه‌ی تعرفه)</label>
+      <label class="pa-check pa-full"><input class="pa-switch" type="checkbox" name="is_publicly_selectable" {% if not plan or plan.is_publicly_selectable %}checked{% endif %}> نمایش در صفحه‌یِ عمومیِ تعرفه‌ها (پس از انتشارِ نسخه)</label>
+    </div>
+  </fieldset>
+
+  <fieldset class="pa-fieldset" data-pricing data-config='{{ pricing_json }}'>
+    <input type="hidden" name="pricing_formula_submitted" value="1">
+    <legend>قیمت‌گذاری {% if latest_version %}<span class="pa-badge {% if latest_version.status == 'draft' %}pa-warn{% else %}pa-info{% endif %}">v{{ latest_version.version_number }} · {{ latest_version.get_status_display }}</span>{% endif %}</legend>
+    <p class="pa-help">فقط <b>قیمتِ ماهانه</b> را وارد کنید و برایِ دوره‌هایِ ۳، ۶ و ۱۲ ماهه <b>درصدِ تخفیف</b> بدهید؛ مبلغِ هر دوره خودکار محاسبه می‌شود (قیمتِ ماهانه × تعدادِ ماه × (۱ − تخفیف)). مبلغ را سرور محاسبه و ثبت می‌کند و با انتشار تغییرناپذیر می‌شود؛ تخفیفِ پیش‌فرض ۰٪ است. گردکردن: نیم‌به‌بالا به تومانِ کامل.</p>
+    {% if pricing.has_legacy or pricing.structure == "legacy" and pricing.monthly is None and latest_version and latest_version.billing_interval != "none" %}
+    <div class="pa-alert" role="status" data-testid="legacy-pricing-review"><b>بازبینیِ قیمتِ قدیمی:</b> این پلن قیمت‌هایِ ثابتِ دوره‌ایِ قدیمی دارد. هیچ قیمتی بی‌صدا بازمحاسبه نمی‌شود: برایِ هر دوره یا «حفظِ قیمتِ فعلی» را بگذارید، یا تبدیل به تخفیفِ درصدی را (در صورتِ ناهم‌خوانی با تأییدِ صریح) بپذیرید. نسخه‌هایِ منتشرشده و صورتحساب‌هایِ قبلی هرگز تغییر نمی‌کنند.</div>
+    {% endif %}
+    <div class="pa-fieldbody">
+      <div class="pa-row pa-mb-3" role="radiogroup" aria-label="نوعِ پلن">
+        <label class="pa-check"><input type="radio" name="plan_kind" value="paid" data-pr-kind {% if not pricing_echo.free and not pricing.free %}checked{% endif %}> پلنِ پولی (قیمتِ ماهانه + تخفیفِ دوره‌ها)</label>
+        <label class="pa-check"><input type="radio" name="plan_kind" value="free" data-pr-kind {% if pricing_echo.free or pricing.free %}checked{% endif %}> پلنِ رایگان/آزمایشی (بدونِ دوره)</label>
+      </div>
+      <div data-pr-paid>
+        <div class="pa-fields">
+          <div class="pa-field">
+            <label for="f-monthly">قیمتِ ماهانه (تومان)</label>
+            <input id="f-monthly" class="pa-ltr" type="text" inputmode="numeric" autocomplete="off" name="monthly_price" data-pr-monthly aria-describedby="f-monthly-help" value="{% if pricing_echo %}{{ pricing_echo.monthly }}{% elif pricing.monthly %}{{ pricing.monthly|stringformat:'d' }}{% endif %}">
+            <span class="pa-help" id="f-monthly-help">قیمتِ مبنا برایِ همه‌یِ دوره‌ها؛ عددِ صحیح، بزرگ‌تر از صفر.</span>
+          </div>
+        </div>
+        <div class="pa-periods" data-pr-periods>
+          <div class="pa-period pa-period-base" data-period="monthly" data-months="1">
+            <div class="pa-period-head"><b>ماهانه</b><span class="pa-help">۱ ماه · دوره‌یِ مبنا</span></div>
+            <dl class="pa-period-grid">
+              <div><dt>جمعِ بدونِ تخفیف</dt><dd data-out="base">—</dd></div>
+              <div><dt>درصدِ تخفیف</dt><dd>۰٪</dd></div>
+              <div><dt>مبلغِ تخفیف</dt><dd data-out="discount">—</dd></div>
+              <div><dt>قیمتِ نهایی</dt><dd class="pa-final" data-out="final">—</dd></div>
+              <div><dt>معادلِ ماهانه</dt><dd data-out="effective">—</dd></div>
+            </dl>
+          </div>
+          {% for row in pricing.rows %}
+          <div class="pa-period" data-period="{{ row.interval }}" data-months="{{ row.months }}" data-legacy="{% if row.legacy %}1{% else %}0{% endif %}">
+            <div class="pa-period-head">
+              <b>{{ row.label }}</b><span class="pa-help">{{ row.months }} ماه</span>
+              <label class="pa-check pa-period-offer"><input class="pa-switch" type="checkbox" name="offer_{{ row.interval }}" data-pr-offer {% if row.offered %}checked{% endif %}> عرضه شود</label>
+            </div>
+            <dl class="pa-period-grid">
+              <div><dt>جمعِ بدونِ تخفیف</dt><dd data-out="base">—</dd></div>
+              <div class="pa-field"><label for="d-{{ row.interval }}">درصدِ تخفیف</label>
+                <div class="pa-inputunit"><input id="d-{{ row.interval }}" class="pa-ltr" type="text" inputmode="decimal" autocomplete="off" name="discount_{{ row.interval }}" data-pr-discount aria-describedby="e-{{ row.interval }}" value="{{ row.discount }}"><span aria-hidden="true">٪</span></div>
+                <span class="pa-help pa-err" id="e-{{ row.interval }}" data-out="error" role="alert" hidden></span>
+              </div>
+              <div><dt>مبلغِ تخفیف</dt><dd data-out="discount">—</dd></div>
+              <div><dt>قیمتِ نهایی</dt><dd class="pa-final" data-out="final">—</dd></div>
+              <div><dt>معادلِ ماهانه</dt><dd data-out="effective">—</dd></div>
+            </dl>
+            {% if row.legacy %}
+            <div class="pa-legacy" data-testid="legacy-{{ row.interval }}">
+              <p class="pa-help">قیمتِ ثابتِ قدیمی: <b class="pa-num" data-stored="{{ row.stored_price|stringformat:'d' }}">{{ row.stored_price|stringformat:'d' }}</b> تومان.
+                {% if row.exact %}معادلِ <b>دقیقِ</b> {{ row.implied }}٪ تخفیف از قیمتِ ماهانه است.
+                {% elif row.exact is not None %}با فرمول <b>دقیقاً</b> قابلِ نمایش نیست (نزدیک‌ترین: {{ row.implied }}٪).{% else %}قیمتِ ماهانه‌یِ مبنا وجود ندارد.{% endif %}</p>
+              <label class="pa-check"><input type="checkbox" name="keep_legacy_{{ row.interval }}" data-pr-keep {% if row.keep_checked %}checked{% endif %}> حفظِ قیمتِ فعلی (بدونِ تبدیل به فرمول)</label>
+              {% if row.needs_review %}<label class="pa-check"><input type="checkbox" name="ack_{{ row.interval }}" data-pr-ack {% if row.ack_checked %}checked{% endif %}> تغییرِ ارزشِ تجاریِ این دوره را تأیید می‌کنم</label>{% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <p class="pa-help" data-pr-free hidden>پلنِ رایگان/آزمایشی دوره و قیمتِ دوره‌ای ندارد؛ برایِ پلنِ رایگان هیچ پرداخت یا درگاهی لازم نیست.</p>
+      <div class="pa-fields pa-mt-4">
+        <div class="pa-field"><label for="f-trial">روزهایِ تریال</label><input id="f-trial" class="pa-ltr" type="text" inputmode="numeric" name="trial_days" value="{{ latest_version.trial_days|default:0 }}"></div>
+        <label class="pa-check pa-full"><input class="pa-switch" type="checkbox" name="trial_once_per_store" {% if not latest_version or latest_version.trial_once_per_store %}checked{% endif %}> تریال فقط یک‌بار برایِ هر فروشگاه</label>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="pa-fieldset">
+    <legend>حق‌دسترسی‌ها و سقف‌ها</legend>
+    <p class="pa-help">فقط حق‌دسترسی‌هایی که اکنون در کد اعمال می‌شوند اینجا قابلِ‌تنظیم‌اند. قابلیت‌هایِ آینده و سقف‌هایِ سفارشی در «تخصیصِ قابلیت به پلن» مدیریت می‌شوند.</p>
+    <div class="pa-fieldbody">
+      {% for entitlement in entitlements %}{% if entitlement.enforced %}
+      <div class="pa-setting-row">
+        <div><b>{{ entitlement.name }}</b><div class="pa-help">{{ entitlement.description }}</div></div>
+        <div class="pa-row">
+          {% if entitlement.entitlement_type == "boolean" %}
+          <label class="pa-check"><input class="pa-switch" type="checkbox" name="entitlement_{{ entitlement.key }}" {% if entitlement.existing.is_enabled %}checked{% endif %}> فعال</label>
+          {% else %}
+          <input class="pa-input pa-w-sm" type="number" min="0" step="1" name="entitlement_{{ entitlement.key }}" value="{{ entitlement.existing.integer_limit|default_if_none:'' }}" aria-label="سقفِ {{ entitlement.name }}">
+          <label class="pa-check"><input type="checkbox" name="entitlement_{{ entitlement.key }}_unlimited" {% if entitlement.existing.is_unlimited %}checked{% endif %}> نامحدود</label>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}{% endfor %}
+      <details class="pa-acc pa-mt-4">
+        <summary>حق‌دسترسی‌هایِ تعریف‌شده امّا هنوز اعمال‌نشده در کد</summary>
+        <div>
+          <p class="pa-help pa-mb-2">این‌ها به این دلیل قابلِ‌تنظیم نیستند که گیتِ Backend ندارند؛ تبلیغ هم نمی‌شوند.</p>
+          <ul class="pa-help">
+            {% for entitlement in entitlements %}{% if not entitlement.enforced %}<li>{{ entitlement.name }} <span class="pa-code">{{ entitlement.key }}</span></li>{% endif %}{% endfor %}
+          </ul>
+        </div>
+      </details>
+    </div>
+  </fieldset>
+
+  <div class="pa-formbar">
+    <button class="pa-btn pa-primary" type="submit">ذخیره‌ی پیش‌نویس</button>
+    <a class="pa-btn" href="{% url 'portal_platform_admin:plans' %}">انصراف</a>
+  </div>
+</form>
+<script src="{% static 'portal/js/platform-admin-pricing.js' %}?v=20261106-1"></script>
+{% endblock %}

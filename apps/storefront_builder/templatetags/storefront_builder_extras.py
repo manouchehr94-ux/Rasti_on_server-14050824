@@ -1,0 +1,596 @@
+import hashlib
+import os
+
+from django import template
+from django.contrib.staticfiles import finders
+from django.templatetags.static import static
+from django.utils.safestring import mark_safe
+
+from ..semantic_colors import semantic_color_css, semantic_foreground_css
+
+register = template.Library()
+
+
+@register.filter
+def contrast_fg(color):
+    """Black or white text colour for an arbitrary merchant background colour
+    (WCAG relative-luminance based — never an RGB-average guess). An invalid /
+    empty value yields white, the historical default for coloured section bands."""
+    from apps.core.color_utils import best_foreground, is_valid_hex
+
+    return best_foreground(color) if is_valid_hex(color) else "#FFFFFF"
+
+
+@register.filter
+def section_label(section_key):
+    """برچسب فارسیِ یک section_key از Section Registry — «؟» برای کلید
+    ناشناخته (هرگز crash نمی‌کند)."""
+    from ..section_registry import UnknownSectionTypeError, get_definition
+
+    try:
+        return get_definition(section_key).label_fa
+    except UnknownSectionTypeError:
+        return f"نوع ناشناخته ({section_key})"
+
+
+@register.filter
+def sanitize_rich_text(value):
+    """پاک‌سازی allowlist محتوای بخش rich_text — همان ساینیتایزر توضیحات
+    کالا (``apps.catalog.services.html_sanitizer``)، امن برای رندر مستقیم."""
+    from apps.catalog.services.html_sanitizer import sanitize_product_description
+
+    return mark_safe(sanitize_product_description(value or ""))
+
+
+@register.filter
+def shell_geometry_style(geometry, region):
+    """Inline custom-property fragment for a header/footer ``geometry`` block (``--gh-*`` / ``--gf-*``)."""
+    from .. import shell_geometry
+
+    return shell_geometry.geometry_style(geometry, region)
+
+
+@register.filter
+def geo(geometry, spec):
+    """``{{ hc.geometry|geo:"chip_count:2" }}`` — an integer geometry value with the variant's own default."""
+    key, _, default = str(spec).partition(":")
+    value = geometry.get(key) if isinstance(geometry, dict) else None
+    try:
+        return int(value) if value is not None else int(default)
+    except (TypeError, ValueError):
+        return int(default or 0)
+
+
+@register.filter
+def startswith(value, prefix):
+    """``{% if value|startswith:"token:" %}`` — string prefix test for template conditions."""
+    return isinstance(value, str) and value.startswith(prefix)
+
+
+@register.filter
+def dictget(d, key):
+    """دسترسیِ پویا به یک کلیدِ dict که نامش در یک متغیرِ تمپلیت است —
+    برایِ حلقه‌هایِ رنگِ ظاهر (``appearance_panel.html``) که کلید از یک
+    متغیرِ حلقه (``color_field_labels``) می‌آید، نه یک رشته‌ی ثابت."""
+    if not isinstance(d, dict):
+        return ""
+    return d.get(key, "")
+
+
+@register.simple_tag
+def has_real_footer_contact_data(footer_settings, shop_contact_phone, shop_contact_email):
+    """آیا دادهٔ تماسِ واقعی برایِ فوتر وجود دارد؟ — دقیقاً همان شرطِ
+    استفاده‌شده در ``global_footer/_shared/contact_info.html``/
+    ``contact_column.html``، این‌جا به‌صورتِ یک بولِینِ آماده در دسترس
+    است تا شرطِ «آیا گریدِ بیرونیِ فوتر چیزی برایِ رندر دارد؟» بتواند
+    بدونِ تکرارِ آن عبارتِ طولانی از این مقدار استفاده کند — پوستهٔ گرید
+    هرگز برایِ یک ستونِ تماسِ خالی باز نمی‌ماند."""
+    fs = footer_settings
+    if fs and (fs.phone or fs.secondary_phone or fs.email or fs.working_hours or fs.address):
+        return True
+    return bool(shop_contact_phone or shop_contact_email)
+
+
+@register.filter
+def has_renderable_footer_extra_block(extra_blocks, social_links_footer):
+    """آیا فهرستِ ``extra_blocks`` فوترِ Global دستِ‌کم یک ستونِ واقعاً
+    رندرشدنی دارد؟ — دقیقاً همان سه شرطِ per-block در
+    ``global_footer/_shared/extra_blocks.html`` (custom_text با متنِ
+    واقعی / link با آدرسِ واقعیِ ثبت‌شده / social با دادهٔ واقعیِ
+    SOCIAL_LINKS_FOOTER)؛ چون write-time یک بلوکِ custom_text/link با
+    متن/آدرسِ خالی هم می‌تواند ذخیره شود (بدونِ رد شدن)، صرفِ غیرخالی‌بودنِ
+    فهرست تضمینی برایِ رندرِ واقعی نیست — این تابع همان بررسیِ دقیق را
+    انجام می‌دهد تا پوستهٔ گریدِ بیرونیِ فوتر برایِ یک بلوکِ نامعتبر/خالی
+    باز نماند. هرگز crash نمی‌کند (هم‌آهنگ با قراردادِ این ماژول)."""
+    if not extra_blocks:
+        return False
+    for block in extra_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "custom_text" and block.get("text"):
+            return True
+        if block_type == "link" and block.get("url"):
+            return True
+        if block_type == "social" and social_links_footer:
+            return True
+    return False
+
+
+@register.filter
+def getattribute(obj, attr_name):
+    """دسترسیِ پویا به یک attribute که نامش در یک متغیرِ تمپلیت است — برای
+    فرمِ عمومیِ رسانه (``section_media_form.html``) که فیلدِ متنیِ دوم
+    (``subtitle`` برایِ اسلاید، ``description`` برایِ بنر) بسته به ``kind``
+    فرق می‌کند؛ Django به‌طورِ پیش‌فرض فقط دسترسیِ attribute با نامِ ثابت
+    (نه متغیر) را در تمپلیت پشتیبانی می‌کند."""
+    return getattr(obj, attr_name, "")
+
+
+# نگاشتِ اسلاگِ آیکونِ Section Registry (``SectionDefinition.icon``) به
+# مسیرِ SVG — همان سبکِ آیکون‌هایِ دستی‌نوشته‌ی ناوبریِ پنل مدیریت
+# (``base_admin.html``: stroke=currentColor، viewBox 24x24)، تا فهرستِ
+# «افزودن بخش جدید» به‌جایِ نمایشِ نامِ فنیِ آیکون (مثلاً «sparkles» به
+# صورتِ متن) آیکونِ واقعی نشان دهد — طبقِ الزامِ صریحِ «بدون اصطلاحِ فنیِ
+# registry» در بازبینیِ UX سازنده. فقط شاملِ آیکون‌هایِ واقعاً استفاده‌شده
+# در section_registry.py است، نه یک کتابخانه‌ی عمومی.
+_ICON_PATHS = {
+    "megaphone": '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+    "image": '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+    "images": '<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.3-1.3a2.4 2.4 0 0 0-3.4 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>',
+    "layout-grid": '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+    "grid": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+    "star": '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    "sparkles": '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.29 1.29L3 12l5.8 1.9a2 2 0 0 1 1.29 1.29L12 21l1.9-5.8a2 2 0 0 1 1.29-1.29L21 12l-5.8-1.9a2 2 0 0 1-1.29-1.29z"/>',
+    "trending-up": '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+    "percent": '<line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+    "zap": '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    "award": '<circle cx="12" cy="8" r="6"/><path d="M15.48 12.89 17 22l-5-3-5 3 1.52-9.11"/>',
+    "layout": '<rect width="18" height="18" x="3" y="3" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>',
+    "text": '<path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/>',
+    "image-plus": '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" y1="5" x2="22" y2="5"/><line x1="19" y1="2" x2="19" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+    "shopping-bag": '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>',
+    "shield-check": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+    "layers": '<path d="m12.83 2.18-8.6 3.9a1 1 0 0 0 0 1.83l8.6 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83l-8.58-3.91a2 2 0 0 0-1.66 0Z"/><path d="m22 12.18-9.17 4.16a2 2 0 0 1-1.66 0L2 12.18"/><path d="m22 17.18-9.17 4.16a2 2 0 0 1-1.66 0L2 17.18"/>',
+    "compass": '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+    "help-circle": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    "message-circle": '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+    "play-circle": '<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>',
+}
+
+_ICON_FALLBACK = '<circle cx="12" cy="12" r="9"/>'
+
+
+@register.filter
+def icon_svg(icon_slug):
+    """SVG آیکونِ متناظرِ یک اسلاگِ ``SectionDefinition.icon`` (مثلاً
+    ``"sparkles"``) — برایِ اسلاگِ ناشناخته یک دایره‌ی ساده برمی‌گرداند،
+    هرگز crash نمی‌کند (هم‌آهنگ با قراردادِ ``section_label``)."""
+    path = _ICON_PATHS.get(icon_slug, _ICON_FALLBACK)
+    svg = (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{path}</svg>'
+    )
+    return mark_safe(svg)
+
+
+@register.filter
+def engine_icon(key):
+    """SVG of an engine-registry decorative icon key (``icon_registry``); ``""`` for an unknown key (fail closed)."""
+    from .. import icon_registry
+
+    return icon_registry.icon_svg(key)
+
+
+@register.simple_tag
+def rs_icon(name):
+    """R4 Design Studio stroke icon (see ``studio_icons``)."""
+    from ..studio_icons import icon_svg
+
+    return mark_safe(icon_svg(str(name)))
+
+
+@register.simple_tag
+def rs_family_icon(family_key):
+    """R4 Design Studio icon for a Design Lab family key."""
+    from ..studio_icons import DESIGN_LAB_FAMILY_ICONS, icon_svg
+
+    return mark_safe(icon_svg(DESIGN_LAB_FAMILY_ICONS.get(str(family_key), "grid")))
+
+
+@register.simple_tag
+def rs_section_icon(section_key):
+    """Design Studio outline icon for a canonical section key (presentation only)."""
+    from apps.storefront_builder.studio_icons import icon_svg
+
+    key = str(section_key or "")
+    if "hero" in key or "banner" in key or "image" in key or "video" in key:
+        name = "image"
+    elif "product" in key or "catalog" in key:
+        name = "grid"
+    elif "brand" in key or "promo" in key or "offer" in key:
+        name = "tag"
+    elif "collection" in key:
+        name = "card"
+    elif "search" in key:
+        name = "search"
+    elif "cart" in key:
+        name = "bag"
+    else:
+        name = "layers"
+    return mark_safe(icon_svg(name))
+
+
+@register.simple_tag
+def rs_section_description(section_key):
+    """Merchant-facing one-liner of a section type for the Studio block library — read straight from the registry
+    (``SectionDefinition.description_fa``); empty when the registry declares none. Presentation only, never a second source."""
+    from apps.storefront_builder import section_registry
+
+    try:
+        return section_registry.get_definition(str(section_key or "")).description_fa or ""
+    except ValueError:
+        return ""
+
+
+#: Abstract wireframe family per section type (a schematic glyph for the library card, NOT a rendering of the section):
+#: grid = several tiles, wide = one wide banner, cards = banner cards, split = media + text, lines = text, strip = thin band.
+_LIBRARY_WIRE = {
+    "featured_products": "grid", "newest_products": "grid", "best_sellers": "grid", "discounted_products": "grid",
+    "amazing_offers": "grid", "product_section": "grid", "catalog_product_wall": "grid", "category_grid": "grid",
+    "collection_tiles": "grid", "brand_carousel": "grid",
+    "hero_banner": "wide", "fashion_lifestyle_hero": "wide", "image_slider": "wide", "single_banner": "wide", "linked_image": "wide",
+    "multi_banner": "cards", "promo_cards": "cards",
+    "image_text": "split", "video_section": "split",
+    "rich_text": "lines", "blog_posts": "lines", "faq": "lines", "testimonials": "lines", "newsletter": "lines",
+    "quick_links": "strip", "story_rail": "strip", "decorative_strip": "strip", "trust_features": "strip",
+    "surface_panel": "strip",
+}
+
+
+@register.simple_tag
+def rs_section_wire(section_key):
+    """CSS class suffix of the schematic glyph for a library card (``lines`` for an unknown type)."""
+    return _LIBRARY_WIRE.get(str(section_key or ""), "lines")
+
+
+def _layout_key_for(widths):
+    from apps.storefront_builder.services import container_service
+
+    return next((key for key, value in container_service.LAYOUT_PRESETS.items() if tuple(value) == tuple(widths)), None)
+
+
+def _stacked_layout_key_for(spans):
+    from apps.storefront_builder.services import container_service
+
+    return next((key for key, value in container_service.STACKED_LAYOUT_PRESETS.items() if tuple(value) == tuple(spans)), None)
+
+
+@register.simple_tag
+def rs_three_cell_patterns():
+    """The two three-slot patterns of the reference, expressed ONLY through engine presets that already exist (looked up by their
+    widths, so a registry change can only remove a pattern, never invent one): three equal columns (``LAYOUT_PRESETS`` 4,4,4), and —
+    V5-LAYOUT-011 — one big column + two small stacked Cells (``STACKED_LAYOUT_PRESETS`` 8,4,4: THREE real Cells, so each of the
+    big / top-small / bottom-small slots exists, fills and reorders independently even while empty). ``cells`` maps each chosen
+    section to the Cell index that receives it."""
+    thirds = _layout_key_for((4, 4, 4))
+    big_small = _stacked_layout_key_for((8, 4, 4))
+    patterns = []
+    if thirds:
+        patterns.append({
+            "key": "thirds_equal", "engine": thirds, "widths": (4, 4, 4), "stacked": False, "name": "سه ستون مساوی",
+            "cells": "0,1,2", "slot_labels": "بخش ستون اول (راست)|بخش ستون دوم (وسط)|بخش ستون سوم (چپ)",
+        })
+    if big_small:
+        patterns.append({
+            "key": "big_right_two_left", "engine": big_small, "widths": (8, 4), "stacked": True,
+            "name": "بزرگ راست + دو کوچک چپ", "cells": "0,1,2",
+            "slot_labels": "بخش بزرگ (راست)|بخش کوچک بالا (چپ)|بخش کوچک پایین (چپ)",
+        })
+    return patterns
+
+
+@register.simple_tag
+def rs_four_cell_patterns():
+    """V5 — the four-column rows of «افزودن چیدمان», again ONLY through the engine's own ``quarters`` preset (looked up by its widths):
+    four equal columns, and an asymmetric row whose per-Cell widths (``spans``, e.g. 4/2/4/2) ride in the SAME ``container.add``
+    (applied server-side by the validated resize code the drag handles use). Each slot is a real, independent Cell."""
+    quarters = _layout_key_for((3, 3, 3, 3))
+    if not quarters:
+        return []
+    labels = "خانهٔ اول (راست)|خانهٔ دوم|خانهٔ سوم|خانهٔ چهارم (چپ)"
+    return [
+        {"key": "quarters_equal", "engine": quarters, "widths": (3, 3, 3, 3), "spans": "", "name": "چهار ستون مساوی",
+         "cells": "0,1,2,3", "slot_labels": labels},
+        {"key": "quarters_424", "engine": quarters, "widths": (4, 2, 4, 2), "spans": "4,2,4,2", "name": "چهار ستون نامتقارن ۴/۲/۴/۲",
+         "cells": "0,1,2,3", "slot_labels": labels},
+    ]
+
+
+@register.simple_tag
+def rs_sample_layouts():
+    """V5 — ready-made, fully EDITABLE starting points for the layouts the engine supports but a seller would not guess: the four-tile
+    row «متن · تصویر · متن · تصویر» and «هیرو + پنل‌های کناری». A sample is only a pre-selection of the same radio + section pickers the
+    dialog already has (the seller can change every pick before building); it adds no renderer, no persistence and no recipe — the build is
+    the ordinary ``container.add``. ``sections`` are plain section keys; a key the page cannot take is simply left empty by the dialog."""
+    quarters = _layout_key_for((3, 3, 3, 3))
+    stacked = _stacked_layout_key_for((8, 4, 4))
+    samples = []
+    if quarters:
+        samples.append({
+            "key": "sample_tiles", "engine": quarters, "widths": (4, 2, 4, 2), "stacked": False, "spans": "4,2,4,2",
+            "name": "متن · تصویر · متن · تصویر", "sections": "rich_text,linked_image,rich_text,linked_image",
+            "cells": "0,1,2,3", "slot_labels": "متن (راست)|تصویر|متن|تصویر (چپ)",
+            "hint": "چهار کاشی متناوب با عرض‌های ۴/۲/۴/۲؛ عرض و محتوای هر کاشی بعداً قابل‌تغییر است.",
+        })
+    if stacked:
+        samples.append({
+            "key": "sample_hero_panels", "engine": stacked, "widths": (8, 4), "stacked": True, "spans": "",
+            "name": "هیرو + پنل‌های کناری", "sections": "hero_banner,multi_banner,multi_banner",
+            "cells": "0,1,2", "slot_labels": "هیرو (راست)|پنل بالا (چپ)|پنل پایین (چپ)",
+            "hint": "هیروی بزرگ در راست و دو ردیف پنل کنار آن؛ همه قابل‌ویرایش‌اند.",
+        })
+    return samples
+
+
+@register.simple_tag
+def rs_featured(items, attr, current, count):
+    """Split a real choice list for the Design Studio: the current choice
+    first plus the next ones up to ``count`` stay visible, the rest go into a
+    "more" disclosure. Pure presentation; never filters anything out."""
+    items = list(items or [])
+
+    def _value(item):
+        return item.get(attr) if isinstance(item, dict) else getattr(item, attr, None)
+
+    current_items = [item for item in items if _value(item) == current]
+    others = [item for item in items if _value(item) != current]
+    ordered = current_items + others
+    return {"featured": ordered[: int(count)], "more": ordered[int(count):]}
+
+
+_STUDIO_FONT_LABELS_FA = {
+    "Vazirmatn": "وزیرمتن · خوانا و امروزی",
+    "Estedad": "استعداد · گرم و مدرن",
+    "Noto Sans Arabic": "نوتو سنس عربی · تمیز و خنثی",
+    "Lalezar": "لالزار · تیتر پررنگ",
+    "Tahoma": "تاهوما · ساده و آشنا",
+    "Arial": "آریال · بی‌پیرایه",
+    "Georgia": "جورجیا · سریف و روایی",
+}
+
+
+@register.filter
+def first_social(links, icon_name):
+    """The first of the Store's own social links whose safe icon name is ``icon_name`` (``None`` when there is none)."""
+    for link in links or ():
+        if getattr(link, "effective_icon_name", "") == icon_name:
+            return link
+    return None
+
+
+_STUDIO_HEADING_STYLE_LABELS_FA = {
+    "default": "پیش‌فرض (نوار رنگی کنار عنوان)",
+    "centered": "وسط‌چین",
+    "centered_rule": "وسط‌چین با خطوط ظریف",
+    "underline": "زیرخط‌دار",
+    "plain": "ساده",
+}
+
+
+@register.filter
+def rs_heading_style_label(value):
+    """Merchant-facing Persian label for a section-heading style (display only; the stored value stays the key)."""
+    return _STUDIO_HEADING_STYLE_LABELS_FA.get(str(value), value)
+
+
+@register.filter
+def rs_font_label(value):
+    """Merchant-facing Persian label for a canonical font choice (display only;
+    the stored value stays the canonical font name)."""
+    return _STUDIO_FONT_LABELS_FA.get(str(value), value)
+
+
+#: Design Studio vocabulary for the seven Design Lab families (the approved
+#: reference's terminology). Presentation only; family keys are unchanged.
+STUDIO_FAMILY_LABELS_FA = {
+    "header": "سربرگ",
+    "hero": "بنر اصلی",
+    "product_view": "چیدمان محصولات",
+    "card": "کارت محصول",
+    "footer": "پایین صفحه",
+    "badge": "نشان محصول",
+    "bottom_nav": "نوار موبایل",
+}
+
+
+@register.filter
+def rs_family_label(family_key, fallback=""):
+    return STUDIO_FAMILY_LABELS_FA.get(str(family_key), fallback or family_key)
+
+
+@register.simple_tag
+def media_default_state(section, config):
+    """R4 media manager — are this section's media currently coming from the
+    store-wide DEFAULTS (the renderer's fallback) rather than from items the
+    manager can list? See ``services.media_defaults_service``. Read-only.
+
+    Only a missing/unusable ``config`` (a context that is not a media manager)
+    yields the inert "no defaults" state. Any real failure — a DB error, a bug —
+    is deliberately NOT swallowed: it must surface (500 + log) rather than make
+    the manager silently disagree with what the storefront renders."""
+    from ..services import media_defaults_service
+
+    model = config.get("model") if hasattr(config, "get") else None
+    if model is None or config.get("no_defaults"):
+        # a section type that owns exactly its own picture (V5 «عکس لینک‌دار») never shows / adopts the store-wide default rows
+        return media_defaults_service.DefaultMediaState()
+    return media_defaults_service.default_media_state(section, model)
+
+
+@register.simple_tag
+def footer_badge_slot_total(extra_blocks):
+    """Total square count requested by the footer's ``badge_slots`` block (0 when the block is absent)."""
+    for block in extra_blocks or []:
+        if isinstance(block, dict) and block.get("type") == "badge_slots":
+            try:
+                return max(0, int(block.get("count", 0)))
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+@register.simple_tag
+def footer_empty_badge_slots(total, badges):
+    """Range of neutral empty squares left after the real trust badges took their places."""
+    try:
+        used = len(badges or [])
+    except TypeError:
+        used = 0
+    return range(max(0, int(total or 0) - used))
+
+
+@register.simple_tag
+def sfb_static(path):
+    """Static URL with a content-derived cache-busting query (``?v=<mtime>``).
+
+    The storefront stylesheets are loaded by BOTH the published pages and the Design Studio preview. They must
+    share one URL that changes exactly when the file changes — a hand-pinned token (or none at all) lets one
+    surface keep running an older stylesheet than the other. Falls back to the plain static URL when the file
+    cannot be located on disk."""
+    import os
+
+    from django.contrib.staticfiles import finders
+    from django.templatetags.static import static
+
+    url = static(path)
+    try:
+        found = finders.find(path)
+        if found:
+            return f"{url}?v={int(os.stat(found).st_mtime)}"
+    except OSError:
+        pass
+    return url
+
+
+@register.filter
+def visible_when_json(field):
+    """The Inspector's context-sensitive visibility rule of a schema field as compact JSON ("" when unconditional)."""
+    from ..settings_schema import visible_when_json as _visible_when_json
+
+    return _visible_when_json(field)
+
+
+@register.filter
+def mode_not_in(mode, csv):
+    """True when ``mode`` is NOT one of the comma separated ``csv`` modes (drives the server-rendered ``hidden``)."""
+    return str(mode or "theme") not in {item.strip() for item in str(csv).split(",")}
+
+
+@register.simple_tag(takes_context=True)
+def service_claims(context):
+    """FOLLOWUP-10 — the REAL payment / shipping / pickup state of the current store, for the few fixed (non-editable)
+    storefront blocks that used to state those services unconditionally. Read-only, store-scoped, cached per request;
+    without a store everything is False (never claim what cannot be verified)."""
+    request = context.get("request")
+    store = getattr(request, "store", None) if request is not None else None
+    if store is None:
+        return {"payment": False, "shipping": False, "pickup": False}
+    cached = getattr(request, "_service_claims_cache", None)
+    if cached is None:
+        from ..services.trust_claims import store_service_state
+
+        cached = request._service_claims_cache = store_service_state(store)
+    return cached
+
+
+#: path -> (mtime_ns, content hash): the hash is recomputed only when the file really changed
+_STATIC_VERSION_CACHE: dict[str, tuple[int, str]] = {}
+
+
+@register.simple_tag
+def static_v(path):
+    """``{% static %}`` URL + ``?v=<content hash>`` (R4-09 fix).
+
+    Django's default static serving sends ``Last-Modified`` but no ``Cache-Control`` / ``ETag``, so a browser (Firefox in
+    particular) applies HEURISTIC freshness and keeps serving a previously fetched ``r4_studio.css`` / ``r4_editor.js`` for
+    hours after a patch replaced them — new script against old stylesheet. A URL that changes with the file's content makes
+    that impossible. A storage that already fingerprints its URLs (``?`` or a hash in the name) is left alone; a file the
+    finders cannot see simply gets the plain URL."""
+    url = static(path)
+    if "?" in url:
+        return url
+    absolute = finders.find(path)
+    if not absolute or not os.path.isfile(absolute):
+        return url
+    mtime = os.stat(absolute).st_mtime_ns
+    cached = _STATIC_VERSION_CACHE.get(absolute)
+    if cached is None or cached[0] != mtime:
+        with open(absolute, "rb") as handle:
+            cached = (mtime, hashlib.sha1(handle.read()).hexdigest()[:10])
+        _STATIC_VERSION_CACHE[absolute] = cached
+    return f"{url}?v={cached[1]}"
+
+
+@register.simple_tag(takes_context=True)
+def announcement_view(context, header_config):
+    """V5 — the ONE read model of the header's announcement strip (every header variant + the legacy shell read it through the shared
+    ``_shared/announcement_content.html``). Pure projection of ``header_config`` (single source); ``extended`` is False for a header that never
+    used the V5 keys, so those render the historical markup byte-for-byte.
+
+    * ``visible`` — the page scope (``announcement_pages``: all pages (default) or the home page only);
+    * ``image_url`` — the small picture, resolved ONLY from a ``MediaAsset`` of the current store (fail-closed: a foreign / deleted id shows nothing);
+    * ``style`` — merchant colours (``geometry.announce_bg`` / ``announce_fg``, semantic colours resolved + contrast-safe foreground)."""
+    hc = header_config if isinstance(header_config, dict) else {}
+    request = context.get("request")
+    page_type = context.get("page_type")
+    on_home = (page_type == "home") if page_type else bool(
+        getattr(getattr(request, "resolver_match", None), "url_name", "") == "home"
+    )
+    visible = hc.get("announcement_pages", "all") != "home" or on_home
+
+    image_url = ""
+    asset_id = hc.get("announcement_image_asset_id")
+    if asset_id:
+        store = context.get("store") or getattr(request, "store", None)
+        if store is not None:
+            from apps.content.models import MediaAsset
+
+            asset = MediaAsset.objects.filter(pk=asset_id, store=store).first()
+            if asset is not None and getattr(asset, "image", None):
+                try:
+                    image_url = asset.image.url
+                except ValueError:
+                    image_url = ""
+
+    geometry = hc.get("geometry") if isinstance(hc.get("geometry"), dict) else {}
+    css = []
+    background = semantic_color_css(geometry.get("announce_bg")) if geometry.get("announce_bg") else ""
+    foreground = semantic_color_css(geometry.get("announce_fg")) if geometry.get("announce_fg") else ""
+    if background:
+        css.append(f"background:{background}")
+        if not foreground:
+            foreground = semantic_foreground_css(geometry["announce_bg"])
+    if foreground:
+        css.append(f"color:{foreground}")
+    try:
+        size = int(geometry.get("announce_image_size") or 24)
+    except (TypeError, ValueError):
+        size = 24
+
+    # V5-UI-014 — the bar's own height / vertical padding (validated 32–72 / 0–16 by shell_geometry; absent = the strip's built-in size)
+    for key, var, low, high in (("announce_height", "--ann-h", 32, 120), ("announce_padding", "--ann-py", 0, 16)):
+        try:
+            value = int(geometry.get(key))
+        except (TypeError, ValueError):
+            continue
+        css.append(f"{var}:{max(low, min(high, value))}px")
+    link_url = hc.get("announcement_link_url") or ""
+    align = hc.get("announcement_align") or ""
+    extended = bool(image_url or link_url or align or css)
+    return {
+        "visible": visible, "extended": extended, "image_url": image_url,
+        "image_alt": hc.get("announcement_image_alt") or "", "image_side": hc.get("announcement_image_side") or "start",
+        "image_size": max(16, min(64, size)), "url": link_url, "new_tab": bool(hc.get("announcement_link_new_tab")),
+        "align": align, "style": ";".join(css),
+    }

@@ -1,0 +1,2192 @@
+"""R4 Task 5 — the single optimistic mutation boundary for the R4 editor.
+
+One transaction: lock the Store's ``StorefrontLayout``, resolve its
+currently-active Draft (``layout.draft_version`` — never silently
+switched/created here, see ``layout_service.get_or_create_draft`` for that),
+compare ``base_revision``, dispatch exactly one allowlisted mutation type,
+increment ``edit_revision`` once, and record history through the existing
+``edit_history_service`` contract. R3 never calls this module.
+"""
+
+from __future__ import annotations
+
+import re
+
+from django.db import transaction
+
+from apps.storefront_builder import (
+    appearance_registry,
+    hero_stage,
+    layout_preset_registry,
+    resource_source,
+    section_registry,
+    shell_geometry,
+    template_gallery_policy,
+    variant_contract,
+)
+from apps.storefront_builder.models import (
+    APPEARANCE_COLOR_KEYS,
+    FOOTER_TOGGLE_FIELDS,
+    HEADER_TOGGLE_FIELDS,
+    StorefrontContainer,
+    StorefrontLayout,
+    StorefrontLayoutVersion,
+    StorefrontSection,
+)
+from apps.storefront_builder.services import (
+    appearance_authority_service,
+    container_service,
+    edit_history_service,
+    layout_service,
+    preset_service,
+    section_data_service,
+    section_structure_service,
+)
+from apps.storefront_builder.settings_schema import clean_section_schema_patch
+from apps.storefront_builder.storefront_appearance.contracts import (
+    InvalidStoreAppearanceContract,
+)
+from apps.storefront_builder.storefront_appearance.families import COMPONENT_FAMILIES
+from apps.storefront_builder.storefront_appearance.persistence import (
+    component_key_for_registry_reference,
+    load_store_appearance_manifest,
+)
+from apps.storefront_builder.storefront_appearance.registry import get_component
+from apps.storefront_builder.storefront_appearance.validation import (
+    manifest_to_primitive,
+    validate_store_appearance_manifest,
+)
+
+
+class R4MutationError(ValueError):
+    """A refused R4 mutation. ``str(exc)`` is the stable external code;
+    ``payload`` optionally carries structured, client-safe detail (for example
+    the exact locked sections or the replacement dry-run) so the UI can show a
+    precise Persian message instead of a generic failure."""
+
+    def __init__(self, *args, payload=None):
+        super().__init__(*args)
+        self.payload = dict(payload or {})
+
+
+class R4StaleRevision(R4MutationError):
+    def __init__(self, current_revision: int, *, current_draft_id: int | None = None):
+        self.current_revision = current_revision
+        # P5-W5A Independent-Review repair — Class C's ABA fix additionally
+        # reports which Draft is actually current; every other R4 mutation
+        # action still constructs this with the single positional arg only.
+        self.current_draft_id = current_draft_id
+        super().__init__("stale_revision")
+
+
+_MUTATION_HISTORY_LABELS = {
+    "section.update_settings": "ویرایش تنظیمات بخش",
+    "section.add": "افزودن بخش",
+    "section.remove": "حذف بخش",
+    "section.duplicate": "تکرار بخش",
+    "section.move": "جابه‌جایی بخش",
+    "section.toggle_active": "نمایش/مخفی کردن بخش",
+    "section.toggle_locked": "قفل/بازکردن بخش",
+    "container.change_layout": "تغییر چیدمان",
+    "container.add": "افزودن چیدمان",
+    "container.remove": "حذف چیدمان",
+    "section.resize": "تغییر اندازه بخش",
+    "container.resize": "تغییر اندازه ستون‌ها",
+    "cell.add_section": "افزودن بخش به خانه",
+    "section.move_to_cell": "انتقال بخش به خانه دیگر",
+    "container.update_settings": "ویرایش تنظیمات چیدمان",
+    # V5 Groups (free nested layout)
+    "row.add": "افزودن ردیف ساده",
+    "cell.split": "تقسیم خانه",
+    "container.set_layout": "تغییر چیدمان گروه",
+    "container.add_cell": "افزودن خانه به گروه",
+    "cell.remove": "حذف خانه",
+    "container.remove_group": "حذف گروه",
+    "cell.duplicate": "کپی خانه",
+    "container.duplicate": "کپی ردیف",
+    "cell.move": "جابه‌جایی خانه",
+    "container.move": "جابه‌جایی ردیف",
+    "section.reset_to_baseline": "بازنشانی بخش به قالب",
+    "section.reset_setting_to_baseline": "بازنشانی فیلد بخش به قالب",
+    "appearance.reset_setting_to_baseline": "بازنشانی تنظیم ظاهر به قالب",
+    "header.reset_to_baseline": "بازنشانی هدر به قالب",
+    "footer.reset_to_baseline": "بازنشانی فوتر به قالب",
+    "appearance.update": "ویرایش طراحی کلی",
+    "header.update": "ویرایش هدر",
+    "header.apply_template": "اعمال هدرِ یک قالب",
+    "header.set_placement": "جایگاه هدر",
+    "header.apply_recipe": "اعمال هدرِ حرفه‌ای",
+    "hero.apply_template": "اعمال چیدمانِ هیروی یک قالب",
+    "footer.update": "ویرایش فوتر",
+    "appearance.component.update": "تغییر جزء طراحی فروشگاه",
+    "appearance.manifest.apply": "اعمال طراحی فروشگاه",
+    "appearance.template.apply": "اعمال قالب آماده",
+    "theme.apply": "اعمال تم مناسبتی",
+    "theme.clear": "حذف تم مناسبتی",
+    "design_lab.apply_candidate": "اعمال ترکیب آزمایشگاه طراحی",
+}
+
+
+def _history_label(mutation: dict) -> str:
+    return _MUTATION_HISTORY_LABELS.get(mutation.get("type"), "ویرایش R4")
+
+
+_PERSIAN_LETTERS = re.compile(r"[\u0600-\u06FF]")
+_INVALID_SETTINGS_MESSAGE_FA = "مقدار واردشده برای این تنظیم معتبر نیست؛ هیچ تغییری ذخیره نشد."
+
+
+def _is_strict_int(value: object) -> bool:
+    return type(value) is int
+
+
+def _validate_resource_source_ownership(*, store, source: "resource_source.ResourceSource") -> None:
+    """Phase 4 (Task 2) — delegates to the ONE shared, DB-backed ownership
+    check (``section_data_service.validate_resource_source_ownership``) also
+    used by the legacy settings-save view, translating its stable error into
+    R4's own external error-code contract. R4 Task 10 (Section 8)'s original
+    rationale still applies: a Store-scoped Picker search endpoint alone does
+    not stop a client from POSTing an arbitrary foreign-Store id straight to
+    this mutation endpoint."""
+    try:
+        section_data_service.validate_resource_source_ownership(store=store, source=source)
+    except section_data_service.ResourceSourceOwnershipError:
+        raise R4MutationError("invalid_resource_ownership") from None
+
+
+def _validate_background_asset_ownership(*, store, background: dict | None) -> None:
+    """Phase 5 Task 4B — delegates to the SAME canonical, DB-backed ownership
+    check (``section_data_service.validate_background_asset_ownership``) the
+    legacy settings-save view uses, translating its stable error into R4's own
+    external error-code contract. Write-time isolation: a Store-scoped media
+    Picker alone does not stop a client from POSTing an arbitrary foreign-Store
+    ``media_asset_id`` straight to this mutation endpoint, and render-time
+    fail-close does not stop it from being PERSISTED — so it is rejected here,
+    before save, never a second media authority."""
+    try:
+        section_data_service.validate_background_asset_ownership(store=store, background=background)
+    except section_data_service.BackgroundAssetOwnershipError:
+        raise R4MutationError("invalid_background_asset_ownership") from None
+
+
+def _scoped_section(draft: StorefrontLayoutVersion, section_id) -> StorefrontSection:
+    """Strict Draft-scoping rule shared by every mutation applier in this
+    module — a crafted ``section_id`` belonging to another Store, page, or
+    non-active-Draft version is indistinguishable from "does not exist"."""
+    try:
+        return StorefrontSection.objects.select_for_update().get(
+            pk=section_id, page__version=draft,
+        )
+    except StorefrontSection.DoesNotExist:
+        raise R4MutationError("section_not_found") from None
+
+
+def _apply_section_update_settings(*, store, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    patch = mutation.get("patch")
+
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    if not isinstance(patch, dict):
+        raise R4MutationError("invalid_patch")
+
+    section = _scoped_section(draft, section_id)
+
+    try:
+        definition = section_registry.get_definition(section.section_key)
+    except ValueError:
+        raise R4MutationError("unknown_section_type") from None
+
+    if definition.settings_schema is None:
+        raise R4MutationError("section_not_schema_enabled")
+
+    # Narrowly scoped: covers both SettingsSchemaError (schema cleaning)
+    # and a plain ValueError from the legacy validator bridge that
+    # clean_section_schema_patch calls internally — one stable external
+    # code either way, never the internal validator's own message text.
+    try:
+        cleaned = clean_section_schema_patch(definition, patch, section.settings or {})
+    except ValueError as exc:
+        # R4-08 — the refusal must SAY why (the Studio shows ``message``): a schema error carries its own safe Persian
+        # sentence naming the control and its limits; every other validator error gets the generic sentence — the internal
+        # technical text is still never shown.
+        text = str(exc)
+        message = (
+            getattr(exc, "merchant_message", "")
+            # the section validators (design / background / strip ...) raise merchant-facing PERSIAN sentences by contract;
+            # internal technical errors are English and never match
+            or (text if _PERSIAN_LETTERS.search(text) else "")
+            or _INVALID_SETTINGS_MESSAGE_FA
+        )
+        raise R4MutationError("invalid_settings", payload={"message": message}) from exc
+
+    # R4 Task 10 — ownership is only ever validated when THIS mutation's
+    # raw patch actually touches "source"; a stale/deleted legacy reference
+    # left over from before Task 10 must never turn an unrelated field edit
+    # into a failure (Section 10's explicit backward-compatibility rule).
+    # Checked AFTER schema cleaning (the shape is already trustworthy) but
+    # BEFORE section.settings is assigned/saved, so a rejection here rolls
+    # back cleanly with no settings/revision/history change.
+    if "source" in patch:
+        try:
+            projected_source = resource_source.resource_source_from_section_settings(
+                section.section_key, cleaned,
+            )
+        except resource_source.ResourceSourceError:
+            projected_source = None
+        if projected_source is not None:
+            _validate_resource_source_ownership(store=store, source=projected_source)
+
+    # Phase 5 Task 4B — write-time tenant isolation for a background image.
+    # Only ever validated when THIS patch touches "background" (an unrelated
+    # field edit must never fail on a stale legacy id), and only when the
+    # RESULTING (cleaned) background is image mode with an id — mirroring the
+    # "source" preflight above exactly. Checked AFTER schema cleaning (shape is
+    # already trustworthy) but BEFORE section.settings is assigned/saved, so a
+    # foreign id rolls back cleanly with no settings/revision/history change —
+    # it is never persisted even as a dangling id.
+    if "background" in patch:
+        _validate_background_asset_ownership(store=store, background=cleaned.get("background"))
+    # The same write-time tenant isolation for every standalone ``media`` field of the schema (campaign panel image,
+    # decorative strip picture, ...): a foreign-Store asset id is rejected before anything is saved.
+    for field in definition.settings_schema.fields:
+        if field.field_type == "media" and field.key in patch and cleaned.get(field.key):
+            _validate_background_asset_ownership(
+                store=store, background={"mode": "image", "media_asset_id": cleaned.get(field.key)},
+            )
+
+    # Phase 3 (V02) — Brand "View-all" capability truth. A merchant may only
+    # turn the "مشاهده همه" anchor ON when the RESULTING rendered state can
+    # actually present an actionable link: the resulting variant must support
+    # it (grid/carousel — beauty_tabs never does) AND the trusted current+
+    # resulting destination must resolve to a non-None URL for THIS store.
+    # Rejected atomically here — BEFORE section.settings is assigned/saved —
+    # so no settings/revision/history change survives, exactly like the
+    # source-ownership preflight above. The DB-backed destination resolution
+    # deliberately lives at this store-scoped boundary, never in the pure,
+    # DB-free schema cleaner. A variant-only switch (which does NOT itself
+    # set show_view_all=True in the raw patch) is never rejected — a dormant
+    # stored value is preserved untouched, only hidden at render/inspect time.
+    if section.section_key == "brand_carousel":
+        _validate_brand_view_all_enable(store=store, patch=patch, cleaned=cleaned)
+
+    section.settings = cleaned
+    section.save(update_fields=["settings"])
+
+
+#: Phase 3 (V02) — the brand_carousel variants (``display_mode``) whose
+#: rendered output actually emits the "مشاهده همه" anchor. ``beauty_tabs`` is
+#: deliberately excluded: its presentation has no View-all affordance (see
+#: ``render_service._brand_carousel_context`` and the brand_carousel
+#: template). An explicit allowlist, not a denylist.
+_BRAND_VIEW_ALL_SUPPORTING_VARIANTS = frozenset({"grid", "carousel"})
+
+
+def _brand_view_all_is_actionable(*, store, cleaned: dict) -> bool:
+    """True IFF the RESULTING brand_carousel state could render an actionable
+    View-all anchor: a supporting variant AND a trusted destination that
+    resolves to a non-None URL for this store. Pure read — never mutates
+    ``cleaned`` and never touches revision/history."""
+    variant = cleaned.get("display_mode")
+    if variant not in _BRAND_VIEW_ALL_SUPPORTING_VARIANTS:
+        return False
+    destination = cleaned.get("destination") or {}
+    from apps.content.services import resolve_destination_setting
+
+    return resolve_destination_setting(store, destination).get("url") is not None
+
+
+def _validate_brand_view_all_enable(*, store, patch: dict, cleaned: dict) -> None:
+    """Reject an EXPLICIT View-all enable that the resulting variant/
+    destination cannot support. "Explicit enable" == the raw ``patch`` itself
+    sets ``show_view_all`` truthy; a variant-only switch that merely carries a
+    previously-stored ``show_view_all=True`` forward is NOT an explicit enable
+    and is never rejected here (its dormant value is preserved, just hidden)."""
+    if not (isinstance(patch, dict) and bool(patch.get("show_view_all"))):
+        return
+    if not _brand_view_all_is_actionable(store=store, cleaned=cleaned):
+        raise R4MutationError("view_all_unsupported")
+
+
+#: R4 Task 7 (Batch 2) — every ``preset_service`` baseline-reset exception
+#: mapped to ONE stable, external code per FAMILY (not one per subclass —
+#: the same coarseness every other R4MutationError code in this module
+#: already uses). The human-readable Persian message these exceptions
+#: carry is a legacy-view-only concern (shown via ``django.contrib.messages``)
+#: and is never surfaced through the R4 JSON contract.
+def _reset_error_code(exc: "preset_service.BaselineResetError | preset_service.InvalidPresetError") -> str:
+    if isinstance(exc, preset_service.LockedSectionsPresentError):
+        return "locked_sections_present"
+    if isinstance(exc, preset_service.NoTemplateBaselineError):
+        return "no_template_baseline"
+    if isinstance(exc, preset_service.TemplateBaselineVersionChangedError):
+        return "template_baseline_version_changed"
+    if isinstance(exc, preset_service.InvalidPresetError):
+        return "invalid_preset"
+    return "baseline_reset_error"
+
+
+def reset_error_payload(exc) -> dict:
+    """Structured, client-safe detail for a refused reset (locked sections by
+    id/page/key) so the UI names exactly what blocks it."""
+    if isinstance(exc, preset_service.LockedSectionsPresentError):
+        return {"locked_sections": exc.locked_sections, "message": str(exc)}
+    return {"message": str(exc)}
+
+
+#: Precise, actionable Persian text per stable R4 error code. The Studio shows
+#: this instead of a generic "save failed" whenever the cause is known; an
+#: unknown code falls back to the generic message on the client.
+R4_ERROR_MESSAGES_FA = {
+    "locked_sections_present": (
+        "این کار انجام نشد چون بخش قفل‌شده‌ای در صفحه وجود دارد. "
+        "قفل آن بخش‌ها را باز کنید و دوباره تلاش کنید؛ هیچ تغییری ذخیره نشد."
+    ),
+    "replace_confirmation_required": (
+        "این کار چیدمان فعلی شما را جایگزین می‌کند. برای ادامه باید صریحاً تأیید کنید؛ "
+        "هیچ تغییری ذخیره نشد."
+    ),
+    "no_template_baseline": (
+        "برای این پیش‌نویس هنوز قالب آماده‌ای اعمال نشده است، پس چیزی برای بازنشانی وجود ندارد."
+    ),
+    "template_baseline_version_changed": (
+        "نسخهٔ قالبِ این پیش‌نویس با نسخهٔ فعلیِ آن قالب فرق دارد؛ بازنشانی به قالب کنونی انجام نشد. "
+        "قالب را دوباره انتخاب کنید."
+    ),
+    "invalid_appearance_template": "قالب انتخاب‌شده قابل اعمال نیست؛ هیچ تغییری ذخیره نشد.",
+    "unknown_appearance_template": "قالب انتخاب‌شده در فهرست قالب‌ها وجود ندارد.",
+    "template_not_selectable": "این قالب فعلاً برای انتخاب در دسترس نیست؛ یکی از قالب‌های فهرست را انتخاب کنید.",
+    "template_version_mismatch": "نسخهٔ قالب تغییر کرده است؛ صفحه را تازه کنید و دوباره انتخاب کنید.",
+    "invalid_preset": "این بازنشانی انجام نشد؛ هیچ تغییری ذخیره نشد.",
+    "baseline_reset_error": "بازنشانی به قالب انجام نشد؛ هیچ تغییری ذخیره نشد.",
+    "no_active_draft": "پیش‌نویس فعالی وجود ندارد؛ صفحه را دوباره بارگذاری کنید.",
+    # V5-QA-FIX-01 (V5-FUNC-002) — structural refusals are legitimate, protective server decisions (nothing was written).
+    # Without a Persian ``message`` the Studio could only show the generic «ذخیره ناموفق»; with one, the client's existing
+    # known-refusal path keeps the saved state and tells the merchant exactly why the move/duplicate/remove did not happen.
+    "move_boundary": "این بخش در همان جهت جای دیگری برای رفتن ندارد.",
+    "section_locked": "این بخش قفل است؛ برای جابه‌جایی یا تغییر، ابتدا قفل آن را باز کنید. هیچ تغییری ذخیره نشد.",
+    "target_locked": "بخش مجاور قفل است و جابه‌جایی از روی آن ممکن نیست؛ قفل آن را باز کنید یا جای دیگری امتحان کنید. هیچ تغییری ذخیره نشد.",
+    "container_locked": "ردیفی که این بخش در آن است قفل شده؛ هیچ تغییری ذخیره نشد.",
+    "target_container_locked": "ردیف مجاور قفل شده و جابه‌جایی از روی آن ممکن نیست؛ هیچ تغییری ذخیره نشد.",
+    "row_layout_invalid": (
+        "این جابه‌جایی چیدمان یک ردیف چندبخشی را به‌هم می‌ریزد؛ بخش را بعد از کل آن ردیف قرار دهید. "
+        "هیچ تغییری ذخیره نشد."
+    ),
+    "unsupported_placement": "جایگاه این بخش با این جابه‌جایی سازگار نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_placement": "جایگاه انتخاب‌شده برای این بخش معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "section_not_placed": "این بخش هنوز در چیدمان صفحه جایگاهی ندارد؛ صفحه را تازه کنید و دوباره تلاش کنید.",
+    "section_not_found": "این بخش دیگر در پیش‌نویس نیست؛ صفحه را تازه کنید و دوباره تلاش کنید.",
+    "cell_not_found": "این خانه دیگر در پیش‌نویس نیست؛ صفحه را تازه کنید و دوباره تلاش کنید.",
+    "container_not_found": "این ردیف دیگر در پیش‌نویس نیست؛ صفحه را تازه کنید و دوباره تلاش کنید.",
+    "section_not_removable": "این بخش برای صفحه ضروری است و حذف نمی‌شود.",
+    "section_not_duplicable": "از این بخش فقط یک نمونه می‌تواند در صفحه باشد.",
+    "max_instances_exceeded": "به حداکثر تعداد مجاز این بخش در صفحه رسیده‌اید.",
+    "min_instances_violation": "تعداد لازم از این بخش باید در صفحه بماند؛ حذف آن ممکن نیست.",
+    "row_member": "این بخش عضو یک ردیف چندبخشی است و از اینجا حذف نمی‌شود؛ هیچ تغییری ذخیره نشد.",
+    # V5-LAYOUT-ATOMIC — container.add / cell.add_section refusals (the whole build is rolled back; nothing was saved)
+    "invalid_section_key": "یکی از بخش‌های انتخاب‌شده معتبر نیست؛ چیدمان ساخته نشد و هیچ تغییری ذخیره نشد.",
+    "section_not_allowed_on_page": "یکی از بخش‌های انتخاب‌شده روی این صفحه مجاز نیست؛ چیدمان ساخته نشد و هیچ تغییری ذخیره نشد.",
+    "section_hidden_from_library": "یکی از بخش‌های انتخاب‌شده دیگر در کتابخانه نیست؛ چیدمان ساخته نشد و هیچ تغییری ذخیره نشد.",
+    "invalid_container_layout": "این چیدمان معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_layout_key": "این چیدمان معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_cells": "انتخاب بخش‌های چیدمان معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_page_type": "نوع صفحه معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    # V5-LAYOUT-011 — container.remove refusals (nothing was changed)
+    "container_has_locked_section": "یکی از بخش‌های این چیدمان قفل است؛ ابتدا قفل آن را باز کنید. چیدمان حذف نشد و هیچ تغییری ذخیره نشد.",
+    "invalid_resize_value": "اندازهٔ واردشده معتبر نیست یا خارج از محدودهٔ مجاز است؛ هیچ تغییری ذخیره نشد.",
+    "invalid_resize_layout": "این چیدمان با این تغییر اندازه سازگار نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_announcement_image": "تصویر نوار اطلاعیه متعلق به این فروشگاه نیست یا وجود ندارد؛ هیچ تغییری ذخیره نشد.",
+    "container_has_row_member": "یکی از بخش‌های این چیدمان عضو یک ردیف چندبخشی قدیمی است؛ چیدمان حذف نشد و هیچ تغییری ذخیره نشد.",
+    # V5 Groups — nested layout refusals (nothing was saved)
+    "invalid_axis": "جهت تقسیم نامعتبر است؛ هیچ تغییری ذخیره نشد.",
+    "invalid_split_count": "تعداد قسمت‌ها معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "block_locked": "یکی از بخش‌های این خانه قفل است؛ ابتدا قفل آن را باز کنید. هیچ تغییری ذخیره نشد.",
+    "group_depth_limit": "گروه‌ها بیش از این تودرتو نمی‌شوند؛ یک گروه بالاتر را تقسیم کنید. هیچ تغییری ذخیره نشد.",
+    "page_cell_limit": "تعداد خانه‌های این صفحه به سقف مجاز رسیده است؛ هیچ تغییری ذخیره نشد.",
+    "cell_limit": "هر گروه حداکثر ۶ خانه دارد؛ برای خانهٔ بیشتر یکی از خانه‌ها را دوباره تقسیم کنید. هیچ تغییری ذخیره نشد.",
+    "group_has_children": "برای کم‌کردن خانه‌ها، ابتدا گروه‌های داخل خانه‌های حذفی را جابه‌جا یا حذف کنید؛ هیچ تغییری ذخیره نشد.",
+    "last_cell": "آخرین خانهٔ یک گروه جدا حذف نمی‌شود؛ خودِ گروه را حذف کنید. هیچ تغییری ذخیره نشد.",
+    "cell_not_empty": "خانهٔ دارای محتوا مستقیماً حذف نمی‌شود؛ هیچ تغییری ذخیره نشد.",
+    "not_top_level": "این عملیات فقط برای ردیف‌های سطح صفحه است؛ هیچ تغییری ذخیره نشد.",
+    "not_group_cell": "این خانه جزو یک گروه تقسیم‌شده نیست؛ ابتدا آن را تقسیم کنید. هیچ تغییری ذخیره نشد.",
+    "cell_hosts_group": "این خانه یک گروه تودرتو دارد؛ بخش را داخل یکی از خانه‌های همان گروه اضافه کنید. هیچ تغییری ذخیره نشد.",
+    "invalid_group_settings": "تنظیمات گروه معتبر نیست؛ هیچ تغییری ذخیره نشد.",
+    "invalid_direction": "جهت جابه‌جایی نامعتبر است؛ هیچ تغییری ذخیره نشد.",
+}
+
+
+def error_response_body(exc: "R4MutationError") -> dict:
+    """The JSON body for a refused mutation: stable ``code`` + precise Persian
+    ``message`` (when known) + any structured ``payload`` detail."""
+    code = str(exc)
+    body = {"ok": False, "code": code}
+    message = (exc.payload or {}).get("message") if isinstance(getattr(exc, "payload", None), dict) else None
+    body["message"] = R4_ERROR_MESSAGES_FA.get(code) or message or ""
+    for key, value in (getattr(exc, "payload", None) or {}).items():
+        if key != "message":
+            body[key] = value
+    return body
+
+
+def _apply_section_reset_to_baseline(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    section = _scoped_section(draft, section_id)
+    try:
+        preset_service.reset_section_to_baseline(draft, section)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+def _apply_section_reset_setting_to_baseline(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    key = mutation.get("key")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    if not isinstance(key, str) or not key:
+        raise R4MutationError("invalid_key")
+    section = _scoped_section(draft, section_id)
+    try:
+        preset_service.reset_section_setting_to_baseline(draft, section, key)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+def _apply_appearance_reset_setting_to_baseline(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    key = mutation.get("key")
+    if not isinstance(key, str) or not key:
+        raise R4MutationError("invalid_key")
+    try:
+        preset_service.reset_appearance_setting_to_baseline(draft, key)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+def _apply_header_reset_to_baseline(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    try:
+        preset_service.reset_header_to_baseline(draft)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+def _apply_footer_reset_to_baseline(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    try:
+        preset_service.reset_footer_to_baseline(draft)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+def _apply_section_add(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    from ..models import StorefrontPage
+
+    section_key = mutation.get("section_key")
+    if not isinstance(section_key, str) or not section_key:
+        raise R4MutationError("invalid_section_key")
+    # Phase 4 (Task 3B) — page_type is required and explicitly validated
+    # here (not defaulted to Home) because a mutation is a deliberate
+    # merchant action, unlike a page LOAD where an absent/invalid value
+    # silently falling back to Home preserves old bookmarks/links.
+    page_type = mutation.get("page_type")
+    if page_type not in StorefrontPage.PageType.values:
+        raise R4MutationError("invalid_page_type")
+    try:
+        section_structure_service.add_section(draft=draft, section_key=section_key, page_type=page_type)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_remove(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    try:
+        section_structure_service.remove_section(draft=draft, section_id=section_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_duplicate(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    try:
+        section_structure_service.duplicate_section(draft=draft, section_id=section_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_move(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    direction = mutation.get("direction")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    if not isinstance(direction, str):
+        raise R4MutationError("invalid_direction")
+    try:
+        section_structure_service.move_section(draft=draft, section_id=section_id, direction=direction)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_toggle_active(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    try:
+        section_structure_service.toggle_section_active(draft=draft, section_id=section_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_toggle_locked(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    try:
+        section_structure_service.toggle_section_locked(draft=draft, section_id=section_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_container_change_layout(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = mutation.get("container_id")
+    layout_key = mutation.get("layout_key")
+    if not _is_strict_int(container_id):
+        raise R4MutationError("invalid_container_id")
+    if not isinstance(layout_key, str) or not layout_key:
+        raise R4MutationError("invalid_layout_key")
+    try:
+        section_structure_service.change_container_layout(
+            draft=draft, container_id=container_id, layout_key=layout_key,
+        )
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_container_add(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """V5-LAYOUT-ATOMIC — one new Container (layout preset) with EMPTY or pre-filled Cells, all-or-nothing inside this mutation's
+    single transaction. Shape checks here; every legality rule is the existing service code (see ``add_container``)."""
+    page_type = mutation.get("page_type")
+    layout_key = mutation.get("layout_key")
+    cells = mutation.get("cells")
+    if not isinstance(layout_key, str) or not layout_key:
+        raise R4MutationError("invalid_layout_key")
+    if cells is not None and not isinstance(cells, list):
+        raise R4MutationError("invalid_cells")
+    spans = mutation.get("spans")
+    if spans is not None and (not isinstance(spans, list) or not all(_is_strict_int(v) for v in spans)):
+        raise R4MutationError("invalid_resize_value")
+    try:
+        section_structure_service.add_container(draft=draft, page_type=page_type, layout_key=layout_key, cells=cells, spans=spans)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+_SECTION_RESIZE_FIELDS = {"height": (0, 1600), "width": (30, 100)}
+_SECTION_RESIZE_ALIGN = ("start", "center", "end")
+
+
+def _apply_section_resize(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """V5-RESIZE — one drag = one mutation. Payload: ``section_id`` plus any of ``height`` (px, floor), ``width`` (% of the Cell),
+    ``align`` (start/center/end); a key present with ``null`` returns that dimension to Auto, an absent key leaves it untouched.
+    Nothing else is accepted, so the mutation can only ever write the three size keys of the design block."""
+    section_id = mutation.get("section_id")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    unknown = set(mutation) - {"type", "section_id", *section_structure_service.RESIZE_DIMENSIONS}
+    changes = {k: mutation[k] for k in section_structure_service.RESIZE_DIMENSIONS if k in mutation}
+    if unknown or not changes:
+        raise R4MutationError("invalid_resize_value")
+    for dimension, value in changes.items():
+        if value is None:
+            continue
+        if dimension == "align":
+            if value not in _SECTION_RESIZE_ALIGN:
+                raise R4MutationError("invalid_resize_value")
+            continue
+        low, high = _SECTION_RESIZE_FIELDS[dimension]
+        if not _is_strict_int(value) or not low <= value <= high:
+            raise R4MutationError("invalid_resize_value")
+    try:
+        section_structure_service.resize_section(draft=draft, section_id=section_id, changes=changes)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_container_resize(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """V5-RESIZE — column widths (``spans``: one int per Cell, the existing ``Cell.span`` truth) and/or the stacked layout's height split
+    (``stack_split``: the top small Cell's share in %, ``null`` = Auto). One drag = one mutation."""
+    container_id = mutation.get("container_id")
+    if not _is_strict_int(container_id):
+        raise R4MutationError("invalid_container_id")
+    unknown = set(mutation) - {"type", "container_id", "spans", "stack_split"}
+    if unknown or not ({"spans", "stack_split"} & set(mutation)):
+        raise R4MutationError("invalid_resize_value")
+    spans = mutation.get("spans")
+    if "spans" in mutation and (not isinstance(spans, list) or not all(_is_strict_int(v) for v in spans)):
+        raise R4MutationError("invalid_resize_value")
+    split = mutation.get("stack_split")
+    if "stack_split" in mutation and split is not None and not _is_strict_int(split):
+        raise R4MutationError("invalid_resize_value")
+    try:
+        section_structure_service.resize_container(
+            draft=draft, container_id=container_id, spans=spans if "spans" in mutation else None,
+            stack_split=split, set_split="stack_split" in mutation,
+        )
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_container_remove(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """V5-LAYOUT-011 — remove one Container; content is always preserved (an empty Container is deleted, a filled one is dissolved into
+    independent rows). No payload option can delete a Section: the only accepted fields are ``type`` and ``container_id``."""
+    container_id = mutation.get("container_id")
+    if not _is_strict_int(container_id):
+        raise R4MutationError("invalid_container_id")
+    try:
+        section_structure_service.remove_container(draft=draft, container_id=container_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_cell_add_section(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_key = mutation.get("section_key")
+    cell_id = mutation.get("cell_id")
+    if not isinstance(section_key, str) or not section_key:
+        raise R4MutationError("invalid_section_key")
+    if not _is_strict_int(cell_id):
+        raise R4MutationError("invalid_cell_id")
+    try:
+        section_structure_service.add_section_to_cell(draft=draft, section_key=section_key, cell_id=cell_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+def _apply_section_move_to_cell(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    section_id = mutation.get("section_id")
+    cell_id = mutation.get("cell_id")
+    at_index = mutation.get("at_index")
+    if not _is_strict_int(section_id):
+        raise R4MutationError("invalid_section_id")
+    if not _is_strict_int(cell_id):
+        raise R4MutationError("invalid_cell_id")
+    if at_index is not None and not _is_strict_int(at_index):
+        raise R4MutationError("invalid_at_index")
+    try:
+        section_structure_service.move_section_to_cell(
+            draft=draft, section_id=section_id, cell_id=cell_id, at_index=at_index,
+        )
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+
+
+#: Pre-Task-10 remediation (composition parity closure) — Container-level
+#: merchant settings the legacy ``storefront_container_settings`` view
+#: exposes (``views.py``) with no prior R4 equivalent (Task-7 B1 audit
+#: item #1: "R4 never exposes container-level merchant controls"). Matches
+#: the legacy view's own allowlist exactly — ``content_width`` is
+#: deliberately excluded there too ("not exposed until the renderer has a
+#: family-safe implementation"), so it stays INTERNAL/NOT MERCHANT-FACING
+#: here as well, never a new capability invented beyond legacy parity.
+_CONTAINER_SETTINGS_ALLOWED_PATCH_KEYS = frozenset({
+    "gap", "mobile_mode", "mobile_order", "vertical_align", "height_mode",
+    "background_mode", "background_color", "background_pattern",
+    # V5 Groups: title / description / presentation of a Group and the two extra background modes (gradient / picture)
+    "title", "description", "title_visible", "style", "background_color2", "background_media_asset_id",
+})
+
+
+def _apply_container_update_settings(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = mutation.get("container_id")
+    patch = mutation.get("patch")
+    if not _is_strict_int(container_id):
+        raise R4MutationError("invalid_container_id")
+    if not isinstance(patch, dict):
+        raise R4MutationError("invalid_patch")
+    if set(patch) - _CONTAINER_SETTINGS_ALLOWED_PATCH_KEYS:
+        raise R4MutationError("invalid_container_settings_patch")
+    try:
+        container = StorefrontContainer.all_objects.select_for_update().get(
+            pk=container_id, page__version=draft,
+        )
+    except StorefrontContainer.DoesNotExist:
+        raise R4MutationError("container_not_found") from None
+    if container.is_locked:
+        raise R4MutationError("container_locked")
+
+    from .. import group_style
+
+    current = container_service.effective_container_settings(container.settings)
+    candidate = dict(current)
+    patch = dict(patch)
+    try:
+        if "style" in patch:
+            # a PARTIAL style patch merges onto the stored one (None / "" clears a key) and is validated strictly: a bad value refuses the whole edit
+            patch["style"] = group_style.validate_style(group_style.merge_style_patch(current.get("style"), patch["style"]))
+        if "title" in patch:
+            patch["title"] = group_style.clean_text(patch["title"], group_style.MAX_TITLE_LENGTH, "عنوان گروه")
+        if "description" in patch:
+            patch["description"] = group_style.clean_text(patch["description"], group_style.MAX_DESCRIPTION_LENGTH, "توضیح گروه")
+        if "title_visible" in patch and not isinstance(patch["title_visible"], bool):
+            raise group_style.GroupStyleError("نمایش عنوان باید روشن/خاموش باشد")
+    except group_style.GroupStyleError as exc:
+        raise R4MutationError("invalid_group_settings", payload={"message": str(exc)}) from exc
+    for key in ("title", "description", "style", "background_color2", "background_media_asset_id"):
+        if key in patch and patch[key] in ("", None, {}):
+            candidate.pop(key, None)
+            patch.pop(key)
+    if patch.get("title_visible") is True:
+        candidate.pop("title_visible", None)
+        patch.pop("title_visible")
+    candidate.update(patch)
+    # content_width is preserved unconditionally — same restraint as the
+    # legacy view, never settable via this patch even if posted (the
+    # allowlist above already rejects an unknown key, but this guards the
+    # one already-known key that must never move here either).
+    candidate["content_width"] = current["content_width"]
+    container.settings = container_service.effective_container_settings(candidate)
+    container.save(update_fields=["settings", "updated_at"])
+
+
+def _group_error(exc) -> "R4MutationError":
+    return R4MutationError(exc.code)
+
+
+def _int_field(mutation: dict, key: str, error: str) -> int:
+    value = mutation.get(key)
+    if not _is_strict_int(value):
+        raise R4MutationError(error)
+    return value
+
+
+def _apply_row_add(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    try:
+        section_structure_service.add_row(draft=draft, page_type=mutation.get("page_type"))
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_cell_split(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    cell_id = _int_field(mutation, "cell_id", "invalid_cell_id")
+    count = mutation.get("count")
+    if not _is_strict_int(count):
+        raise R4MutationError("invalid_split_count")
+    if mutation.get("axis") not in container_service.GROUP_AXES:
+        raise R4MutationError("invalid_axis")
+    try:
+        section_structure_service.split_cell(draft=draft, cell_id=cell_id, axis=mutation["axis"], count=count)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_container_set_layout(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = _int_field(mutation, "container_id", "invalid_container_id")
+    count = mutation.get("count")
+    if not _is_strict_int(count):
+        raise R4MutationError("invalid_split_count")
+    if mutation.get("axis") not in container_service.GROUP_AXES:
+        raise R4MutationError("invalid_axis")
+    try:
+        section_structure_service.set_group_layout(draft=draft, container_id=container_id, axis=mutation["axis"], count=count)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_container_add_cell(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = _int_field(mutation, "container_id", "invalid_container_id")
+    try:
+        section_structure_service.add_group_cell(draft=draft, container_id=container_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_cell_remove(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    cell_id = _int_field(mutation, "cell_id", "invalid_cell_id")
+    try:
+        section_structure_service.remove_cell(draft=draft, cell_id=cell_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_container_remove_group(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = _int_field(mutation, "container_id", "invalid_container_id")
+    try:
+        section_structure_service.remove_group(draft=draft, container_id=container_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_cell_duplicate(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    cell_id = _int_field(mutation, "cell_id", "invalid_cell_id")
+    try:
+        section_structure_service.duplicate_cell(draft=draft, cell_id=cell_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_container_duplicate(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = _int_field(mutation, "container_id", "invalid_container_id")
+    try:
+        section_structure_service.duplicate_container(draft=draft, container_id=container_id)
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_cell_move(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    cell_id = _int_field(mutation, "cell_id", "invalid_cell_id")
+    try:
+        section_structure_service.move_cell(draft=draft, cell_id=cell_id, direction=mutation.get("direction"))
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+def _apply_container_move(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    container_id = _int_field(mutation, "container_id", "invalid_container_id")
+    try:
+        section_structure_service.move_container(draft=draft, container_id=container_id, direction=mutation.get("direction"))
+    except section_structure_service.SectionStructureError as exc:
+        raise _group_error(exc) from exc
+
+
+#: Pre-Task-10 remediation (field-parity closure) — widened from the
+#: original Phase 1 Section 6 allowlist (template_slug/palette_slug/font/
+#: type_scale/motion/button_style) to cover every REQUIRED EXISTING
+#: CAPABILITY the field-by-field parity matrix
+#: (docs/qa_evidence/.../task9_legacy_retirement.md, headline finding #3)
+#: found missing from R4 — never raw CSS/JSON, never an arbitrary/unknown
+#: key: every one of these is validated by the SAME canonical
+#: ``layout_service.validate_appearance_config`` the legacy form uses.
+_APPEARANCE_UPDATE_ALLOWED_PATCH_KEYS = frozenset({
+    "template_slug", "palette_slug", "font", "type_scale", "motion", "button_style",
+    "radius", "button_radius", "density",
+    "image_fit", "image_hover", "card_image_crossfade", "card_image_zoom",
+    "content_width", "grid_density", "card_shadow", "card_hover", "hero_style", "heading_style",
+    "page_width_mode", "page_max_width", "page_gutter",
+    "color_overrides", "theme_overrides",
+    # explicit, labelled merchant action: drop EVERY global colour / region-colour override (never a side effect of anything else)
+    "clear_global_color_overrides",
+})
+
+#: The fields a Template selection owns on transition — verified against
+#: R3's own real POST-time semantics (views.py's ``_field()``), not
+#: invented: exactly these 7 use "Template > posted > current" priority.
+#: TemplateDefinition's other 5 "structural" fields (content_width/
+#: grid_density/card_shadow/card_hover/hero_style — the Phase 8 P0-7
+#: fields) are validated against a DIFFERENT, independent choice domain
+#: (appearance_registry.SITE_CONTENT_WIDTH_CHOICES etc.) and are, by R3's
+#: own real behavior, deliberately NOT auto-applied on a Template switch —
+#: they only ever come from an explicit posted value or the current
+#: stored one. swatch/name_fa/group_fa/description_fa/slug are
+#: presentation-only / the key itself, also excluded.
+_TEMPLATE_OWNED_FIELDS = ("font", "radius", "button_radius", "button_style", "density", "motion", "type_scale")
+
+
+def _require_pinned_appearance_draft(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """Pin A6 writes to the exact Draft the client previewed.
+
+    Store ownership still comes exclusively from ``_lock_active_draft``. The
+    explicit id prevents a stale browser tab from applying a candidate to a
+    newly-created active Draft that happens to share the same revision.
+    """
+    draft_id = mutation.get("draft_id")
+    if not _is_strict_int(draft_id):
+        raise R4MutationError("invalid_draft_id")
+    if draft_id != draft.pk:
+        # Nonexistent, inactive, Published and foreign Draft ids are deliberately
+        # indistinguishable to the caller.
+        raise R4MutationError("draft_not_found")
+
+
+_LEGACY_SELECTOR_FAMILIES = ("header", "footer", "bottom_nav", "motion")
+
+
+def _component_key_from_live_reference(*, family: str, reference: str) -> str:
+    component_key = component_key_for_registry_reference(reference, family_key=family)
+    if component_key is None:
+        # Every valid legacy selector should already be adapted into the central
+        # registry. Fail closed rather than preserve a stale typed manifest.
+        raise R4MutationError("invalid_store_appearance_manifest")
+    return component_key
+
+
+def _live_legacy_selection_updates(*, draft: StorefrontLayoutVersion) -> dict[str, str]:
+    header = draft.effective_header_config()
+    footer = draft.effective_footer_config()
+    appearance = draft.effective_appearance_config()
+    references = {
+        "header": f"global_region:header:{header['header_variant']}",
+        "footer": f"global_region:footer:{footer['footer_variant']}",
+        "bottom_nav": f"global_region:mobile_bottom_nav:{footer['mobile_nav_variant']}",
+        "motion": f"appearance_motion:{appearance['motion']}",
+    }
+    return {
+        family: _component_key_from_live_reference(
+            family=family, reference=references[family]
+        )
+        for family in _LEGACY_SELECTOR_FAMILIES
+    }
+
+
+def _persist_manifest_selection_updates(
+    *,
+    draft: StorefrontLayoutVersion,
+    updates: dict[str, str],
+    preserve_live_legacy_siblings: bool = False,
+) -> None:
+    try:
+        current = load_store_appearance_manifest(draft)
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+    current_primitive = manifest_to_primitive(current)
+    primitive = manifest_to_primitive(current)
+    live_legacy = _live_legacy_selection_updates(draft=draft)
+    if preserve_live_legacy_siblings:
+        primitive["selections"].update(
+            {family: key for family, key in live_legacy.items() if family not in updates}
+        )
+    primitive["selections"].update(updates)
+
+    # Do not turn a semantic no-op into explicit default JSON writes. A5's
+    # fresh Draft stores a typed default manifest while legacy selector dicts
+    # may remain sparse; effective selector equality is the relevant truth.
+    if primitive == current_primitive and all(
+        live_legacy[family] == primitive["selections"][family]
+        for family in _LEGACY_SELECTOR_FAMILIES
+    ):
+        return
+
+    try:
+        appearance_authority_service.apply_store_appearance_manifest(
+            version=draft, manifest=primitive
+        )
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _sync_manifest_from_live_selectors(*, draft: StorefrontLayoutVersion) -> None:
+    _persist_manifest_selection_updates(
+        draft=draft, updates=_live_legacy_selection_updates(draft=draft)
+    )
+
+
+def _apply_appearance_component_update(
+    *, draft: StorefrontLayoutVersion, mutation: dict
+) -> None:
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+    family = mutation.get("family")
+    component_key = mutation.get("component_key")
+    if not isinstance(family, str) or family not in COMPONENT_FAMILIES:
+        raise R4MutationError("invalid_appearance_family")
+    if not isinstance(component_key, str):
+        raise R4MutationError("invalid_appearance_component")
+    component = get_component(component_key)
+    if component is None or component.family_key != family:
+        raise R4MutationError("invalid_appearance_component")
+    try:
+        _persist_manifest_selection_updates(
+            draft=draft,
+            updates={family: component_key},
+            preserve_live_legacy_siblings=True,
+        )
+    except R4MutationError as exc:
+        if str(exc) == "invalid_store_appearance_manifest":
+            raise R4MutationError("invalid_appearance_component") from exc
+        raise
+
+
+def _apply_theme_apply(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """P5-W2 — apply an occasion Theme (selection + bounded intensity) through
+    the canonical appearance authority. Reuses the ONE mutation boundary
+    (lock/base-revision/history/increment in ``apply_mutation``); this handler
+    only validates input and delegates the state transformation."""
+    from apps.storefront_builder import theme_catalog
+
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+    component_key = mutation.get("component_key")
+    intensity = mutation.get("intensity", theme_catalog.DEFAULT_THEME_INTENSITY)
+
+    component = get_component(component_key) if isinstance(component_key, str) else None
+    if component is None or component.family_key != "theme":
+        raise R4MutationError("invalid_theme_component")
+    if not isinstance(intensity, str) or not theme_catalog.is_valid_intensity(intensity):
+        raise R4MutationError("invalid_theme_intensity")
+
+    try:
+        appearance_authority_service.apply_theme(
+            version=draft, component_key=component_key, intensity=intensity
+        )
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _apply_theme_clear(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """P5-W2 — clear the occasion Theme back to the safe no-op. Changes ONLY
+    Theme-owned state; never restores from ``template_baseline_snapshot``."""
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+    try:
+        appearance_authority_service.clear_theme(version=draft)
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _apply_design_lab_candidate(
+    *, draft: StorefrontLayoutVersion, mutation: dict
+) -> None:
+    """P5-W3 — the ONE atomic Design Lab Apply. A single merchant Apply turns a
+    transient multi-family candidate into ONE canonical mutation: it reuses the
+    ONE mutation boundary (lock / base-revision / history / single revision
+    advance live in ``apply_mutation``), so this handler only validates the
+    candidate and delegates each state transformation to the existing canonical
+    authorities — never a second save/history/theme authority.
+
+    Integrity + final stale check (Architect IMPORTANT 1): the mutation never
+    carries raw client-editable ``selections``/``theme_intensity`` — only a
+    SIGNED ``candidate_token``. This handler decodes it INSIDE the same locked
+    ``apply_mutation`` transaction and re-checks the candidate's OWN
+    ``draft_id``/``base_revision`` against the Draft this call already holds
+    ``select_for_update`` on. That closes the race where a candidate generated
+    at revision N passes the ``/design-lab/`` ``apply_payload`` preflight at N,
+    an intervening canonical mutation then advances the Draft to N+1, and the
+    Design-Lab mutation is finally submitted with an OUTER envelope
+    ``base_revision`` that was refreshed to N+1 (so the generic
+    ``_lock_active_draft`` revision check alone would NOT catch it). A stale
+    candidate here raises the SAME canonical ``R4StaleRevision`` (409
+    ``stale_revision``) as every other R4 mutation — no second stale-conflict
+    system.
+
+    Atomicity: every component is validated against the canonical registry
+    BEFORE any write, so an invalid candidate raises and the surrounding
+    ``apply_mutation`` transaction rolls back with zero partial writes. Theme is
+    orthogonal (§9): Theme state is applied through the W2 ``apply_theme`` /
+    ``clear_theme`` owner; all other families go through the single multi-family
+    ``_persist_manifest_selection_updates`` writer. Both run inside the one
+    outer transaction — all-or-nothing.
+    """
+    from apps.storefront_builder import theme_catalog
+    from apps.storefront_builder.services import design_lab_service
+
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+
+    token = mutation.get("candidate_token")
+    if not isinstance(token, str) or not token:
+        raise R4MutationError("invalid_design_lab_candidate")
+    try:
+        candidate = design_lab_service.decode_candidate_token(token)
+    except ValueError as exc:
+        raise R4MutationError("invalid_design_lab_candidate") from exc
+
+    # Final transactional stale check — NEVER trust the token's own claims
+    # about which Draft/revision it belongs to without re-verifying them
+    # against the Draft this call already holds locked.
+    if candidate.draft_id is not None and candidate.draft_id != draft.pk:
+        raise R4MutationError("draft_not_found")
+    if (
+        candidate.base_revision is not None
+        and candidate.base_revision != draft.edit_revision
+    ):
+        raise R4StaleRevision(draft.edit_revision)
+
+    selections = dict(candidate.candidate_selections)
+    if not selections:
+        raise R4MutationError("invalid_design_lab_candidate")
+
+    theme_intensity = None
+    cand_settings = candidate.candidate_settings
+    if cand_settings and isinstance(cand_settings.get("theme"), dict):
+        theme_intensity = cand_settings["theme"].get("intensity")
+
+    # --- Validate EVERYTHING first (fail closed, before any write) ---
+    theme_component_key = None
+    non_theme_updates: dict[str, str] = {}
+    for family, component_key in selections.items():
+        if not isinstance(family, str) or family not in COMPONENT_FAMILIES:
+            raise R4MutationError("invalid_appearance_family")
+        if not isinstance(component_key, str):
+            raise R4MutationError("invalid_appearance_component")
+        component = get_component(component_key)
+        if component is None or component.family_key != family:
+            raise R4MutationError("invalid_appearance_component")
+        if family == "theme":
+            theme_component_key = component_key
+        else:
+            non_theme_updates[family] = component_key
+
+    if theme_component_key is not None and theme_component_key != "theme.none.v1":
+        if theme_intensity is None:
+            theme_intensity = theme_catalog.DEFAULT_THEME_INTENSITY
+        if not isinstance(theme_intensity, str) or not theme_catalog.is_valid_intensity(
+            theme_intensity
+        ):
+            raise R4MutationError("invalid_theme_intensity")
+
+    # --- Apply (inside apply_mutation's single transaction => atomic) ---
+    # Non-theme DNA families in one canonical multi-family manifest write.
+    if non_theme_updates:
+        _persist_manifest_selection_updates(
+            draft=draft,
+            updates=non_theme_updates,
+            preserve_live_legacy_siblings=True,
+        )
+
+    # Theme is applied LAST through the canonical W2 owner (never duplicated):
+    # a no-op selection routes to clear_theme; any occasion routes to apply_theme.
+    if theme_component_key is not None:
+        try:
+            if theme_component_key == "theme.none.v1":
+                appearance_authority_service.clear_theme(version=draft)
+            else:
+                appearance_authority_service.apply_theme(
+                    version=draft,
+                    component_key=theme_component_key,
+                    intensity=theme_intensity,
+                )
+        except InvalidStoreAppearanceContract as exc:
+            raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _apply_appearance_manifest(
+    *, draft: StorefrontLayoutVersion, mutation: dict
+) -> None:
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+    candidate = mutation.get("manifest")
+    if not isinstance(candidate, dict):
+        raise R4MutationError("invalid_store_appearance_manifest")
+    try:
+        validated = validate_store_appearance_manifest(candidate).manifest
+        primitive = manifest_to_primitive(validated)
+        current = manifest_to_primitive(load_store_appearance_manifest(draft))
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+    live_legacy = _live_legacy_selection_updates(draft=draft)
+    if primitive == current and all(
+        live_legacy[family] == primitive["selections"][family]
+        for family in _LEGACY_SELECTOR_FAMILIES
+    ):
+        return
+
+    try:
+        appearance_authority_service.apply_store_appearance_manifest(
+            version=draft, manifest=primitive
+        )
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _resolve_ready_template(template_key, template_version):
+    """Validate an R4 Ready Template key/version request, returning the exact
+    registered ``LayoutPresetDefinition`` or raising the stable external codes.
+    Shared by ``appearance.template.apply`` and the ``switch_template`` entry
+    points so every merchant-facing Ready Template change validates identically.
+    """
+    if not isinstance(template_key, str) or not template_key:
+        raise R4MutationError("unknown_appearance_template")
+    if not isinstance(template_version, str) or not template_version:
+        raise R4MutationError("template_version_mismatch")
+    preset = layout_preset_registry.get_layout_preset(template_key)
+    if preset is None or not preset.is_ready_template:
+        raise R4MutationError("unknown_appearance_template")
+    if preset.version != template_version:
+        raise R4MutationError("template_version_mismatch")
+    return preset
+
+
+def ensure_template_selectable(*, store, template_key) -> None:
+    """The gallery policy (``template_gallery_policy``) for a NEW choice made by a seller through a seller-facing entry point (Studio
+    gallery switch, ``appearance.template.apply`` from the Studio, the dashboard preset form). A registered Ready Template outside the
+    owner-approved subset cannot be chosen, EXCEPT the one this Store's Draft already carries (re-applying/resetting your own template is not
+    a new choice). Unknown keys fall through to the engine's own error codes. The engine itself (``switch_template``, ``apply_mutation``,
+    previews, publishing, repair commands) is deliberately NOT gated: hidden templates stay fully renderable, editable and applicable by
+    identity — only their selection by a seller is closed."""
+    if not isinstance(template_key, str) or template_gallery_policy.is_selectable_key(template_key):
+        return
+    preset = layout_preset_registry.get_layout_preset(template_key)
+    if preset is None or not preset.is_ready_template:
+        return
+    draft = layout_service.get_existing_draft(store)
+    try:
+        current_key = variant_contract.validate_template_provenance(draft.template_provenance)["template"]["key"] if draft else None
+    except Exception:  # noqa: BLE001 — an unreadable provenance simply means «no current template»
+        current_key = None
+    if current_key != template_key:
+        raise R4MutationError("template_not_selectable")
+
+
+def _replace_template_exact_with_checkpoint(
+    *, draft: StorefrontLayoutVersion, preset, actor=None,
+    confirm_replace: bool = False, allow_locked: bool = False,
+) -> bool:
+    """Gate (read-only), snapshot, then replace — in that order, inside the
+    caller's transaction, so a refusal leaves neither a write nor a checkpoint.
+    Returns True when the composition was replaced, False for an idempotent
+    no-op. Raises ``R4MutationError`` with a stable code + structured payload."""
+    try:
+        summary = preset_service.describe_exact_replacement(draft, preset)
+        if summary["already_applied"]:
+            return False
+        if summary["locked_sections"] and not allow_locked:
+            raise preset_service.LockedSectionsPresentError(
+                "locked", locked_sections=summary["locked_sections"],
+            )
+        if summary["needs_confirmation"] and not confirm_replace:
+            raise preset_service.ReplaceConfirmationRequiredError("confirm", summary=summary)
+        layout_service.archive_draft_snapshot(
+            draft.layout.store, draft,
+            label=f"پیش از اعمال قالب «{preset.label_fa}»", user=actor,
+        )
+        return preset_service.replace_with_ready_template_exact(
+            draft, preset, confirmed=confirm_replace, allow_locked=allow_locked,
+        )
+    except preset_service.InvalidPresetError as exc:
+        raise R4MutationError(
+            _template_switch_error_code(exc), payload=_template_switch_error_payload(exc),
+        ) from exc
+
+
+def _apply_appearance_template(
+    *, draft: StorefrontLayoutVersion, mutation: dict
+) -> None:
+    _require_pinned_appearance_draft(draft=draft, mutation=mutation)
+    preset = _resolve_ready_template(
+        mutation.get("template_key"), mutation.get("template_version"),
+    )
+
+    # An explicit Ready Template apply is an EXACT replacement of the covered
+    # pages (owner contract). It requires ``confirm_replace: true`` when it would
+    # discard design work and ``allow_locked: true`` to cross a lock; both gates
+    # are enforced server-side inside ``replace_with_ready_template_exact``. It
+    # runs in place on the already-locked active Draft; ``apply_mutation`` owns
+    # the transaction, base revision and rollback and records exactly one
+    # history entry / one revision increment (in ``record_change``). NOTE: the
+    # pre-replacement ARCHIVED snapshot is taken by the shared helper below for
+    # BOTH this mutation and the dashboard ``switch_template*`` entry points.
+    if mutation.get("mode") == "preserve":
+        # Explicit opt-in to the preservation-first merge (never the default).
+        try:
+            preset_service.switch_ready_template_preserving(draft, preset)
+        except preset_service.InvalidPresetError as exc:
+            raise R4MutationError("invalid_appearance_template") from exc
+        return
+    _replace_template_exact_with_checkpoint(
+        draft=draft, preset=preset,
+        confirm_replace=mutation.get("confirm_replace") is True,
+        allow_locked=mutation.get("allow_locked") is True,
+    )
+
+
+def _apply_appearance_update(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    patch = mutation.get("patch")
+    if not isinstance(patch, dict):
+        raise R4MutationError("invalid_patch")
+    if set(patch) - _APPEARANCE_UPDATE_ALLOWED_PATCH_KEYS:
+        raise R4MutationError("invalid_appearance_patch")
+
+    current = draft.effective_appearance_config()
+    candidate = dict(current)
+
+    # A Template switch wins over an explicit field value in the SAME
+    # patch — exact R3 precedence (views.py's `_field`: Template > posted
+    # > current) — never the other way around.
+    new_template_slug = patch.get("template_slug", current.get("template_slug"))
+    template_changed = new_template_slug != current.get("template_slug")
+    new_template = appearance_registry.get_template(new_template_slug) if template_changed else None
+    candidate["template_slug"] = new_template_slug
+    if new_template is not None:
+        for field in _TEMPLATE_OWNED_FIELDS:
+            candidate[field] = getattr(new_template, field)
+
+    # Selecting another palette changes the INHERITED colours only. The merchant's explicit global overrides survive by default;
+    # what a palette switch drops is colour that was never a merchant choice — values a Ready Template installed and the merchant
+    # did not modify, and bootstrap carry-over (decided PER PROPERTY, see ``appearance_registry.override_origins``) — so they cannot
+    # defeat the palette just selected. Dropping every override is the explicit ``clear_global_color_overrides``.
+    new_palette_slug = patch.get("palette_slug", current.get("palette_slug"))
+    palette_changed = new_palette_slug != current.get("palette_slug")
+    if palette_changed:
+        kept = appearance_registry.merchant_overrides(current, draft.template_baseline_snapshot)
+        candidate["color_overrides"], candidate["theme_overrides"] = kept["color_overrides"], kept["theme_overrides"]
+    candidate["palette_slug"] = new_palette_slug
+
+    # Exact R3 precedence for every one of the 7 real Template-owned fields
+    # (_TEMPLATE_OWNED_FIELDS) — a Template switch in the SAME patch always
+    # wins over an explicitly posted value.
+    for field in ("font", "type_scale", "motion", "button_style", "radius", "button_radius", "density"):
+        if new_template is None and field in patch:
+            candidate[field] = patch[field]
+
+    # These never belong to any Template (image behavior + the Phase 8
+    # P0-7 structural page fields) — always read straight from the patch
+    # when present, exactly like R3's ``_field()`` never gates them on
+    # ``new_template is None`` either.
+    for field in (
+        "image_fit", "image_hover", "card_image_crossfade", "card_image_zoom",
+        "content_width", "grid_density", "card_shadow", "card_hover", "hero_style", "heading_style",
+        "page_width_mode", "page_max_width", "page_gutter",
+    ):
+        if field in patch:
+            candidate[field] = patch[field]
+
+    # Partial color/theme override patch — merge onto the current set (a single Global Design field change posts ONE key, never
+    # the whole dict). A key whose posted value equals the resolved base (no-override) colour is not an override; ``None`` clears
+    # exactly that one override (reset to the selected palette's value).
+    for overrides_key, base_resolver, valid_keys in (
+        ("color_overrides", appearance_registry.resolve_colors, APPEARANCE_COLOR_KEYS),
+        ("theme_overrides", appearance_registry.resolve_theme_roles, appearance_registry.THEME_ROLE_KEYS),
+    ):
+        posted = patch.get(overrides_key)
+        if not isinstance(posted, dict):
+            continue
+        merged = dict(candidate.get(overrides_key) or {})
+        base_config = {**candidate, overrides_key: {}}
+        base_values = base_resolver(base_config)
+        for key, value in posted.items():
+            if key not in valid_keys:
+                continue
+            if value is None:
+                merged.pop(key, None)
+                continue
+            if not isinstance(value, str):
+                continue
+            if value.upper() == base_values.get(key, "").upper():
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        candidate[overrides_key] = merged
+    if "color_overrides" in patch:
+        # "customised" = some stored base colour is not simply what the Ready Template installed
+        installed = ((draft.template_baseline_snapshot or {}).get("appearance") or {}).get("color_overrides") or {}
+        candidate["color_overrides_customized"] = any(
+            not (key in installed and str(installed[key]).upper() == str(value).upper())
+            for key, value in (candidate.get("color_overrides") or {}).items()
+        )
+    if patch.get("clear_global_color_overrides") is True:
+        candidate["color_overrides"], candidate["theme_overrides"] = {}, {}
+        candidate["color_overrides_customized"] = False
+
+    try:
+        cleaned = layout_service.validate_appearance_config(candidate)
+    except layout_service.AppearanceConfigValidationError as exc:
+        if any(key in patch for key in appearance_registry.PAGE_LAYOUT_KEYS):
+            # the page-width validator's own Persian sentence names the control and its bounds, so the seller sees WHY nothing was saved
+            raise R4MutationError("invalid_appearance_config", payload={"message": f"{exc}؛ هیچ تغییری ذخیره نشد."}) from exc
+        raise R4MutationError("invalid_appearance_config") from exc
+
+    # Phase 1 (Task 4) — delegate the final appearance_config transformation to
+    # the canonical authority service. This preserves the reserved
+    # store_appearance manifest and any other opaque canonical keys that the
+    # legacy managed validator would otherwise drop, while R4 keeps ownership of
+    # transaction/lock/base-revision/history/response. Manifest synchronization
+    # can be a semantic no-op (for example, boutique keeps the default motion),
+    # but template-owned fields such as template_slug/font still changed and
+    # must be visible to record_change(), which reloads the Draft from the DB.
+    if patch.get("page_width_mode") == "standard":
+        cleaned = {**cleaned, "page_width_mode": "standard"}      # tell the authority merge to REMOVE the stored mode and its custom numbers
+    if patch.get("heading_style") == "default":
+        # the sparse key is absent from ``cleaned`` when it is the default; tell the authority merge to REMOVE the stored one
+        cleaned = {**cleaned, "heading_style": "default"}
+    appearance_authority_service.apply_appearance_patch(version=draft, patch=cleaned)
+    if "motion" in patch or new_template is not None:
+        _sync_manifest_from_live_selectors(draft=draft)
+
+
+#: Pre-Task-10 final remediation (Gap 1) — merges a per-component partial
+#: ``responsive`` patch (ONE checkbox's change: one component key, one of
+#: ``hide_on_tablet``/``hide_on_mobile``) onto the CURRENT stored responsive
+#: dict, exactly like ``_apply_appearance_update``'s color/theme override
+#: merge above: a single Global Design control still fires exactly one
+#: change event and must never clobber the sibling prop/component it didn't
+#: touch. Unknown component keys or malformed sub-patches are silently
+#: dropped here — ``layout_service._validate_shell_component_responsive``
+#: performs the real allowlist + type validation afterwards.
+def _merge_shell_responsive_patch(current: dict, posted) -> dict:
+    if not isinstance(posted, dict):
+        return dict(current) if isinstance(current, dict) else {}
+    merged = {key: dict(value) for key, value in (current or {}).items() if isinstance(value, dict)}
+    for component_key, component_patch in posted.items():
+        if not isinstance(component_patch, dict):
+            continue
+        merged[component_key] = {**merged.get(component_key, {}), **component_patch}
+    return merged
+
+
+#: Pre-Task-10 remediation — widened from ``header_variant``-only to cover
+#: every REQUIRED EXISTING CAPABILITY toggle/text field the legacy header
+#: form exposes with no prior R4 equivalent (see headline finding #3).
+#: Pre-Task-10 final remediation (Gap 1) — further widened to
+#: ``announcement_links``/``extra_blocks``/``responsive`` (previously
+#: deliberately deferred as legacy-only compound repeater/per-device UI);
+#: the legacy header form no longer has any field R4 lacks.
+_HEADER_UPDATE_ALLOWED_PATCH_KEYS = frozenset(
+    {
+        "header_variant", "announcement_text", "announcement_show_phone",
+        "announcement_links", "extra_blocks", "responsive", "geometry",
+        # V5 — the announcement bar's picture / link / alignment / page scope (sparse extension of the SAME header_config)
+        "announcement_image_asset_id", "announcement_image_alt", "announcement_image_side",
+        "announcement_link_url", "announcement_link_new_tab", "announcement_align", "announcement_pages",
+    }
+    | set(HEADER_TOGGLE_FIELDS)
+)
+
+
+_ANNOUNCEMENT_EXTRA_KEYS = (
+    "announcement_image_asset_id", "announcement_image_alt", "announcement_image_side",
+    "announcement_link_url", "announcement_link_new_tab", "announcement_align", "announcement_pages",
+)
+
+
+def _apply_header_update(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    patch = mutation.get("patch")
+    if not isinstance(patch, dict):
+        raise R4MutationError("invalid_patch")
+    if set(patch) - _HEADER_UPDATE_ALLOWED_PATCH_KEYS:
+        raise R4MutationError("invalid_header_patch")
+
+    candidate = dict(draft.effective_header_config())
+    if "header_variant" in patch:
+        candidate["header_variant"] = patch["header_variant"]
+    for field in HEADER_TOGGLE_FIELDS:
+        if field in patch:
+            candidate[field] = patch[field]
+    if "announcement_text" in patch:
+        candidate["announcement_text"] = patch["announcement_text"]
+    if "announcement_show_phone" in patch:
+        candidate["announcement_show_phone"] = patch["announcement_show_phone"]
+    if "announcement_links" in patch:
+        candidate["announcement_links"] = patch["announcement_links"]
+    for key in _ANNOUNCEMENT_EXTRA_KEYS:
+        if key in patch:
+            candidate[key] = patch[key]
+    if "extra_blocks" in patch:
+        candidate["extra_blocks"] = patch["extra_blocks"]
+    if "responsive" in patch:
+        candidate["responsive"] = _merge_shell_responsive_patch(candidate.get("responsive"), patch["responsive"])
+    if "geometry" in patch:
+        candidate["geometry"] = shell_geometry.merge_patch(candidate.get("geometry"), patch["geometry"])
+
+    try:
+        cleaned = layout_service.validate_header_config(candidate)
+    except layout_service.HeaderConfigValidationError as exc:
+        # the validator's own Persian sentence names the control and the rule («لینک نوار اعلان…»), so the merchant sees WHY nothing was saved
+        raise R4MutationError("invalid_header_config", payload={"message": f"{exc}؛ هیچ تغییری ذخیره نشد."}) from exc
+    # V5 — the announcement picture must be a MediaAsset of THIS Draft's store (never another tenant's, never a made-up id)
+    asset_id = cleaned.get("announcement_image_asset_id")
+    if asset_id is not None:
+        from apps.content.models import MediaAsset
+
+        if not MediaAsset.objects.filter(pk=asset_id, store_id=draft.layout.store_id).exists():
+            raise R4MutationError("invalid_announcement_image")
+
+    # Persist the full validated header config first (toggles/announcement/
+    # content preserved), then delegate the typed manifest header selection
+    # synchronization to the canonical authority service.
+    draft.header_config = cleaned
+    draft.save(update_fields=["header_config"])
+    try:
+        appearance_authority_service.apply_header_variant(
+            version=draft, header_variant=cleaned["header_variant"]
+        )
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def template_header_patch(preset) -> dict:
+    """The part of a Ready Template that is its HEADER STYLE (variant + show/sticky toggles) as a ``header.update`` patch — never the
+    merchant's announcement bar. Empty when the template carries no header recipe."""
+    overlay = preset.header if isinstance(preset.header, dict) else {}
+    return {
+        key: value for key, value in overlay.items()
+        if key in _HEADER_UPDATE_ALLOWED_PATCH_KEYS and not key.startswith("announcement_")
+    }
+
+
+def template_hero_stage_entry(preset):
+    """The Hero Stage row of a Ready Template's home page, or ``None`` (a slider/banner hero is not a stage recipe)."""
+    return next((entry for entry in (preset.pages or {}).get("home", ()) if entry.section_key == hero_stage.SECTION_KEY), None)
+
+
+def template_parts(preset) -> dict:
+    """What a Ready Template can offer on its own — drives the «فقط هدر» / «فقط هیرو» actions of the Studio gallery."""
+    return {"header": bool(template_header_patch(preset)), "hero": template_hero_stage_entry(preset) is not None}
+
+
+def _apply_header_from_template(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """Take ONLY the header of a Ready Template: its variant and show/sticky toggles. Pages, sections, the hero, the footer, the palette and the
+    merchant's announcement bar (a message, not a style) are left exactly as they are. One history step; goes through the same validated
+    ``header.update`` path, so the typed Store Appearance manifest stays in sync."""
+    preset = _resolve_ready_template(mutation.get("template_key"), mutation.get("template_version"))
+    patch = template_header_patch(preset)
+    if not patch:
+        raise R4MutationError("template_has_no_header")
+    _apply_header_update(draft=draft, mutation={"patch": patch})
+
+
+def _apply_header_set_placement(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """Move the Store's header between «above the page» / «inside the Hero Stage» / «floating over the picture» WITHOUT touching the header model,
+    the hero's pictures or texts, the footer or any other section. It is one validated ``section.update_settings`` of the page's first top-level
+    Hero Stage (``header_mode``) — the same schema path the stage's own Inspector uses — so Undo/Redo, revisions and tenant scoping are the
+    engine's. Without such a stage the request is refused with a stable code: the header is never half-embedded or drawn twice."""
+    from .. import header_placement
+
+    placement = mutation.get("placement")
+    if placement not in header_placement.PLACEMENT_KEYS:
+        raise R4MutationError("invalid_placement")
+    state = header_placement.placement_state(draft)
+    if placement == "independent" and state["stage"] is None:
+        return                                            # nothing embeds the header: already independent
+    if state["stage"] is None:
+        raise R4MutationError("header_placement_needs_stage", payload={"message": f"{header_placement.REASONS['no_stage']} هیچ تغییری ذخیره نشد."})
+    if placement != "independent":
+        if state["reason"] == "stage_hidden":
+            raise R4MutationError("header_placement_stage_hidden", payload={"message": f"{header_placement.REASONS['stage_hidden']} هیچ تغییری ذخیره نشد."})
+        if state["reason"] == "stage_locked":
+            raise R4MutationError("section_locked")
+    elif state["stage"].is_locked:
+        raise R4MutationError("section_locked")
+    _apply_section_update_settings(
+        store=draft.layout.store, draft=draft,
+        mutation={"section_id": state["stage"].pk, "patch": {"header_mode": placement}},
+    )
+
+
+def _apply_header_recipe(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """Apply a Header Recipe (model + placement read off a Ready Template of the registry) to this Draft, in one history step. The MODEL is always
+    applied; the PLACEMENT only when the home page opens with a usable Hero Stage — otherwise the header stays independent (honest degradation,
+    reported to the seller by the Inspector) and nothing else changes: hero, footer, palette, pages and the merchant's announcement bar are kept."""
+    from .. import header_placement
+
+    recipe = header_placement.get_recipe(mutation.get("recipe_key"))
+    if recipe is None:
+        raise R4MutationError("unknown_header_recipe")
+    preset = layout_preset_registry.get_layout_preset(recipe["key"])
+    _apply_header_update(draft=draft, mutation={"patch": template_header_patch(preset)})
+    state = header_placement.placement_state(draft)
+    if state["stage"] is not None and state["available"]:
+        _apply_header_set_placement(draft=draft, mutation={"placement": recipe["placement"]})
+
+
+def _apply_hero_from_template(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """Take ONLY the Hero Stage LOOK of a Ready Template (header mode, panels, split, alignment, scrim, frame, heights, slot order…) and
+    apply it to this Draft's stage — the merchant's own texts, pictures and focal points, the header chosen for the Store, and every other
+    section stay untouched. When the home page has no stage yet, one is added at the very top (a stage is a normal single-instance section).
+    Templates whose hero is not a Hero Stage (a slider, a banner…) have no recipe to take: refused with a stable code, never faked."""
+    preset = _resolve_ready_template(mutation.get("template_key"), mutation.get("template_version"))
+    source = template_hero_stage_entry(preset)
+    if source is None:
+        raise R4MutationError("template_has_no_hero_stage")
+    recipe = hero_stage.layout_recipe(source.settings)
+
+    page = draft.get_page("home")
+    stage = page.sections.filter(section_key=hero_stage.SECTION_KEY).order_by("order", "id").first()
+    try:
+        if stage is None:
+            stage = section_structure_service.add_section(draft=draft, section_key=hero_stage.SECTION_KEY, page_type="home")
+            while True:                                              # a new section lands last: walk it up to the top of the page
+                try:
+                    section_structure_service.move_section(draft=draft, section_id=stage.pk, direction="up")
+                except section_structure_service.SectionStructureError as exc:
+                    if exc.code == "move_boundary":
+                        break
+                    raise
+            stage.refresh_from_db()
+    except section_structure_service.SectionStructureError as exc:
+        raise R4MutationError(exc.code) from exc
+    if stage.is_locked:
+        raise R4MutationError("section_locked")
+    stage.settings = hero_stage.apply_layout_recipe(stage.settings, recipe)
+    stage.save(update_fields=["settings"])
+
+
+#: Pre-Task-10 remediation — widened from ``footer_variant``-only to cover
+#: every REQUIRED EXISTING CAPABILITY toggle the legacy footer form exposes
+#: with no prior R4 equivalent (see headline finding #3). Pre-Task-10 final
+#: remediation (Gap 1) — further widened to ``extra_blocks``/``responsive``
+#: (previously deliberately deferred as legacy-only compound repeater/
+#: per-device UI); the legacy footer form no longer has any field R4 lacks.
+#: P5-W5B — widened once more to ``mobile_nav_variant``: Mobile Bottom
+#: Navigation is a third global chrome region (``GLOBAL_MOBILE_NAV_REGION``)
+#: whose selector already lives inside this same versioned ``footer_config``
+#: JSON and was already validated/synced on every save — it simply could
+#: never be CHANGED by a merchant through R4 before this.
+_FOOTER_UPDATE_ALLOWED_PATCH_KEYS = frozenset(
+    {"footer_variant", "mobile_nav_variant", "extra_blocks", "responsive", "geometry",
+     "floating_whatsapp", "floating_phone", "floating_back_to_top", "floating_position"} | set(FOOTER_TOGGLE_FIELDS)
+)
+
+
+def _apply_footer_update(*, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    patch = mutation.get("patch")
+    if not isinstance(patch, dict):
+        raise R4MutationError("invalid_patch")
+    if set(patch) - _FOOTER_UPDATE_ALLOWED_PATCH_KEYS:
+        raise R4MutationError("invalid_footer_patch")
+
+    candidate = dict(draft.effective_footer_config())
+    if "footer_variant" in patch:
+        candidate["footer_variant"] = patch["footer_variant"]
+    if "mobile_nav_variant" in patch:
+        candidate["mobile_nav_variant"] = patch["mobile_nav_variant"]
+    for field in FOOTER_TOGGLE_FIELDS:
+        if field in patch:
+            candidate[field] = patch[field]
+    if "extra_blocks" in patch:
+        candidate["extra_blocks"] = patch["extra_blocks"]
+    if "responsive" in patch:
+        candidate["responsive"] = _merge_shell_responsive_patch(candidate.get("responsive"), patch["responsive"])
+    if "geometry" in patch:
+        candidate["geometry"] = shell_geometry.merge_patch(candidate.get("geometry"), patch["geometry"])
+    for field in (*layout_service.FLOATING_ACTION_KEYS, "floating_position"):
+        if field in patch:
+            candidate[field] = patch[field]
+
+    try:
+        cleaned = layout_service.validate_footer_config(candidate)
+    except layout_service.FooterConfigValidationError as exc:
+        raise R4MutationError("invalid_footer_config") from exc
+
+    # Persist the full validated footer config first, then delegate the typed
+    # manifest footer/bottom_nav selection synchronization to the authority
+    # service. mobile_nav_variant is always present in the effective footer
+    # config, so both families are kept in sync.
+    draft.footer_config = cleaned
+    draft.save(update_fields=["footer_config"])
+    try:
+        appearance_authority_service.apply_footer_variant(
+            version=draft,
+            footer_variant=cleaned["footer_variant"],
+            mobile_nav_variant=cleaned["mobile_nav_variant"],
+        )
+    except InvalidStoreAppearanceContract as exc:
+        raise R4MutationError("invalid_store_appearance_manifest") from exc
+
+
+def _dispatch_mutation(*, store, draft: StorefrontLayoutVersion, mutation: dict) -> None:
+    """The one explicit, server-owned allowlist — no getattr-on-user-input,
+    no globals(), no dynamic import, no eval. ``store`` is accepted (not
+    used by every mutation type) to keep the dispatcher's signature stable
+    for future allowlisted mutation types that need it."""
+    mutation_type = mutation.get("type")
+    if mutation_type == "section.update_settings":
+        _apply_section_update_settings(store=store, draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.add":
+        _apply_section_add(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.remove":
+        _apply_section_remove(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.duplicate":
+        _apply_section_duplicate(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.move":
+        _apply_section_move(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.toggle_active":
+        _apply_section_toggle_active(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.toggle_locked":
+        _apply_section_toggle_locked(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "container.change_layout":
+        _apply_container_change_layout(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "container.add":
+        _apply_container_add(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "container.remove":
+        _apply_container_remove(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.resize":
+        _apply_section_resize(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "container.resize":
+        _apply_container_resize(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "cell.add_section":
+        _apply_cell_add_section(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.move_to_cell":
+        _apply_section_move_to_cell(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "container.update_settings":
+        _apply_container_update_settings(draft=draft, mutation=mutation)
+        return
+    # V5 Groups — the free nested layout (each is ONE mutation = one Revision = one Undo step)
+    for _type, _handler in (
+        ("row.add", _apply_row_add), ("cell.split", _apply_cell_split), ("container.set_layout", _apply_container_set_layout),
+        ("container.add_cell", _apply_container_add_cell), ("cell.remove", _apply_cell_remove),
+        ("container.remove_group", _apply_container_remove_group), ("cell.duplicate", _apply_cell_duplicate),
+        ("container.duplicate", _apply_container_duplicate), ("cell.move", _apply_cell_move), ("container.move", _apply_container_move),
+    ):
+        if mutation_type == _type:
+            _handler(draft=draft, mutation=mutation)
+            return
+    if mutation_type == "section.reset_to_baseline":
+        _apply_section_reset_to_baseline(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "section.reset_setting_to_baseline":
+        _apply_section_reset_setting_to_baseline(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "appearance.reset_setting_to_baseline":
+        _apply_appearance_reset_setting_to_baseline(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "header.reset_to_baseline":
+        _apply_header_reset_to_baseline(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "footer.reset_to_baseline":
+        _apply_footer_reset_to_baseline(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "appearance.update":
+        _apply_appearance_update(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "header.update":
+        _apply_header_update(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "header.apply_template":
+        _apply_header_from_template(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "hero.apply_template":
+        _apply_hero_from_template(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "header.set_placement":
+        _apply_header_set_placement(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "header.apply_recipe":
+        _apply_header_recipe(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "footer.update":
+        _apply_footer_update(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "appearance.component.update":
+        _apply_appearance_component_update(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "appearance.manifest.apply":
+        _apply_appearance_manifest(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "appearance.template.apply":
+        _apply_appearance_template(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "theme.apply":
+        _apply_theme_apply(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "theme.clear":
+        _apply_theme_clear(draft=draft, mutation=mutation)
+        return
+    if mutation_type == "design_lab.apply_candidate":
+        _apply_design_lab_candidate(draft=draft, mutation=mutation)
+        return
+    raise R4MutationError("unknown_mutation_type")
+
+
+def _lock_active_draft(*, store, base_revision: int) -> StorefrontLayoutVersion:
+    """The ONE R4 concurrency boundary — select_for_update the Store's
+    StorefrontLayout, resolve ONLY its already-active ``draft_version``
+    (never silently create/switch one — see ``layout_service.
+    get_or_create_draft`` for that), require DRAFT status, and compare
+    ``base_revision``. Shared by normal mutations, Undo/Redo, and Publish;
+    every caller runs inside its own ``@transaction.atomic``."""
+    layout = StorefrontLayout.objects.select_for_update().get(store=store)
+
+    if layout.draft_version_id is None:
+        raise R4MutationError("no_active_draft")
+
+    try:
+        draft = StorefrontLayoutVersion.objects.select_for_update().get(
+            pk=layout.draft_version_id,
+            layout=layout,
+            status=StorefrontLayoutVersion.Status.DRAFT,
+        )
+    except StorefrontLayoutVersion.DoesNotExist:
+        raise R4MutationError("no_active_draft") from None
+
+    if draft.edit_revision != base_revision:
+        raise R4StaleRevision(draft.edit_revision)
+
+    return draft
+
+
+@transaction.atomic
+def apply_mutation(*, store, actor, base_revision: int, mutation: dict) -> int:
+    if not isinstance(mutation, dict):
+        raise R4MutationError("invalid_mutation")
+
+    draft = _lock_active_draft(store=store, base_revision=base_revision)
+
+    before_state = edit_history_service.snapshot_draft(draft)
+
+    _dispatch_mutation(store=store, draft=draft, mutation=mutation)
+
+    # L01 convergence (Phase 2 Task 3): the single edit_revision advance now
+    # lives inside edit_history_service.record_change — it advances the
+    # Draft-wide token atomically, exactly once, iff a real change is
+    # recorded, and updates this locked ``draft`` instance in place. R4 must
+    # NOT re-increment here or the token would advance by 2. A semantic
+    # no-op returns False and advances nothing (no revision churn, no fake
+    # history entry). Undo/Redo (apply_history_command) never route through
+    # record_change and keep their own separate single increment.
+    edit_history_service.record_change(
+        draft=draft,
+        actor=actor,
+        action_label=_history_label(mutation),
+        before_state=before_state,
+    )
+    return draft.edit_revision
+
+
+@transaction.atomic
+def apply_history_command(*, store, actor, base_revision: int, command: str) -> dict:
+    """R4 Task 11 — thin command wrapper around edit_history_service.undo/
+    redo. Deliberately NEVER calls edit_history_service.record_change:
+    routing Undo/Redo through the normal history path would make Undo
+    itself a new undoable edit and corrupt history semantics (Section 13).
+    A successful Undo/Redo still owns the ONE R4 revision-monotonicity
+    guarantee: edit_revision always moves forward by exactly 1, even
+    though the restored *content* may be older."""
+    if command not in ("undo", "redo"):
+        raise R4MutationError("unknown_history_command")
+
+    draft = _lock_active_draft(store=store, base_revision=base_revision)
+    return _run_history_command(draft=draft, command=command)
+
+
+def _run_history_command(*, draft: StorefrontLayoutVersion, command: str) -> dict:
+    """The ONE Undo/Redo execution contract, shared by every entry point.
+
+    Deliberately NEVER calls ``edit_history_service.record_change``: routing
+    Undo/Redo through the normal history path would make Undo itself a new
+    undoable edit and corrupt history semantics (Section 13). A *successful*
+    Undo/Redo owns the single revision-monotonicity guarantee —
+    ``edit_revision`` always moves forward by exactly 1, even though the
+    restored *content* may be older; a no-op (nothing to undo/redo) advances
+    nothing. The caller MUST already hold the draft lock inside a
+    ``@transaction.atomic`` block (via ``_lock_active_draft`` for the R4 path,
+    or the store's layout lock for the legacy path). This keeps legacy
+    ``storefront_undo``/``storefront_redo`` and R4 ``apply_history_command``
+    revision-coherent through a single boundary."""
+    if command not in ("undo", "redo"):
+        raise R4MutationError("unknown_history_command")
+
+    entry = edit_history_service.undo(draft) if command == "undo" else edit_history_service.redo(draft)
+
+    if entry is None:
+        # Nothing to Undo/Redo — a controlled no-op: no Draft mutation, no
+        # revision increment, no fake history entry.
+        history = edit_history_service.history_state(draft)
+        return {
+            "changed": False,
+            "new_revision": draft.edit_revision,
+            "can_undo": history["can_undo"],
+            "can_redo": history["can_redo"],
+            "action_label": None,
+        }
+
+    draft.edit_revision += 1
+    draft.save(update_fields=["edit_revision"])
+    history = edit_history_service.history_state(draft)
+    return {
+        "changed": True,
+        "new_revision": draft.edit_revision,
+        "can_undo": history["can_undo"],
+        "can_redo": history["can_redo"],
+        "action_label": entry.action_label,
+    }
+
+
+@transaction.atomic
+def apply_history_command_current(*, store, command: str) -> dict:
+    """Legacy-path Undo/Redo — same execution contract as the R4
+    ``apply_history_command`` but WITHOUT a client-supplied optimistic
+    ``base_revision`` (legacy form-POST callers do not carry one). It locks
+    the store's active Draft against its OWN current revision (a lock that can
+    never spuriously reject), then runs the SAME shared ``_run_history_command``
+    so a successful legacy undo/redo advances ``edit_revision`` by exactly 1
+    and never appends a new undoable history entry. This gives L03 the same
+    revision-monotonic, atomic guarantee the R4 path already had, through the
+    single shared boundary — no duplicated lifecycle logic."""
+    if command not in ("undo", "redo"):
+        raise R4MutationError("unknown_history_command")
+
+    layout = StorefrontLayout.objects.select_for_update().get(store=store)
+    if layout.draft_version_id is None:
+        raise R4MutationError("no_active_draft")
+    try:
+        draft = StorefrontLayoutVersion.objects.select_for_update().get(
+            pk=layout.draft_version_id,
+            layout=layout,
+            status=StorefrontLayoutVersion.Status.DRAFT,
+        )
+    except StorefrontLayoutVersion.DoesNotExist:
+        raise R4MutationError("no_active_draft") from None
+
+    return _run_history_command(draft=draft, command=command)
+
+
+@transaction.atomic
+def publish_draft(*, store, actor, base_revision: int) -> StorefrontLayoutVersion:
+    """R4 Task 11 — stale-aware Publish. Locks/compares through the SAME
+    concurrency boundary as every other R4 write, then delegates the
+    entire release lifecycle to the existing, already-atomic
+    ``layout_service.publish`` — never a second, hand-rolled copy of it.
+    Publish is deliberately NOT a normal edit mutation (Section 18): no
+    history label, no edit_history_service.record_change call — the
+    Draft being published already clears its own short-lived edit history
+    as part of ``layout_service.publish`` itself."""
+    _lock_active_draft(store=store, base_revision=base_revision)
+    return layout_service.publish(store, user=actor)
+
+
+@transaction.atomic
+def discard_draft(*, store, actor, base_revision: int) -> None:
+    """R4 Task 7 (Batch 2) — discard the entire Draft (revert to whatever
+    ``layout_service.discard_draft`` already means: delete the Draft, no
+    effect on the Published version). Same shape as ``publish_draft``
+    above: gated through the SAME concurrency boundary, then delegates the
+    whole operation to the existing service — never a second, hand-rolled
+    copy of it. Deliberately NOT a normal ``_dispatch_mutation`` type: this
+    DELETES the locked Draft row entirely, so there is no ``edit_revision``
+    left to report afterwards — the caller (the R4 view) tells the client
+    to reload, exactly like Publish/Undo/Redo already do for the same
+    reason (a whole-Draft identity change, not an in-place edit)."""
+    _lock_active_draft(store=store, base_revision=base_revision)
+    layout_service.discard_draft(store)
+
+
+@transaction.atomic
+def reset_page(*, store, actor, base_revision: int, page_type: str) -> StorefrontLayoutVersion:
+    """R4 Task 7 (Batch 2) — RESET PAGE, gated through the same concurrency
+    boundary as Publish/Discard, delegating the actual (checkpoint-then-
+    replace) operation to the existing ``preset_service.reset_page_with_
+    checkpoint`` — never a second copy of its checkpoint/baseline logic.
+    Replaces the active Draft with a NEW version (the old one archived as a
+    recoverable checkpoint), so — like ``discard_draft`` above — this is
+    deliberately NOT a normal ``_dispatch_mutation`` type."""
+    _lock_active_draft(store=store, base_revision=base_revision)
+    try:
+        return preset_service.reset_page_with_checkpoint(store, page_type, user=actor)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+@transaction.atomic
+def reset_storefront(*, store, actor, base_revision: int) -> StorefrontLayoutVersion:
+    """R4 Task 7 (Batch 2) — RESET STOREFRONT (the most destructive
+    granularity: appearance + header + footer + every Ready-Template-covered
+    page), same shape as ``reset_page`` above, delegating to the existing
+    ``preset_service.reset_storefront_with_checkpoint``."""
+    _lock_active_draft(store=store, base_revision=base_revision)
+    try:
+        return preset_service.reset_storefront_with_checkpoint(store, user=actor)
+    except (preset_service.BaselineResetError, preset_service.InvalidPresetError) as exc:
+        raise R4MutationError(_reset_error_code(exc), payload=reset_error_payload(exc)) from exc
+
+
+TEMPLATE_SWITCH_MODES = ("replace", "preserve")
+
+
+def _perform_ready_template_switch(
+    *, draft: StorefrontLayoutVersion, actor, preset,
+    confirm_replace: bool = False, allow_locked: bool = False, mode: str = "replace",
+) -> StorefrontLayoutVersion:
+    """The ONE canonical Ready Template switch execution, shared by the
+    optimistic (``switch_template``) and legacy-form (``switch_template_current``)
+    entry points. EXPLICIT selection means EXACT composition (owner contract):
+    the target recipe replaces every covered page — no section of the previous
+    template survives, none is skipped for lack of data. The previous design is
+    kept recoverable twice over: a full ARCHIVED version snapshot (restorable via
+    the version history, media included) taken BEFORE the first write, and the
+    canonical edit-history entry (Undo).
+
+    Runs in place on the already-locked ``draft`` (SAME Draft pk): one history
+    entry / one revision increment through ``edit_history_service.record_change``.
+    A refusal (confirmation required / locked sections) happens before any write
+    and leaves no checkpoint behind (the whole call is one transaction).
+    """
+    if mode not in TEMPLATE_SWITCH_MODES:
+        raise R4MutationError("invalid_switch_mode")
+    before_state = edit_history_service.snapshot_draft(draft)
+    if mode == "preserve":
+        # Opt-in ONLY (never the default for explicit selection): the
+        # preservation-first merge keeps merchant work inside the new template.
+        try:
+            preset_service.switch_ready_template_preserving(draft, preset)
+        except preset_service.InvalidPresetError as exc:
+            raise R4MutationError("invalid_appearance_template") from exc
+    elif not _replace_template_exact_with_checkpoint(
+        draft=draft, preset=preset, actor=actor,
+        confirm_replace=confirm_replace, allow_locked=allow_locked,
+    ):
+        return draft
+    edit_history_service.record_change(
+        draft=draft,
+        actor=actor,
+        action_label=_MUTATION_HISTORY_LABELS["appearance.template.apply"],
+        before_state=before_state,
+    )
+    return draft
+
+
+def _template_switch_error_payload(exc) -> dict:
+    if isinstance(exc, preset_service.ReplaceConfirmationRequiredError):
+        return {"summary": exc.summary, "message": str(exc)}
+    if isinstance(exc, preset_service.LockedSectionsPresentError):
+        return {"locked_sections": exc.locked_sections, "message": str(exc)}
+    return {"message": str(exc)}
+
+
+def _template_switch_error_code(exc) -> str:
+    """Stable external code per failure family of an explicit template switch."""
+    if isinstance(exc, preset_service.ReplaceConfirmationRequiredError):
+        return "replace_confirmation_required"
+    if isinstance(exc, preset_service.LockedSectionsPresentError):
+        return "locked_sections_present"
+    return "invalid_appearance_template"
+
+
+@transaction.atomic
+def switch_template(
+    *, store, actor, base_revision: int, template_key: str, template_version: str,
+    confirm_replace: bool = False, allow_locked: bool = False, mode: str = "replace",
+) -> StorefrontLayoutVersion:
+    """Architecture Convergence / Phase 1 — the merchant-facing Ready Template
+    switch, gated through the same optimistic concurrency boundary as every
+    other R4 write (``_lock_active_draft`` compares ``base_revision`` and raises
+    ``R4StaleRevision`` before any mutation), delegating the actual transition to
+    the ONE canonical preservation-first algorithm
+    (``preset_service.switch_ready_template_preserving``).
+
+    Unlike the pre-convergence implementation (which archived the Draft and
+    cloned a new one), this stays on the SAME active Draft: it is preservation-
+    first (merchant work survives wherever semantically valid), records exactly
+    one canonical edit-history entry, and increments ``edit_revision`` exactly
+    once. ``appearance.template.apply`` and the dashboard Ready Template apply now
+    converge onto this same authority — there is one Ready Template transition,
+    not two competing ones."""
+    draft = _lock_active_draft(store=store, base_revision=base_revision)
+    preset = _resolve_ready_template(template_key, template_version)
+    return _perform_ready_template_switch(
+        draft=draft, actor=actor, preset=preset,
+        confirm_replace=confirm_replace, allow_locked=allow_locked, mode=mode,
+    )
+
+
+@transaction.atomic
+def switch_template_current(
+    *, store, actor, template_key: str, template_version: str,
+    confirm_replace: bool = False, allow_locked: bool = False, mode: str = "replace",
+) -> StorefrontLayoutVersion:
+    """Legacy-form (no client-supplied ``base_revision``) counterpart to
+    ``switch_template`` — same canonical preservation-first switch, locking the
+    store's active Draft against its OWN current revision (a lock that can never
+    spuriously reject). The converged dashboard Ready Template apply routes here
+    so it stays on the same active Draft and records exactly one history entry /
+    one revision increment, instead of the old clone-a-new-Draft path."""
+    layout = StorefrontLayout.objects.select_for_update().get(store=store)
+    if layout.draft_version_id is None:
+        raise R4MutationError("no_active_draft")
+    try:
+        draft = StorefrontLayoutVersion.objects.select_for_update().get(
+            pk=layout.draft_version_id,
+            layout=layout,
+            status=StorefrontLayoutVersion.Status.DRAFT,
+        )
+    except StorefrontLayoutVersion.DoesNotExist:
+        raise R4MutationError("no_active_draft") from None
+    preset = _resolve_ready_template(template_key, template_version)
+    return _perform_ready_template_switch(
+        draft=draft, actor=actor, preset=preset,
+        confirm_replace=confirm_replace, allow_locked=allow_locked, mode=mode,
+    )
+
+
+def _lock_layout_for_identity_replacement(*, store, expected_draft_id, expected_base_revision):
+    """P5-W5A — the concurrency boundary for Class-C whole-Draft-identity
+    replacement operations (Restore Version, Apply Industry Layout) that,
+    unlike every other Draft-identity-replacing action above, may
+    legitimately be invoked when NO Draft is currently active (e.g. a
+    Store with only a Published version, restoring an old one for the
+    first time). ``_lock_active_draft`` cannot be reused unmodified here:
+    it unconditionally raises ``no_active_draft`` when none exists.
+
+    P5-W5A Independent-Review repair — the precondition binds to BOTH the
+    expected Draft IDENTITY and its revision, never revision alone: since
+    ``edit_revision`` defaults to 0 on every newly created Draft row, a
+    revision-only check is vulnerable to an ABA hazard — a stale client
+    that observed Draft A at revision 0 would incorrectly pass the check
+    against an unrelated Draft B that replaced it, also at revision 0,
+    silently discarding B. ``expected_draft_id``/``expected_base_revision``
+    are BOTH ``None`` (the client believes there is no active Draft) or
+    BOTH set — a positive Draft pk and its non-negative ``edit_revision``
+    (the client believes exactly that Draft is active at exactly that
+    revision) — the caller validates this shape before invoking this
+    function. Locks the SAME ``StorefrontLayout`` row every other
+    Draft-identity-replacing action locks; the caller is responsible for
+    running inside its own ``@transaction.atomic`` so the lock is held
+    through the entire check-then-replace sequence — never released
+    between the precondition check and the actual replacement."""
+    layout = StorefrontLayout.objects.select_for_update().get(store=store)
+
+    if expected_draft_id is None:
+        # Case B — client expects no active Draft.
+        if layout.draft_version_id is not None:
+            current = StorefrontLayoutVersion.objects.get(pk=layout.draft_version_id)
+            raise R4StaleRevision(current.edit_revision, current_draft_id=current.pk)
+        return layout
+
+    # Case A — client expects Draft `expected_draft_id` at exactly
+    # `expected_base_revision`. A DIFFERENT current Draft (or none at all)
+    # is stale regardless of what its own revision happens to be — this is
+    # what closes the ABA hazard a revision-only check could not.
+    if layout.draft_version_id != expected_draft_id:
+        current_revision = None
+        if layout.draft_version_id is not None:
+            current_revision = StorefrontLayoutVersion.objects.filter(
+                pk=layout.draft_version_id,
+            ).values_list("edit_revision", flat=True).first()
+        raise R4StaleRevision(current_revision, current_draft_id=layout.draft_version_id)
+
+    try:
+        draft = StorefrontLayoutVersion.objects.get(
+            pk=layout.draft_version_id,
+            layout=layout,
+            status=StorefrontLayoutVersion.Status.DRAFT,
+        )
+    except StorefrontLayoutVersion.DoesNotExist:
+        raise R4StaleRevision(None, current_draft_id=None) from None
+    if draft.edit_revision != expected_base_revision:
+        raise R4StaleRevision(draft.edit_revision, current_draft_id=draft.pk)
+    return layout
+
+
+@transaction.atomic
+def restore_version_safe(*, store, actor, base_draft_id, base_revision, version_id) -> StorefrontLayoutVersion:
+    """P5-W5A Class C — the canonical R4-safe replacement boundary around
+    the existing, UNMODIFIED ``layout_service.restore_version()``. Never a
+    second restore implementation: this function only locks, validates the
+    precondition, and delegates."""
+    _lock_layout_for_identity_replacement(
+        store=store, expected_draft_id=base_draft_id, expected_base_revision=base_revision,
+    )
+    try:
+        return layout_service.restore_version(store, version_id, user=actor)
+    except layout_service.CrossStoreVersionError as exc:
+        raise R4MutationError("version_not_found") from exc
+
+
+@transaction.atomic
+def apply_industry_layout_safe(
+    *, store, actor, base_draft_id, base_revision, force: bool = False,
+) -> StorefrontLayoutVersion:
+    """P5-W5A Class C — the canonical R4-safe replacement boundary around
+    the existing, UNMODIFIED ``layout_service.apply_industry_layout()``.
+    Never a second industry-layout implementation: this function only
+    locks, validates the precondition, and delegates."""
+    _lock_layout_for_identity_replacement(
+        store=store, expected_draft_id=base_draft_id, expected_base_revision=base_revision,
+    )
+    installation = getattr(store, "industry_installation", None)
+    if installation is None:
+        raise R4MutationError("no_industry_installation")
+    try:
+        return layout_service.apply_industry_layout(
+            store, installation.industry_template, user=actor, force=force,
+        )
+    except layout_service.StorefrontAlreadyPublishedError as exc:
+        raise R4MutationError("storefront_already_published") from exc

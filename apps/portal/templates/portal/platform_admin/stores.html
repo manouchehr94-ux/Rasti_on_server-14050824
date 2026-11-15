@@ -1,0 +1,80 @@
+{% extends "portal/platform_admin/base.html" %}
+{% load persian %}
+{% block title %}فروشگاه‌ها | پنل مدیریت پلتفرم{% endblock %}
+{% block content %}
+<div class="pa-pagehead">
+  <div>
+    <h1>فروشگاه‌ها</h1>
+    <p>مدیریتِ همه‌ی فروشگاه‌هایِ پلتفرم — فعال‌سازی، تعلیق، ورودِ پشتیبانی و بررسیِ جزئیات.</p>
+  </div>
+</div>
+
+<form method="get" class="pa-card" role="search"><div class="pa-cardbody pa-filters">
+  <div class="pa-field pa-grow"><label for="flt-q">جستجو</label><input id="flt-q" type="search" name="q" value="{{ query }}"></div>
+  <div class="pa-field"><label for="flt-status">وضعیت</label><select id="flt-status" name="status">
+        <option value="">همه‌ی وضعیت‌ها</option>
+        {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select></div>
+  <div class="pa-field"><label for="flt-subscription_status">وضعیتِ اشتراک</label><select id="flt-subscription_status" name="subscription_status">
+        <option value="">همه‌ی وضعیتِ اشتراک</option>
+        {% for value, label in subscription_status_choices %}
+        <option value="{{ value }}" {% if sub_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select></div>
+  <div class="pa-field"><label for="flt-plan">پلن</label><select id="flt-plan" name="plan">
+        <option value="">همه‌ی پلن‌ها</option>
+        {% for plan in plans %}
+        <option value="{{ plan.pk }}" {% if plan_id == plan.pk|stringformat:"s" %}selected{% endif %}>{{ plan.name }}</option>
+        {% endfor %}
+      </select></div>
+  <div class="pa-field"><label for="flt-date_from">از تاریخ</label><input id="flt-date_from" type="date" name="date_from" value="{{ date_from }}"></div>
+  <div class="pa-field"><label for="flt-date_to">تا تاریخ</label><input id="flt-date_to" type="date" name="date_to" value="{{ date_to }}"></div>
+  <div class="pa-filter-actions"><button class="pa-btn pa-primary" type="submit">اعمالِ فیلتر</button><a class="pa-btn" href="{% url 'portal_platform_admin:stores' %}">پاک‌کردن</a></div>
+</div></form>
+
+<div class="pa-card">
+  {% if page.object_list %}
+  <div class="pa-tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>فروشگاه</th><th>مالک</th><th>وضعیت</th><th>اشتراک</th><th>پلن</th><th>صنف</th>
+          <th>محصولات</th><th>سفارش‌ها</th><th>دامنه</th><th>تاریخِ ایجاد</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for store in page.object_list %}
+        {% with owner=store.owner_memberships.0 sub=store.current_subscriptions.0 domain=store.verified_custom_domains.0 %}
+        <tr>
+          <td><b>{{ store.name }}</b><br><span class="pa-help">{{ store.platform_code }}</span></td>
+          <td>{% if owner %}{{ owner.user.owner_profile.full_name|default:owner.user.email }}{% else %}<span class="pa-help">بدونِ مالکِ فعال</span>{% endif %}</td>
+          <td>
+            {% if store.status == "active" %}<span class="pa-badge pa-ok">فعال</span>
+            {% elif store.status == "suspended" %}<span class="pa-badge pa-off">تعلیق‌شده</span>
+            {% else %}<span class="pa-badge pa-warn">{{ store.get_status_display }}</span>{% endif %}
+          </td>
+          <td>{% if sub %}<span class="pa-badge pa-info">{{ sub.get_status_display }}</span>{% else %}<span class="pa-help">—</span>{% endif %}</td>
+          <td>{% if sub %}{{ sub.plan_version.plan.name }}{% else %}—{% endif %}</td>
+          <td>{% if store.industry_installation %}{{ store.industry_installation.industry_template.name }}{% else %}<span class="pa-help">—</span>{% endif %}</td>
+          <td>{{ store.product_count }}</td>
+          <td>{{ store.order_count }}</td>
+          <td>{% if domain %}{{ domain.hostname }}{% else %}<span class="pa-help">زیردامنه</span>{% endif %}</td>
+          <td>{{ store.created_at|jalali }}</td>
+          <td><a class="pa-btn pa-small pa-soft" href="{% url 'portal_platform_admin:store-detail' store.public_id %}">جزئیات</a></td>
+        </tr>
+        {% endwith %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "portal/platform_admin/_pagination.html" %}
+  {% else %}
+  <div class="pa-empty">
+    <div class="pa-empty-icon"><svg class="pa-i"><use href="#i-store"/></svg></div>
+    <p>هیچ فروشگاهی با این فیلترها یافت نشد.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

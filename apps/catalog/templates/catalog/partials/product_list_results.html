@@ -1,0 +1,89 @@
+{% load persian %}
+{% comment %}Keep the breadcrumb + heading (which live outside #product-results)
+in sync after an HTMX filter/pagination swap by re-rendering them out-of-band.
+``listing_header_oob`` is set by the view ONLY on the HTMX partial response, so a
+full-page load never emits a duplicate/oob header.{% endcomment %}
+{% if listing_header_oob %}{% include "catalog/partials/listing_header.html" with oob=True %}{% endif %}
+
+<div class="plp-meta">
+<div class="plp-toolbar">
+  <span class="plp-count"><b>{{ page_obj.paginator.count|fa_number }}</b> کالا یافت شد</span>
+</div>
+
+{% comment %}G2 — visible, removable active-filter chips. Each remove link drops
+only that filter (server/query canonical) and preserves the rest; the HTMX
+attributes let removal update the results in place, and hx-push-url keeps the
+URL/back-button honest.{% endcomment %}
+{% if active_filter_chips %}
+<div class="plp-chips" aria-label="فیلترهای فعال">
+  {% for chip in active_filter_chips %}
+  <a class="plp-chip" href="{{ chip.remove_url }}"
+     hx-get="{{ chip.remove_url }}" hx-target="#product-results" hx-push-url="true" hx-indicator="#plpLoading"
+     aria-label="حذف فیلتر {{ chip.label }}">
+    <span class="plp-chip-label">{{ chip.label }}</span>
+    <span class="plp-chip-x" aria-hidden="true">×</span>
+  </a>
+  {% endfor %}
+  <a class="plp-chip plp-chip-clear" href="{{ clear_all_url }}"
+     hx-get="{{ clear_all_url }}" hx-target="#product-results" hx-push-url="true" hx-indicator="#plpLoading">
+    حذف همه
+  </a>
+</div>
+{% endif %}
+</div>
+
+{% if products %}
+<div class="grid rsec-cols">
+  {% for product in products %}
+  {% include "catalog/partials/product_card.html" with card_settings=card_settings %}
+  {% endfor %}
+</div>
+
+{% comment %}Task 7 (Browse hardening, Gap #2) — bounded, Django-native page
+window. Iterates the view's ``pagination_range`` (from Paginator.get_elided_page_range)
+instead of the full page_range, so the control stays usable on mobile at any
+page count. Each numeric item keeps the EXACT prior contract: querystring
+preserved, hx-get/#product-results/hx-push-url/hx-indicator, and a no-JS href.
+The ellipsis (``pagination_ellipsis``, Django's own sentinel) is a non-link
+separator — it never generates ?page=…. Semantic labelled <nav> + aria-current
+on the current page are the approved related a11y repair.{% endcomment %}
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="pagination" aria-label="صفحه‌بندی محصولات">
+  {% if page_obj.has_previous %}
+  <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}"
+     hx-get="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}"
+     hx-target="#product-results" hx-push-url="true" hx-indicator="#plpLoading" rel="prev">قبلی</a>
+  {% else %}
+  <span class="disabled" aria-disabled="true">قبلی</span>
+  {% endif %}
+
+  {% for num in pagination_range %}
+    {% if num == pagination_ellipsis %}
+    <span class="ellipsis" aria-hidden="true">{{ num }}</span>
+    {% elif num == page_obj.number %}
+    <span class="current" aria-current="page">{{ num|fa_number }}</span>
+    {% else %}
+    <a href="?page={{ num }}{% if querystring %}&{{ querystring }}{% endif %}"
+       hx-get="?page={{ num }}{% if querystring %}&{{ querystring }}{% endif %}"
+       hx-target="#product-results" hx-push-url="true" hx-indicator="#plpLoading"
+       aria-label="صفحه {{ num|fa_number }}">{{ num|fa_number }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page_obj.has_next %}
+  <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}"
+     hx-get="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}"
+     hx-target="#product-results" hx-push-url="true" hx-indicator="#plpLoading" rel="next">بعدی</a>
+  {% else %}
+  <span class="disabled" aria-disabled="true">بعدی</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<div class="plp-empty">
+  <div class="em">🔍</div>
+  <h3>کالایی یافت نشد</h3>
+  <p>فیلترها یا عبارت جستجو را تغییر دهید.</p>
+</div>
+{% endif %}

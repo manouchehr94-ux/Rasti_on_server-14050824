@@ -1,0 +1,89 @@
+{% load content_tags %}
+{% comment %}
+Universal image-first hero slider.  The hero is a reusable storefront block;
+its geometry and controls are shared by every preset.  Images remain real,
+Store-scoped HeroSlide media.  Text is an optional overlay rather than a
+second fixed column, which lets the same block reproduce image-led commerce
+banners without introducing a preset-specific template.
+{% endcomment %}
+{% if hero_slides %}
+<section class="section hero{% if hero_variant_class %} {{ hero_variant_class }}{% endif %}{% if slider_settings.slider_width == "full" %} hero--full{% endif %}"{% if slider_settings.slider_ratio or slider_settings.slider_ratio_mobile %} style="{% if slider_settings.slider_ratio %}--hero-clean-ratio:{{ slider_settings.slider_ratio }}/1;{% endif %}{% if slider_settings.slider_ratio_mobile %}--hero-clean-ratio-m:{{ slider_settings.slider_ratio_mobile }}/1{% endif %}"{% endif %}>
+  {% if hero_slides|length > 1 %}
+  {% comment %}
+  Phase 5 Task 5 (STRANS) — between-slide transition style. ``data-hero-transition``
+  (cut/fade/slide, from the canonical slider_settings) selects a fixed CSS
+  transition preset on the slides below; there is NO free-text CSS/JS. ``cut``
+  keeps the historical hard-cut behavior byte-identically (display toggle via
+  x-show). For fade/slide the slides stay layered and their opacity/transform is
+  driven by the ``.is-active`` class in CSS. ``prefers-reduced-motion: reduce``
+  collapses fade/slide to an instant cut at the CSS layer (see home.css) without
+  changing slide state. No new slider, no new renderer, no animation library.
+  {% endcomment %}
+  <div class="hero-inner" data-sfb-section-surface data-text-position="{{ slider_settings.text_position|default:'end' }}"
+       data-hero-transition="{{ slider_settings.transition|default:'cut' }}"
+       {% if effective_section_typography %}style="--sfb-hero-heading-size:{{ effective_section_typography.heading }}px;--sfb-hero-body-size:{{ effective_section_typography.body }}px;--sfb-hero-font:'{{ effective_section_appearance.font }}';"{% endif %}
+       x-data="{ slide: 0, count: {{ hero_slides|length }}, autoplay: {{ slider_settings.autoplay|yesno:'true,false' }}, interval: {{ slider_settings.interval_ms|default:4500 }}, loop: {{ slider_settings.loop|yesno:'true,false' }}, transition: '{{ slider_settings.transition|default:'cut' }}', _timer: null,
+                  next() { this.slide = (this.slide + 1) % this.count; },
+                  prev() { this.slide = (this.slide - 1 + this.count) % this.count; } }"
+       x-init="if (autoplay) { _timer = setInterval(() => next(), interval) }"
+       @mouseenter="if (_timer) { clearInterval(_timer); _timer = null }"
+       @mouseleave="if (autoplay && !_timer) { _timer = setInterval(() => next(), interval) }">
+    {% for s in hero_slides %}
+    <article class="hero-slide" :class="{ 'is-active': slide === {{ forloop.counter0 }} }" x-show="transition === 'cut' ? slide === {{ forloop.counter0 }} : true" x-cloak{% if is_builder_preview %} data-admin-edit-kind="media" data-admin-edit-id="{{ s.pk }}" data-admin-edit-title="{{ s.title|default:'اسلاید'|escape }}" data-admin-media-kind="hero-slides"{% endif %}>
+      <picture class="hero-media">
+        {% if s.mobile_image_url %}<source media="(max-width:680px)" srcset="{{ s.mobile_image_url }}">{% endif %}
+        {% if s.desktop_image_url %}<img src="{{ s.desktop_image_url }}" data-img-role="hero" alt="{{ s.title|default:'اسلاید' }}" loading="{% if forloop.first %}eager{% else %}lazy{% endif %}">{% endif %}
+      </picture>
+      {% if s.title or s.subtitle or s.show_button %}
+      <div class="hero-text">
+        {% if s.title %}<h1>{{ s.title }}</h1>{% endif %}
+        {% if s.subtitle %}<p>{{ s.subtitle }}</p>{% endif %}
+        {% if s.show_button and s.button_label %}
+        {% resolve_destination s as dest %}
+        {% if dest.url %}<a class="hero-cta" href="{{ dest.url }}" {% if dest.open_new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ s.button_label }}</a>{% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+
+    {% if slider_settings.show_arrows is not False %}
+    <button type="button" class="hero-arrow hero-arrow-prev" @click="prev()" aria-label="اسلاید قبلی"
+            {% if slider_settings.loop is False %}:disabled="slide === 0"{% endif %}>‹</button>
+    <button type="button" class="hero-arrow hero-arrow-next" @click="next()" aria-label="اسلاید بعدی"
+            {% if slider_settings.loop is False %}:disabled="slide === count - 1"{% endif %}>›</button>
+    {% endif %}
+
+    {% if slider_settings.show_dots is not False %}
+    <div class="hero-tabs" aria-label="اسلایدها">
+      {% for s in hero_slides %}
+      <button type="button" @click="slide = {{ forloop.counter0 }}" :class="{ 'active': slide === {{ forloop.counter0 }} }">{{ s.title|default:"مشاهده" }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  {% with slide=hero_slides.0 %}
+  <div class="hero-inner" data-sfb-section-surface data-text-position="{{ slider_settings.text_position|default:'end' }}"
+       {% if effective_section_typography %}style="--sfb-hero-heading-size:{{ effective_section_typography.heading }}px;--sfb-hero-body-size:{{ effective_section_typography.body }}px;--sfb-hero-font:'{{ effective_section_appearance.font }}';"{% endif %}>
+    <article class="hero-slide single"{% if is_builder_preview %} data-admin-edit-kind="media" data-admin-edit-id="{{ slide.pk }}" data-admin-edit-title="{{ slide.title|default:'اسلاید'|escape }}" data-admin-media-kind="hero-slides"{% endif %}>
+      <picture class="hero-media">
+        {% if slide.mobile_image_url %}<source media="(max-width:680px)" srcset="{{ slide.mobile_image_url }}">{% endif %}
+        {% if slide.desktop_image_url %}<img src="{{ slide.desktop_image_url }}" data-img-role="hero" alt="{{ slide.title|default:'اسلاید' }}" loading="eager">{% endif %}
+      </picture>
+      {% if slide.title or slide.subtitle or slide.show_button %}
+      <div class="hero-text">
+        {% if slide.title %}<h1>{{ slide.title }}</h1>{% endif %}
+        {% if slide.subtitle %}<p>{{ slide.subtitle }}</p>{% endif %}
+        {% if slide.show_button and slide.button_label %}
+        {% resolve_destination slide as dest %}
+        {% if dest.url %}<a class="hero-cta" href="{{ dest.url }}" {% if dest.open_new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ slide.button_label }}</a>{% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+    </article>
+  </div>
+  {% endwith %}
+  {% endif %}
+</section>
+{% endif %}

@@ -1,0 +1,506 @@
+/*
+  صفحه‌ی جزئیات محصول (PDP) — کپی دقیق از docs/spec/shop-frontend.html
+  (بخش PRODUCT PAGE) تا وفاداری بصری کامل حفظ شود.
+*/
+.breadcrumb{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding:18px 0;flex-wrap:wrap}
+.breadcrumb a:hover{color:var(--violet-text,var(--violet))}
+.breadcrumb svg{width:13px;height:13px;opacity:.6}
+.pdp{display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:start;padding-bottom:10px}
+.gallery{position:sticky;top:140px}
+.gallery .main{position:relative;aspect-ratio:1/1;border-radius:22px;display:grid;place-items:center;font-size:170px;border:1px solid var(--line)}
+/* R4-11 — the main gallery photo is shown WHOLE in its frame (contain), never cropped */
+.gallery .main{overflow:hidden;background:var(--brand-surface,#fff)}
+.gallery .main>img[data-img-role]{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--img-fit,contain);object-position:var(--img-pos,center);border-radius:inherit}
+.gallery .main .pill-disc{position:absolute;top:16px;right:16px;font-size:13px;padding:6px 12px}
+.gallery .main .zoom{position:absolute;bottom:16px;left:16px;width:40px;height:40px;border-radius:11px;background:rgba(255,255,255,.9);display:grid;place-items:center;color:var(--muted)}
+.gallery .main .zoom svg{width:18px;height:18px}
+.gallery .thumbs{display:flex;gap:10px;margin-top:12px}
+.gallery .thumbs .th{width:74px;height:74px;border-radius:14px;display:grid;place-items:center;font-size:34px;border:2px solid var(--line);cursor:pointer;transition:.15s}
+.gallery .thumbs .th.active{border-color:var(--violet)}
+.gallery .thumbs .th:hover{border-color:var(--violet-3)}
+.pinfo h1{font-size:21px;font-weight:800;line-height:1.7;margin-bottom:12px}
+.pinfo .topline{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:16px;font-size:12.5px;color:var(--muted)}
+.pinfo .topline .brand{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--ink)}
+.pinfo .topline .brand svg{width:15px;height:15px;color:var(--violet-text,var(--violet))}
+.pinfo .topline .rate{display:flex;align-items:center;gap:5px}
+.pinfo .mini-acts{margin-right:auto;display:flex;gap:6px}
+.pinfo .mini-acts button{display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:10px;padding:6px 11px;font-size:11.5px;font-weight:600;color:var(--muted);transition:.15s}
+.pinfo .mini-acts button:hover{color:var(--pink-text,var(--pink));border-color:var(--pink)}
+.pinfo .mini-acts button svg{width:15px;height:15px}
+.opt-block{margin-bottom:16px}
+.opt-block .lbl{font-size:13px;font-weight:700;margin-bottom:9px}
+.opt-block .lbl span{color:var(--muted);font-weight:500}
+.swatches{display:flex;gap:9px}
+.swatch{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1.5px var(--line);cursor:pointer;position:relative;transition:.15s}
+.swatch.active{box-shadow:0 0 0 2px var(--violet)}
+.sizes{display:flex;gap:9px;flex-wrap:wrap}
+.size{min-width:46px;height:40px;border:1.5px solid var(--line);border-radius:11px;font-size:13px;font-weight:700;color:#4b4560;transition:.15s;padding:0 12px}
+.size:hover{border-color:var(--violet-3)}
+.size.active{border-color:var(--violet);background:var(--violet-soft);color:var(--violet-text,var(--violet))}
+.swatch.unavailable,.size.unavailable{opacity:.35;cursor:not-allowed;position:relative}
+.swatch.unavailable::after{content:"";position:absolute;inset:0;border-radius:50%;background:linear-gradient(to top right,transparent 46%,#9993 48%,#9993 52%,transparent 54%)}
+.size.unavailable{text-decoration:line-through}
+.sku-line{font-size:11.5px;color:var(--muted);margin-top:4px}
+.pricebox{background:var(--violet-softer);border:1px solid var(--line);border-radius:18px;padding:18px;margin:6px 0 16px}
+.pricebox .row1{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.pricebox .save{background:var(--pink-soft);color:var(--pink-text,var(--pink));font-size:11.5px;font-weight:800;padding:4px 10px;border-radius:8px}
+.pricebox .old{color:var(--muted);text-decoration:line-through;font-size:13px}
+.pricebox .now{font-size:26px;font-weight:900}
+.pricebox .now small{font-size:13px;font-weight:600;color:var(--muted)}
+.pricebox .stock{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green-text,var(--green));font-weight:700;margin-top:6px}
+.pricebox .stock svg{width:15px;height:15px}
+.qty{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.qty .lbl{font-size:13px;font-weight:700}
+.stepper{display:flex;align-items:center;border:1.5px solid var(--line);border-radius:12px;overflow:hidden}
+.stepper button{width:40px;height:40px;font-size:18px;color:var(--violet-text,var(--violet));font-weight:800}
+.stepper button:hover{background:var(--violet-softer)}
+.stepper input{width:46px;height:40px;text-align:center;border:0;outline:0;font-weight:800;font-size:15px;background:transparent}
+.pdp-actions{display:flex;gap:10px;margin-bottom:18px}
+.pdp-actions .btn-primary{flex:1;height:50px;font-size:15px}
+.pdp-actions .btn-primary:disabled{background:var(--disabled-bg,#e5e7eb);color:var(--disabled-ink,#6b7280);border-color:var(--disabled-bg,#e5e7eb);box-shadow:none;filter:none;cursor:not-allowed}
+.pdp-actions .wish{width:50px;height:50px;border:1.5px solid var(--line);border-radius:12px;display:grid;place-items:center;color:var(--muted);transition:.15s}
+.pdp-actions .wish:hover,.pdp-actions .wish.on{color:var(--pink-text,var(--pink));border-color:var(--pink)}
+.pdp-actions .wish svg{width:21px;height:21px}
+.guarantee{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.guarantee .g{border:1px solid var(--line);border-radius:13px;padding:12px;text-align:center;font-size:11.5px;font-weight:600;color:#4b4560}
+.guarantee .g .ic{font-size:20px;display:block;margin-bottom:5px}
+
+/* Phase 5 Task 5 (PDT) — tabs (desktop) / real accordion (mobile) from ONE
+   accordion-native DOM. Markup is header→panel, header→panel, header→panel as
+   direct children of .pdp-tabs. On DESKTOP the container is a wrapping flexbox
+   and CSS ``order`` lifts the three headers into a single top tablist row
+   (order:0) with the panels full-width below (order:2) — the classic
+   accordion-markup → CSS-tabs pattern. */
+.pdp-tabs{margin:34px 0;display:flex;flex-wrap:wrap;gap:6px 6px}
+.pdp-acc-header{
+  order:0;
+  padding:12px 20px;font-size:14px;font-weight:700;color:var(--muted);
+  border:0;border-bottom:2.5px solid transparent;white-space:nowrap;
+  background:transparent;cursor:pointer;
+}
+.pdp-acc-header.active{color:var(--violet-text,var(--violet));border-color:var(--violet)}
+/* The shared tablist underline: a full-width row rule under the header row. */
+.pdp-tabs::after{content:"";order:1;flex:0 0 100%;height:0;border-bottom:2px solid var(--line);margin-bottom:20px}
+.pdp-tab-panel{order:2;flex:0 0 100%}
+/* Phase 5 Task 5 (PDT) — visible keyboard focus on the accessible tabs/panels. */
+.pdp-acc-header:focus-visible,.pdp-tab-panel:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+/* Progressive enhancement (no-JS safety): PDP panels are VISIBLE BY DEFAULT so
+   every description/spec/review area is reachable with JavaScript disabled.
+   The panels carry `class="tabpane pdp-tab-panel"` and have NO static `active`
+   class, so there must be NO blanket `.tabpane{display:none}` here — that
+   equal-specificity rule previously won and hid ALL content with JS off.
+   Once Alpine initializes, its `x-show` sets an inline `display:none` on the
+   inactive panels (only the active one stays shown); with JS off no inline
+   style is ever applied, so all three panels remain visible. The active tab's
+   fade is applied via the JS-driven `.active` class (harmless when absent). */
+.pdp-tab-panel{display:block}
+.tabpane.active{animation:fade .3s}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.desc-text{font-size:13.5px;color:#4b4560;line-height:2.2;max-width:820px}
+.desc-text ul{margin:14px 0;padding-right:20px}
+.desc-text li{margin-bottom:7px}
+.spec-table{width:100%;border-collapse:collapse;max-width:760px}
+.spec-table tr:nth-child(odd){background:var(--violet-softer)}
+.spec-table td{padding:12px 16px;font-size:13px;border-bottom:1px solid var(--line)}
+.spec-table td:first-child{color:var(--muted);font-weight:600;width:38%}
+.review-sum{display:grid;grid-template-columns:240px 1fr;gap:30px;align-items:center;background:var(--violet-softer);border-radius:18px;padding:24px;margin-bottom:22px}
+.review-sum .big{text-align:center}
+.review-sum .big b{font-size:46px;font-weight:900;color:var(--violet-text,var(--violet));display:block;line-height:1}
+.review-sum .big .stars{font-size:18px;margin:6px 0}
+.review-sum .big small{color:var(--muted);font-size:12px}
+.rbar{display:flex;align-items:center;gap:10px;font-size:12px;margin-bottom:7px}
+.rbar .track{flex:1;height:8px;background:#e6e0f5;border-radius:6px;overflow:hidden}
+.rbar .track i{display:block;height:100%;background:var(--amber);border-radius:6px}
+.review{border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:14px}
+.review .head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.review .av{width:40px;height:40px;border-radius:50%;background:var(--violet-soft);color:var(--violet-text,var(--violet));display:grid;place-items:center;font-weight:800}
+.review .head b{font-size:13px;display:block}
+.review .head small{color:var(--muted);font-size:11px}
+.review .head .stars{margin-right:auto}
+.review p{font-size:13px;color:#4b4560;line-height:2}
+.review-form{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;margin-top:8px}
+.review-form h4{font-size:14px;margin-bottom:14px}
+.review-form .inp,.review-form textarea{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font-size:13px;outline:0;background:var(--bg);transition:.15s;font-family:inherit}
+.review-form .inp:focus,.review-form textarea:focus{border-color:var(--violet);background:#fff}
+.review-form textarea{resize:vertical;min-height:90px;margin:12px 0}
+
+/* product videos */
+.pdp-video-grid{display:grid;gap:18px;width:100%}
+/* یک ویدیو: نه یک کارتِ باریک — پخش‌کننده‌ی اصلیِ رسانه‌ی کالا، تمامِ
+   عرضِ ناحیه‌ی محتوا تا یک حداکثرِ خوانا، وسط‌چین. */
+.pdp-video-grid--single{grid-template-columns:1fr}
+.pdp-video-grid--single .pdp-video-card{width:100%;max-width:1100px;margin:0 auto}
+/* دو یا بیشتر: auto-fit به‌جایِ auto-fill عمداً انتخاب شده — ترک‌هایِ
+   خالی جمع می‌شوند و آیتم‌هایِ موجود با ``1fr`` عرضِ باقی‌مانده را واقعاً
+   پر می‌کنند (نه اینکه هرکدام فقط عرضِ حداقلِ ۳۲۰px را بگیرند و بقیه‌ی
+   عرض به‌صورتِ فضایِ خالی رها شود)؛ در بازه‌ی خیلی باریک (مثلاً ۳۹۰px)
+   همین قاعده به‌طورِ طبیعی به یک ستون فرومی‌ریزد، بدونِ نیاز به یک
+   override جداگانه در media query. */
+.pdp-video-grid--multi{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.pdp-video-card{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+.pdp-video-frame{position:relative;display:block;width:100%;aspect-ratio:16/9;background:#000;max-width:none;max-height:none}
+.pdp-video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;max-width:none}
+.pdp-video-linkcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  background:linear-gradient(45deg,#405de6,#5b51d8,#833ab4,#c13584,#e1306c,#fd1d1d);color:#fff;text-decoration:none}
+.pdp-video-ig-icon{font-size:32px}
+.pdp-video-ig-cta{font-size:12.5px;font-weight:700;background:rgba(255,255,255,.18);padding:6px 14px;border-radius:999px}
+.pdp-video-meta{display:flex;align-items:center;gap:8px;padding:10px 14px;flex-wrap:wrap}
+.pdp-video-badge{font-size:11px;font-weight:700;color:var(--violet-text,var(--violet));background:var(--violet-softer);padding:3px 10px;border-radius:999px}
+.pdp-video-title{font-size:12.5px;color:#4b4560;font-weight:600}
+
+/* ========================================================================
+   PDP layout variant "fashion" (site-target-overhaul, ibolak reference)
+   ------------------------------------------------------------------------
+   A generic, reusable ``product_main`` section setting
+   (``settings.layout_variant``, read via the ``data-pdp-layout``
+   attribute), exactly like the listing section's ``data-plp-layout``.
+   Absent/"standard" changes nothing for the other 7 Ready Templates;
+   "fashion" moves the thumbnail rail beside the main image (a vertical
+   column at the gallery's outer edge, matching a fashion-catalog PDP)
+   and gives the variant chips/CTA row a bolder, apparel-style emphasis.
+   ======================================================================== */
+.pdp[data-pdp-layout="fashion"] .gallery{display:flex;gap:14px}
+.pdp[data-pdp-layout="fashion"] .gallery .main{flex:1;order:2;aspect-ratio:3/4}
+.pdp[data-pdp-layout="fashion"] .gallery .thumbs{order:1;flex-direction:column;margin-top:0;flex:0 0 auto}
+.pdp[data-pdp-layout="fashion"] .gallery .thumbs .th{width:64px;height:80px;border-radius:10px}
+.pdp[data-pdp-layout="fashion"] .swatch{width:40px;height:40px}
+.pdp[data-pdp-layout="fashion"] .size{min-width:64px;height:46px;border-radius:12px;font-size:13.5px}
+.pdp[data-pdp-layout="fashion"] .pdp-actions .btn-primary{height:56px;font-size:16px;border-radius:14px}
+.pdp[data-pdp-layout="fashion"] .pricebox{background:transparent;border:0;padding:0}
+.pdp[data-pdp-layout="fashion"] .pricebox .now{font-size:28px}
+
+@media(max-width:1000px){
+  .pdp{grid-template-columns:1fr}
+  .gallery{position:static}
+  .review-sum{grid-template-columns:1fr}
+  .pdp[data-pdp-layout="fashion"] .gallery{flex-direction:column}
+  .pdp[data-pdp-layout="fashion"] .gallery .thumbs{flex-direction:row;order:2;margin-top:10px}
+  .pdp[data-pdp-layout="fashion"] .gallery .main{order:1}
+  .pdp[data-pdp-layout="fashion"] .gallery .thumbs .th{width:64px;height:64px}
+}
+@media(max-width:480px){
+  .pdp-video-grid--multi{grid-template-columns:1fr}
+}
+
+/* Phase 5 Task 5 (PDT) — REAL mobile accordion. At the storefront mobile
+   breakpoint the SAME tabs/panels (one content source, one DOM) present as a
+   genuine accordion: because the markup is header→panel, header→panel,
+   header→panel, resetting the desktop ``order`` restores natural flow so each
+   full-width header sits DIRECTLY above its OWN panel (not all headers grouped
+   then one panel). Single-open, driven by the same Alpine active key as the
+   desktop tablist. RTL-safe (logical properties). */
+@media(max-width:680px){
+  .pdp-tabs{flex-direction:column;gap:8px;margin:24px 0}
+  /* Drop the desktop tablist underline row entirely. */
+  .pdp-tabs::after{display:none}
+  .pdp-acc-header{
+    order:0;width:100%;text-align:start;
+    border:1px solid var(--line);border-radius:8px;
+    padding:14px 16px;display:flex;align-items:center;justify-content:space-between;
+    margin:0;
+  }
+  .pdp-acc-header.active{background:var(--violet-softer);border-color:var(--violet)}
+  .pdp-acc-header::after{content:"▾";margin-inline-start:auto;transition:transform .2s ease}
+  .pdp-acc-header.active::after{transform:rotate(180deg)}
+  /* Each panel keeps natural document order — directly after its own header. */
+  .pdp-tab-panel{order:0;flex:0 0 auto;padding:4px 4px 8px}
+  @media (prefers-reduced-motion: reduce){
+    .pdp-acc-header::after{transition:none}
+  }
+}
+
+
+/* ========================================================================
+   Phase 5 Task 8 (SATC) — mobile Sticky Add-to-Cart.
+   ------------------------------------------------------------------------
+   PRESENTATION-ONLY. The markup lives physically INSIDE the one canonical
+   Add-to-Cart form in ``product_main.html`` (a plain type="submit"), inside
+   the ``variantSelector`` Alpine scope — no ``form=`` coupling, no second
+   form, no second quantity/variant/price/stock owner. This file only styles
+   it and gates it to mobile.
+
+   LAYERING (public storefront stacking, verified): the sticky bar sits at
+   ``z-index:90`` — ABOVE page content but BELOW every canonical overlay that
+   is meant to cover the page (login modal ``.overlay`` z-index:100, mobile nav
+   drawer backdrop 110 / panel 120, Quick View backdrop 1000 / dialog 1001) and
+   BELOW the mobile bottom nav (``.gmn`` z-index:850). So overlays correctly
+   cover SATC and SATC never covers the bottom nav — reusing the EXISTING
+   stacking order, not a new global overlay-state system.
+
+   POSITION: the bottom offset consumes the canonical ``--gmn-clearance``
+   custom property. That property is owned and published by the mobile
+   bottom-nav CSS owner (``storefront_builder.css``): it is 0 by default (no
+   nav → SATC hugs the safe area), and each active nav variant sets its own
+   real geometry there via the nav's identity class (ONE canonical geometry
+   source; SATC never hard-codes per-variant/per-template offsets). SATC only
+   adds its OWN height on top so it sits directly above the nav.
+
+   NO-OBSCURATION: the WHOLE PDP page content container (``.pdp-page`` — the
+   canonical wrapper around ALL PDP sections: product_main + product_description
+   + product_video + related_products) reserves real bottom space equal to the
+   nav clearance + SATC's own height + a gap. Because ``product_main`` is the
+   FIRST section, reserving inside ``.pdp`` alone would not protect the sections
+   that follow; the reserve must live on the end-of-page owner so the genuine
+   final content (e.g. related products / reviews) can be scrolled fully clear
+   of the fixed SATC + nav stack. This adds real scrollable document height
+   (``padding-bottom``), which ``scroll-padding-bottom`` alone cannot. */
+:root{--satc-height:64px}
+.pdp-satc{display:none}
+@media(max-width:680px){
+  .pdp-satc{
+    display:flex;align-items:center;gap:12px;
+    position:fixed;z-index:90;inset-inline:0;
+    /* Sit directly above the active bottom nav, or — when no nav renders —
+       above the device safe area. The canonical --gmn-clearance ALREADY
+       includes env(safe-area-inset-bottom) in every branch (nav-absent value
+       is the safe area itself; each variant is calc(<n>px + safe-area)), so the
+       safe area is counted exactly once. The var() fallback here is only a
+       defensive backstop if the nav stylesheet failed to load. */
+    bottom:var(--gmn-clearance,env(safe-area-inset-bottom,0px));
+    min-height:var(--satc-height);
+    padding:10px 14px;
+    background:var(--card,#fff);border-top:1px solid var(--line);
+    box-shadow:0 -8px 24px rgba(15,23,42,.10);
+    direction:rtl;
+  }
+  .pdp-satc-price{display:flex;flex-direction:column;line-height:1.25;min-width:0;flex:0 0 auto}
+  .pdp-satc-now{font-size:16px;font-weight:900;color:var(--ink);white-space:nowrap}
+  .pdp-satc-old{font-size:11.5px;color:var(--muted);text-decoration:line-through;white-space:nowrap}
+  .pdp-satc-btn{flex:1;min-width:0;height:48px;font-size:15px}
+  .pdp-satc-btn:disabled{background:var(--disabled-bg,#e5e7eb);color:var(--disabled-ink,#6b7280);border-color:var(--disabled-bg,#e5e7eb);box-shadow:none;filter:none;cursor:not-allowed}
+  /* Bottom content reserve on the WHOLE-PDP content container (covers every
+     PDP section, not just product_main), added only when a SATC is present on
+     the page. Real scrollable height (padding-bottom) so the genuine final
+     content clears the fixed SATC + bottom-nav stack; scoped to the PDP page
+     container so it never affects other pages. Value derived entirely from the
+     canonical nav geometry (--gmn-clearance) + SATC's own height + gap — no
+     random per-template value. */
+  .wrap.pdp-page:has(.pdp-satc){padding-bottom:calc(var(--gmn-clearance,env(safe-area-inset-bottom,0px)) + var(--satc-height) + 16px)}
+  /* Complements the reserve for keyboard/anchor scrolling; not sufficient on
+     its own (does not add document height), hence the padding above. */
+  html:has(.pdp-satc){scroll-padding-bottom:calc(var(--gmn-clearance,env(safe-area-inset-bottom,0px)) + var(--satc-height) + 16px)}
+}
+
+
+/* ========================================================================
+   V5 — PDP design controls (بستهٔ ۱): ``product_main`` + ``product_description``
+   ------------------------------------------------------------------------
+   Everything below is keyed ONLY on generic data attributes written by the shared renderer (``pdp_settings``) and on the shared
+   Design Block flags (``.rsec[data-d~="…"]`` + ``--d-*``). An attribute is written only when a Section's value differs from its
+   default, so a Store that never touched these controls matches NONE of these selectors and renders exactly as before. No rule here
+   names a Store, a Ready Template or a brand. Colours come from the palette tokens / the Design Block, never from a literal brand.
+   ======================================================================== */
+
+/* ---- product_main · gallery ---- */
+.qty[hidden]{display:none}
+@media(min-width:1001px){
+  .pdp[data-gallery-pos="end"] .gallery{order:2}
+  .pdp[data-gallery-split="gallery_wide"]{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+  .pdp[data-gallery-split="info_wide"]{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr)}
+  .pdp[data-gallery-pos="end"][data-gallery-split="gallery_wide"]{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr)}
+  .pdp[data-gallery-pos="end"][data-gallery-split="info_wide"]{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+}
+.pdp[data-gallery-sticky="off"] .gallery{position:static}
+.pdp[data-thumbs="hidden"] .gallery .thumbs{display:none}
+.pdp[data-thumbs="side"] .gallery{display:flex;gap:14px}
+.pdp[data-thumbs="side"] .gallery .main{flex:1;order:2}
+.pdp[data-thumbs="side"] .gallery .thumbs{order:1;flex-direction:column;margin-top:0;flex:0 0 auto}
+.pdp[data-thumbs="side"] .gallery .thumbs .th{width:64px;height:64px;border-radius:10px}
+.pdp[data-pdp-layout="fashion"][data-thumbs="below"] .gallery{display:block}
+.pdp[data-pdp-layout="fashion"][data-thumbs="below"] .gallery .thumbs{flex-direction:row;margin-top:12px}
+.pdp[data-pdp-layout="fashion"][data-thumbs="below"] .gallery .thumbs .th{width:74px;height:74px;border-radius:14px}
+@media(max-width:1000px){
+  .pdp[data-thumbs="side"] .gallery{flex-direction:column}
+  .pdp[data-thumbs="side"] .gallery .thumbs{flex-direction:row;order:2;margin-top:10px}
+  .pdp[data-thumbs="side"] .gallery .main{order:1}
+}
+
+/* ---- product_main · info panel, price, quantity, options, CTA ---- */
+.pdp[data-info-panel="card"] .pinfo{background:var(--card,#fff);border:1px solid var(--line);border-radius:18px;padding:22px}
+.pdp[data-info-panel="outlined"] .pinfo{background:var(--card,#fff);border:2px solid var(--brand-primary,var(--violet));border-radius:22px;padding:22px}
+.pdp[data-price-layout="plain"] .pricebox{background:transparent;border:0;padding:0}
+.pdp[data-price-pos="before_options"] .pinfo form,
+.pdp[data-qty-layout="inline"] .pinfo form{display:grid;grid-template-columns:auto minmax(0,1fr)}
+.pdp[data-price-pos="before_options"] .pinfo form>*,
+.pdp[data-qty-layout="inline"] .pinfo form>*{grid-column:1/-1}
+.pdp[data-price-pos="before_options"] .pinfo form>.pricebox{order:-1}
+.pdp[data-qty-layout="inline"] .pinfo form>.qty{grid-column:1;margin-inline-end:12px}
+.pdp[data-qty-layout="inline"] .pinfo form>.pdp-actions{grid-column:2}
+.pdp[data-qty-layout="inline"] .qty .lbl{display:none}
+.pdp[data-qty-layout="inline"] .stepper :is(button,input){height:calc(var(--pdp-cta-h,50px) - 3px)}
+.pdp[data-option-shape="square"] .size{border-radius:4px}
+.pdp[data-option-shape="square"] .swatch,.pdp[data-option-shape="square"] .swatch.unavailable::after{border-radius:6px}
+.pdp[data-option-shape="pill"] .size{border-radius:999px}
+.pdp[data-cta-width="auto"] .pdp-actions .btn-primary{flex:0 1 auto;padding-inline:30px}
+.pdp[data-cta-size="compact"]{--pdp-cta-h:42px}
+.pdp[data-cta-size="large"]{--pdp-cta-h:58px}
+.pdp[data-cta-size="compact"] .pdp-actions .btn-primary,.pdp[data-cta-size="large"] .pdp-actions .btn-primary{height:var(--pdp-cta-h)}
+.pdp[data-cta-size="compact"] .pdp-actions .btn-primary{font-size:13.5px}
+.pdp[data-cta-size="large"] .pdp-actions .btn-primary{font-size:16px}
+.pdp[data-cta-shape="square"] .pdp-actions .btn-primary,.pdp[data-cta-shape="square"] .pdp-satc-btn{border-radius:4px}
+.pdp[data-cta-shape="pill"] .pdp-actions .btn-primary,.pdp[data-cta-shape="pill"] .pdp-satc-btn{border-radius:999px}
+
+/* ---- product_main · Design Block consumers (frame / border / radius / shadow / spacing / background act on the section wrapper) ---- */
+.rsec[data-d~="ratio"] .pdp .gallery .main{aspect-ratio:var(--d-ratio)}
+.rsec[data-d~="gap"] .pdp{gap:var(--d-gap)}
+.rsec[data-d~="heading"] .pdp .pinfo h1{color:var(--d-heading)}
+.rsec[data-d~="text"] .pdp .pinfo :is(h1,.opt-block .lbl,.qty .lbl,.pricebox .now){color:var(--d-text)}
+.rsec[data-d~="accent"] .pdp :is(.size.active){border-color:var(--d-accent);color:var(--d-accent)}
+.rsec[data-d~="accent"] .pdp .swatch.active{box-shadow:0 0 0 2px var(--d-accent)}
+.rsec[data-d~="accent"] .pdp .gallery .thumbs .th.active{border-color:var(--d-accent)}
+.rsec[data-d~="price"] .pdp :is(.pricebox .now,.pdp-satc-now){color:var(--d-price)}
+.rsec[data-d~="surface"] .pdp:not([data-price-layout="plain"]) .pricebox,
+.rsec[data-d~="surface"] .pdp[data-info-panel] .pinfo,
+.rsec[data-d~="surface"] .pdp .gallery .main{background:var(--d-surface);color:var(--d-surface-fg)}
+.rsec[data-d~="btnfill"] .pdp :is(.pdp-actions .btn-primary,.pdp-satc-btn):not(:disabled){background:var(--d-btn-bg);color:var(--d-btn-fg,var(--brand-primary-fg,#fff))}
+.rsec[data-d~="btntext"] .pdp :is(.pdp-actions .btn-primary,.pdp-satc-btn):not(:disabled){color:var(--d-btn-fg)}
+.rsec[data-d~="btnborder"] .pdp :is(.pdp-actions .btn-primary,.pdp-satc-btn):not(:disabled){border:1px solid var(--d-btn-bd)}
+
+/* ---- product_description · presentation modes ----------------------------------------------------------------------------
+   The DOM is the same accessible header→panel pairs in every mode (see product_description.html). ``tabs`` (default) is the rules
+   above; the modes below only re-arrange / re-skin it. Vertical tabs need the JS-set ``data-enhanced`` flag: without JavaScript
+   every panel is simply visible under its own header, so nothing ever overlaps or hides. */
+.pdp-sec-title{font-size:18px;font-weight:800;margin:0 0 12px;line-height:1.6}
+.pdp-tabs[data-tabs-mode="stacked"]{display:block}
+.pdp-tabs[data-tabs-mode="stacked"]::after{display:none}
+.pdp-tabs[data-tabs-mode="stacked"] .pdp-sec-panel{margin-bottom:28px}
+.brand-panel{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.brand-panel .brand-logo{width:96px;height:96px;border:1px solid var(--line);border-radius:14px;padding:8px;background:#fff}
+.brand-panel h3{font-size:16px;font-weight:800;margin:0 0 6px}
+.brand-panel h3 small{font-size:12px;font-weight:600;color:var(--muted);margin-inline-start:8px}
+.brand-panel p{font-size:13.5px;line-height:2;color:#4b4560;margin:0 0 8px;max-width:760px}
+.brand-panel dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin:0}
+.brand-panel dt{color:var(--muted);font-weight:600}
+.brand-panel dd{margin:0}
+.pdp-tabs[data-panel-style="boxed"] .pdp-tab-panel{border:1px solid var(--line);border-radius:16px;padding:20px}
+.pdp-tabs[data-panel-style="soft"] .pdp-tab-panel{background:var(--violet-softer);border-radius:16px;padding:20px}
+.rsec[data-d~="surface"] .pdp-tabs .pdp-tab-panel{background:var(--d-surface);color:var(--d-surface-fg);border-radius:16px;padding:20px}
+.rsec[data-d~="heading"] .pdp-sec-title,.rsec[data-d~="heading"] .brand-panel h3{color:var(--d-heading)}
+.rsec[data-d~="text"] .pdp-tab-panel :is(.desc-text,.review p,.spec-table td,.brand-panel p){color:var(--d-text)}
+.rsec[data-d~="accent"] .pdp-acc-header.active{color:var(--d-accent);border-color:var(--d-accent)}
+@media(min-width:681px){
+  .pdp-tabs[data-tab-align="center"]{justify-content:center}
+  .pdp-tabs[data-tab-align="stretch"] .pdp-acc-header{flex:1 1 0;text-align:center}
+  .pdp-tabs[data-tab-style="pills"]::after,.pdp-tabs[data-tab-style="boxed"]::after{display:none}
+  .pdp-tabs[data-tab-style="pills"],.pdp-tabs[data-tab-style="boxed"]{row-gap:14px}
+  .pdp-tabs[data-tab-style="pills"] .pdp-acc-header{border:0;border-radius:999px;padding:9px 20px;background:var(--violet-softer)}
+  .pdp-tabs[data-tab-style="pills"] .pdp-acc-header.active{background:var(--brand-primary,var(--violet));color:var(--brand-primary-fg,#fff)}
+  .pdp-tabs[data-tab-style="boxed"] .pdp-acc-header{border:1px solid var(--line);border-radius:8px;padding:11px 18px}
+  .pdp-tabs[data-tab-style="boxed"] .pdp-acc-header.active{background:var(--violet-softer);border-color:var(--violet)}
+  .rsec[data-d~="accent"] .pdp-tabs[data-tab-style="pills"] .pdp-acc-header.active{background:var(--d-accent);color:#fff}
+  .pdp-tabs[data-tabs-mode="tabs_vertical"][data-enhanced]{display:grid;grid-template-columns:minmax(150px,240px) minmax(0,1fr);grid-template-rows:repeat(var(--pdp-tab-count,3),max-content) 1fr;gap:8px 26px;align-items:start}
+  .pdp-tabs[data-tabs-mode="tabs_vertical"][data-enhanced]::after{display:none}
+  .pdp-tabs[data-tabs-mode="tabs_vertical"][data-enhanced] .pdp-acc-header{grid-column:1;width:100%;text-align:start;white-space:normal;border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .pdp-tabs[data-tabs-mode="tabs_vertical"][data-enhanced] .pdp-acc-header.active{background:var(--violet-softer);border-color:var(--violet)}
+  .pdp-tabs[data-tabs-mode="tabs_vertical"][data-enhanced] .pdp-tab-panel{grid-column:2;grid-row:1 / -1}
+}
+/* accordion at EVERY width: the same rules the mobile block applies below the mobile breakpoint */
+.pdp-tabs[data-tabs-mode="accordion"]{flex-direction:column;gap:8px;margin:24px 0}
+.pdp-tabs[data-tabs-mode="accordion"]::after{display:none}
+.pdp-tabs[data-tabs-mode="accordion"] .pdp-acc-header{
+  order:0;width:100%;text-align:start;border:1px solid var(--line);border-radius:8px;
+  padding:14px 16px;display:flex;align-items:center;justify-content:space-between;margin:0;
+}
+.pdp-tabs[data-tabs-mode="accordion"] .pdp-acc-header.active{background:var(--violet-softer);border-color:var(--violet)}
+.pdp-tabs[data-tabs-mode="accordion"] .pdp-acc-header::after{content:"▾";margin-inline-start:auto;transition:transform .2s ease}
+.pdp-tabs[data-tabs-mode="accordion"] .pdp-acc-header.active::after{transform:rotate(180deg)}
+.pdp-tabs[data-tabs-mode="accordion"] .pdp-tab-panel{order:0;flex:0 0 auto;padding:4px 4px 8px}
+@media (prefers-reduced-motion: reduce){
+  .pdp-tabs[data-tabs-mode="accordion"] .pdp-acc-header::after{transition:none}
+}
+
+/* V5 — PDP typography roles (product_main ``title_size`` / ``price_size``); absent attribute == the historical sizes. */
+.pdp[data-title-size="large"] .pinfo h1{font-size:clamp(22px,2.4vw,30px);line-height:1.45}
+.pdp[data-title-size="xlarge"] .pinfo h1{font-size:clamp(26px,3vw,38px);line-height:1.4}
+.pdp[data-price-size="large"] .pricebox .now,.pdp[data-price-size="large"] .price-plain .now{font-size:32px}
+.pdp[data-price-size="xlarge"] .pricebox .now,.pdp[data-price-size="xlarge"] .price-plain .now{font-size:40px}
+.pdp[data-price-size="small"] .pricebox .now{font-size:16px;font-weight:500}
+
+/* V5 six-site kit — purchase-support blocks (product_main switches show_low_stock_alert / show_free_shipping_notice / show_contact_buttons) */
+.pdp-lowstock{display:grid;gap:8px;margin:12px 0;padding:10px 14px;border:1px solid var(--pink-soft,#f6cde0);border-radius:12px;background:var(--brand-surface,#fff)}
+.pdp-lowstock-text{display:grid;gap:2px;font-size:13px}
+.pdp-lowstock-text b{color:var(--brand-primary,#c0138a)}
+.pdp-lowstock-text small{color:var(--muted,#6b7280);font-size:11.5px}
+.pdp-lowstock-bar{height:5px;border-radius:5px;background:var(--pink-soft,#f6cde0);overflow:hidden}
+.pdp-lowstock-bar i{display:block;height:100%;background:var(--brand-primary,#c0138a);border-radius:5px;transition:width .25s}
+.pdp-freeship{margin:10px 0;padding:11px 14px;border-radius:12px;background:var(--green-soft,#e8f7ee);color:var(--green-text,#1a7f46);font-size:13px;font-weight:600}
+.pdp-contact{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.pdp-contact-btn{display:flex;align-items:center;justify-content:center;min-height:46px;border:1px solid var(--line,#e5e7eb);border-radius:12px;background:var(--brand-surface,#fff);font-size:13px;font-weight:600;color:var(--brand-text,#222)}
+.pdp-contact-btn:hover{border-color:var(--brand-primary,#c0138a);color:var(--brand-primary,#c0138a)}
+
+/* ---- V5 six-site kit: add-to-cart colour from a palette role (only when data-cta-tone is written, i.e. non-default) ---- */
+.pdp[data-cta-tone="secondary"] .pdp-actions .btn-primary,.pdp[data-cta-tone="secondary"] .pdp-satc-btn{background:var(--brand-secondary);border-color:var(--brand-secondary);color:var(--brand-secondary-fg,#fff)}
+.pdp[data-cta-tone="accent"] .pdp-actions .btn-primary,.pdp[data-cta-tone="accent"] .pdp-satc-btn{background:var(--brand-accent);border-color:var(--brand-accent);color:var(--brand-accent-fg,#fff)}
+
+/* ---- V5 six-site kit: gallery lightbox (rendered only when the product-main switch is on) ---- */
+.pdp-lb{position:fixed;inset:0;z-index:1400;display:grid;place-items:center;background:rgba(10,10,14,.92);padding:24px}
+.pdp-lb[x-cloak]{display:none}
+.pdp-lb-img{max-width:min(94vw,1200px);max-height:88vh;object-fit:var(--img-fit,contain);cursor:zoom-in;transition:transform .2s;touch-action:pan-y}
+.pdp-lb-img.is-zoomed{transform:scale(1.9);cursor:zoom-out}
+.pdp-lb-close,.pdp-lb-nav{position:absolute;display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:28px;line-height:1;cursor:pointer}
+.pdp-lb-close{top:16px;inset-inline-end:16px}
+.pdp-lb-nav{top:50%;transform:translateY(-50%)}
+.pdp-lb-prev{inset-inline-start:16px}.pdp-lb-next{inset-inline-end:16px}
+.pdp-lb-nav:dir(rtl){transform:translateY(-50%) scaleX(-1)}
+.pdp-lb-close:focus-visible,.pdp-lb-nav:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* ---- V5: the tab row stays a tab row on a phone (data-mobile="tabs"; the default is the historical accordion) ---- */
+@media(max-width:680px){
+  .pdp-tabs[data-mobile="tabs"]{flex-direction:row;flex-wrap:wrap;gap:0;margin:18px 0}
+  .pdp-tabs[data-mobile="tabs"]::after{display:block;order:1;flex:0 0 100%;margin-bottom:14px}
+  .pdp-tabs[data-mobile="tabs"] .pdp-acc-header{order:0;width:auto;display:block;border:0;border-bottom:2.5px solid transparent;border-radius:0;padding:12px 12px;background:transparent;white-space:normal;text-align:center}
+  .pdp-tabs[data-mobile="tabs"] .pdp-acc-header.active{background:transparent;border-color:var(--violet)}
+  .pdp-tabs[data-mobile="tabs"] .pdp-acc-header::after{display:none}
+  .pdp-tabs[data-mobile="tabs"] .pdp-tab-panel{order:2;flex:0 0 100%;padding:0}
+}
+
+/* V5 desktop sticky purchase bar — only when the switch writes data-satc (md / d). Hidden until the in-flow button scrolls out
+   above the viewport (JS toggles .is-shown); on phones the existing mobile rules apply and a desktop-only bar stays hidden. */
+@media(min-width:681px){
+  .pdp-satc[data-satc]{display:flex;align-items:center;justify-content:center;gap:28px;position:fixed;z-index:90;inset-inline:0;bottom:0;padding:12px 24px;background:var(--card,#fff);border-top:1px solid var(--line);box-shadow:0 -8px 24px rgba(15,23,42,.10);direction:rtl;transform:translateY(110%);visibility:hidden;transition:transform .25s ease,visibility 0s linear .25s}
+  .pdp-satc[data-satc].is-shown{transform:none;visibility:visible;transition:transform .25s ease}
+  .pdp-satc[data-satc] .pdp-satc-id{display:flex;align-items:center;gap:10px;min-width:0;max-width:34%;margin-inline-end:auto}
+  .pdp-satc[data-satc] .pdp-satc-id img{width:40px;height:40px;border-radius:6px;object-fit:var(--img-fit,cover);flex:0 0 auto}
+  .pdp-satc[data-satc] .pdp-satc-id b{font-size:14px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pdp-satc[data-satc] .pdp-satc-price{display:flex;flex-direction:row;align-items:baseline;gap:10px}
+  .pdp-satc[data-satc] .pdp-satc-now{font-size:18px;font-weight:900;color:var(--ink)}
+  .pdp-satc[data-satc] .pdp-satc-old{font-size:13px;color:var(--muted);text-decoration:line-through}
+  .pdp-satc[data-satc] .pdp-satc-btn{flex:0 1 320px;height:46px;font-size:15px}
+  .pdp-satc[data-satc] .pdp-satc-btn:disabled{background:var(--disabled-bg,#e5e7eb);color:var(--disabled-ink,#6b7280);border-color:var(--disabled-bg,#e5e7eb);box-shadow:none;cursor:not-allowed}
+}
+@media(max-width:680px){
+  .pdp-satc[data-away]{transform:translateY(130%);visibility:hidden;transition:transform .2s ease,visibility 0s .2s}
+  .pdp-satc[data-satc="d"]{display:none}
+  .pdp-satc[data-satc] .pdp-satc-id{display:none}
+}
+
+/* V5 fidelity: flush picture frame and a larger reading size for the description (both attribute-gated, default rendering unchanged) */
+.pdp[data-gallery-frame="flush"] .gallery .main{border:0;background:transparent;border-radius:0;overflow:visible}
+.pdp[data-gallery-frame="flush"] .gallery .main>img[data-img-role]{border-radius:0}
+.pdp-tabs[data-body-size="large"] .pdp-tab-panel{font-size:17px;line-height:2.1}
+[data-pdp-specs]{list-style:none;margin:6px 0 14px;padding:0;display:grid;gap:8px;font-size:14px;line-height:1.8}
+[data-pdp-specs] li{position:relative;padding-inline-start:16px}
+[data-pdp-specs] li::before{content:"";position:absolute;inset-inline-start:0;top:.8em;width:6px;height:6px;border-radius:50%;background:var(--brand-primary,currentColor);opacity:.7}
+[data-pdp-specs] b{font-weight:700}
+[data-pdp-specs] span{color:var(--muted);margin-inline-start:6px}
+.pdp[data-info-panel="outlined_tone"] .pinfo{background:color-mix(in srgb,var(--brand-tone-2,var(--brand-primary,#c0138a)) 6%,var(--card,#fff));border:3px solid var(--brand-tone-2,var(--brand-primary,#c0138a));border-radius:30px;padding:28px}
+.pdp[data-option-size="large"] .size{min-width:92px;height:46px;font-size:15px}
+.pdp[data-option-size="large"] .sizes{gap:12px}
+.pdp-tabs[data-body-size="xlarge"] .pdp-tab-panel{font-size:19px;line-height:2.25}
+/* V5 composition: the merchant-ordered information column (only when data-info-order is written). The form is dissolved into the
+   panel grid so purchase blocks and the blocks around the form share ONE ordering context; the ordinary markup is untouched. */
+.pdp[data-info-order] .pinfo{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start}
+.pdp[data-info-order] .pinfo form{display:contents}
+.pdp[data-info-order] .pinfo>*,.pdp[data-info-order] .pinfo form>*{grid-column:1/-1}
+.pdp[data-info-order][data-qty-layout="inline"] .pinfo form>.qty{grid-column:1;margin-inline-end:12px}
+.pdp[data-info-order][data-qty-layout="inline"] .pinfo form>.pdp-actions{grid-column:2}
+.pdp[data-info-order] .pinfo>h1{order:-20}
+.pdp[data-info-order] .pinfo>.topline{order:-19}
+.pdp[data-info-order] [data-blk="options"]{order:var(--o-options,1)}
+.pdp[data-info-order] [data-blk="price"]{order:var(--o-price,2)}
+.pdp[data-info-order] [data-blk="specs"]{order:var(--o-specs,3)}
+.pdp[data-info-order] [data-blk="gift"]{order:var(--o-gift,4)}
+.pdp[data-info-order] [data-blk="actions"]{order:var(--o-actions,5)}
+.pdp[data-info-order] [data-blk="notices"]{order:var(--o-notices,6)}
+.pdp[data-info-order] [data-blk="contact"]{order:var(--o-contact,7)}
+.pdp[data-info-order] [data-blk="trust"]{order:var(--o-trust,8)}

@@ -1,0 +1,60 @@
+{% load static platform_admin_ui %}<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}پنل مدیریت پلتفرم | راستیسی{% endblock %}</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="{% static 'portal/css/platform-admin-panel.css' %}?v=20261107-trial1">
+<link rel="stylesheet" href="{% static 'notifications/inbox.css' %}?v=20261101-1">
+<script src="{% static 'notifications/inbox.js' %}?v=20261101-1" defer></script>
+<link rel="stylesheet" href="{% static 'core/password_toggle.css' %}?v=20261106-1">
+<script src="{% static 'core/password_toggle.js' %}?v=20261106-1" defer></script>
+<link rel="stylesheet" href="{% static 'core/jalali_picker.css' %}?v=20261106-1">
+<script src="{% static 'js/alpine.min.js' %}" defer></script>
+<script src="{% static 'core/jalali_picker.js' %}?v=20261106-1" defer></script>
+<script src="{% static 'portal/js/platform-admin-ui.js' %}?v=20261105-ux1" defer></script>
+{% block extra_css %}{% endblock %}
+</head>
+<body class="pa">
+{% if request.user.is_authenticated %}
+{% include "portal/platform_admin/_icons.html" %}
+<a class="pa-sr" href="#pa-main-content">پرش به محتوا</a>
+<div class="pa-app">
+  <div class="pa-backdrop" data-pa-backdrop hidden></div>
+  {% pa_sidebar %}
+
+  <section class="pa-main">
+    <header class="pa-topbar">
+      <div class="pa-start">
+        <button class="pa-btn pa-icon pa-menu-btn" type="button" data-pa-nav-open aria-controls="pa-sidebar" aria-expanded="false" aria-label="باز کردنِ منو"><svg class="pa-i"><use href="#i-menu"/></svg></button>
+        <form class="pa-search" method="get" action="{% url 'portal_platform_admin:stores' %}" role="search">
+          <label class="pa-sr" for="pa-global-search">جستجو در فروشگاه‌ها</label>
+          <input class="pa-input" id="pa-global-search" type="search" name="q" placeholder="جستجو در فروشگاه‌ها…" value="{{ request.GET.q|default:'' }}">
+        </form>
+      </div>
+      <div class="pa-end">
+        {% include "notifications/partials/bell.html" %}
+        <div class="pa-user">
+          <span class="pa-avatar" aria-hidden="true">{{ request.user.get_username|first|upper }}</span>
+          <div><b class="pa-ltr">{{ request.user.get_full_name|default:request.user.get_username }}</b><span class="pa-help">مدیر پلتفرم</span></div>
+        </div>
+        <form method="post" action="{% url 'portal_platform_admin:logout' %}" data-no-loading>{% csrf_token %}<button type="submit" class="pa-btn pa-ghost" aria-label="خروج"><svg class="pa-i"><use href="#i-logout"/></svg><span class="pa-logout-text">خروج</span></button></form>
+      </div>
+    </header>
+    <main class="pa-content {% block page_class %}{% endblock %}" id="pa-main-content">
+      {% pa_breadcrumb as crumb %}{% if crumb %}<nav class="pa-crumb" aria-label="مسیر"><span>{{ crumb.group }}</span><span aria-hidden="true">›</span><a href="{{ crumb.url }}">{{ crumb.item }}</a></nav>{% endif %}
+      {% if messages %}
+      {% for message in messages %}
+      <div class="pa-alert {% if message.tags == 'error' %}pa-alert-error{% elif message.tags == 'warning' %}pa-alert-warn{% elif message.tags == 'success' %}pa-alert-success{% endif %}" role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}"{% if message.tags == 'success' %} data-pa-message="success"{% endif %}>{{ message }}</div>
+      {% endfor %}
+      {% endif %}
+{% endif %}
+{% block content %}{% endblock %}
+{% if request.user.is_authenticated %}
+    </main>
+  </section>
+</div>
+{% endif %}
+</body>
+</html>

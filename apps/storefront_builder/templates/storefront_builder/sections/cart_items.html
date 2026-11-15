@@ -1,0 +1,72 @@
+{% load persian %}
+{% comment %}
+Phase 5 — قلم‌های سبدِ خرید؛ اگر سبد خالی باشد، همینجا حالتِ خالیِ کامل
+(نه cart_summary) نمایش داده می‌شود — چون «خالی» ویژگیِ همین داده است.
+{% endcomment %}
+{% if not cart or item_count == 0 %}
+<div class="wrap">
+  <div class="empty">
+    <div class="em">🛒</div>
+    <h3>سبد خرید شما خالی است</h3>
+    <p>برای ادامه، ابتدا کالاهای موردنظر را از فروشگاه به سبد خرید اضافه کنید.</p>
+    <a class="btn btn-primary" href="{% url 'catalog:product-list' %}">مشاهده محصولات فروشگاه</a>
+  </div>
+</div>
+{% else %}
+<div class="wrap">
+  <div class="card">
+    <div class="card-h"><span class="ic">🛍️</span>کالاهای سبد خرید (<span>{{ item_count|fa_number }}</span> قلم)</div>
+    <div class="card-b">
+      {% for item in cart_items %}
+      <div class="citem">
+        <div class="thumb{% if item.display_image %} has-img{% endif %}" style="background:{{ item.product.tint|default:'#eceef3' }}">{% if item.display_image %}<img src="{{ item.display_image.url }}" data-img-role="thumb" alt="{{ item.display_image.alt }}" loading="lazy" decoding="async" width="74" height="74">{% else %}<span class="thumb-fallback" aria-hidden="true">{{ item.product.icon|default:"🛍️" }}</span>{% endif %}</div>
+        <div class="info">
+          <b>{{ item.product.name }}</b>
+          {% if item.variant %}
+          <div class="meta">
+            <span>{% if item.variant.value_hex %}<span class="sw" style="background:{{ item.variant.value_hex }}"></span>{% endif %}{{ item.variant.attribute }}: {{ item.variant.value }}</span>
+          </div>
+          {% endif %}
+          {% if gift_wrap.available and item.gift_wrap_eligible %}
+          <form class="gift-wrap-box" hx-post="{% url 'cart:item-gift-wrap' item.id %}" hx-target="#cart-container" hx-swap="innerHTML" hx-trigger="change"
+                style="margin-top:8px;padding:8px 10px;border:1px dashed var(--line,#d9dce3);border-radius:10px;display:grid;gap:6px">
+            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+              <input type="checkbox" name="gift_wrap" value="1" {% if item.gift_wrap_selected %}checked{% endif %} aria-describedby="gw-desc-{{ item.id }}">
+              <span>🎁 {{ gift_wrap.title }}
+                <b>{% if item.gift_wrap_price_now %}(+{{ item.gift_wrap_price_now|toman }} {{ gift_wrap.scope_hint }}){% else %}(رایگان){% endif %}</b></span>
+            </label>
+            {% if gift_wrap.description %}<small id="gw-desc-{{ item.id }}" style="color:var(--muted,#6b7280)">{{ gift_wrap.description }}</small>{% endif %}
+            {% if gift_wrap.image_url %}<img src="{{ gift_wrap.image_url }}" data-img-role="thumb" alt="نمونه‌ی {{ gift_wrap.title }}" width="64" height="64" loading="lazy" style="border-radius:8px">{% endif %}
+            {% if item.gift_wrap_selected and gift_wrap.message_enabled %}
+            <input type="text" name="gift_message" maxlength="200" value="{{ item.gift_message }}" placeholder="پیام کارت هدیه (اختیاری)" aria-label="پیام کارت هدیه برای {{ item.product.name }}"
+                   style="width:100%;padding:8px;border:1px solid var(--line,#d9dce3);border-radius:8px">
+            {% endif %}
+          </form>
+          {% endif %}
+        </div>
+        <div class="right">
+          <div class="lp">
+            {% if item.product.is_price_inquiry %}
+            <span class="price-inquiry-label">استعلام قیمت</span>
+            <small>این کالا دیگر قابل خرید مستقیم نیست؛ لطفاً آن را از سبد حذف کنید.</small>
+            {% else %}
+            {{ item.unit_price|toman }}
+            {% if item.regular_price > item.unit_price %}<small>{{ item.regular_price|toman }}</small>{% endif %}
+            {% endif %}
+          </div>
+          <div class="stepper">
+            <button type="button" hx-post="{% url 'cart:item-update' item.id %}" hx-vals='{"quantity": {{ item.quantity|add:"-1" }}}' hx-target="#cart-container" hx-swap="innerHTML">−</button>
+            <input value="{{ item.quantity|fa_number }}" readonly>
+            <button type="button" hx-post="{% url 'cart:item-update' item.id %}" hx-vals='{"quantity": {{ item.quantity|add:"1" }}}' hx-target="#cart-container" hx-swap="innerHTML">+</button>
+          </div>
+          <button type="button" class="rm" hx-post="{% url 'cart:item-remove' item.id %}" hx-target="#cart-container" hx-swap="innerHTML">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            حذف
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,1557 @@
+"""رندر یک نسخه‌ی چیدمان (Draft یا منتشرشده) به فهرستی از بخش‌های آماده‌ی نمایش.
+
+این ماژول تنها نقطه‌ی مشترک بین پیش‌نمایش ادیتور (Draft) و صفحه اصلی عمومی
+(نسخه‌ی منتشرشده) است — دقیقاً همان چیزی که تصمیم کاربر می‌خواهد: «Public
+storefront must never read the editable draft» یعنی هر دو مسیر از همین
+رندرکننده استفاده می‌کنند اما همیشه با یک ``StorefrontLayoutVersion`` مشخص
+که فراخوان (view) آن را انتخاب کرده — پیش‌نمایش version=draft، صفحه‌ی عمومی
+version=published — نه خودِ این سرویس هرگز تصمیم نمی‌گیرد کدام نسخه.
+
+هر بخش با استفاده از سرویس‌های *موجود* catalog/content داده می‌گیرد — نه
+بازنویسیِ قوانینِ «قابل‌مشاهده بودن» — دقیقاً همان الگویی که
+``apps.catalog.views.home`` از قبل استفاده می‌کند.
+"""
+
+from __future__ import annotations
+
+from copy import copy
+
+from apps.catalog.models import Brand, Category
+from apps.catalog.services.product_publish_service import storefront_listing_products
+from apps.catalog.services import availability_service
+from apps.catalog.services.promotion_service import active_discount_q, earliest_discount_end
+from apps.content.models import HeroSlide, PromotionalBanner
+from apps.orders.services import best_seller_service
+
+from .. import appearance_registry, decorative_strip, design_block, hero_stage, pdp_settings, semantic_colors
+from ..section_registry import (
+    UnknownSectionTypeError,
+    default_brand_carousel_settings,
+    default_category_grid_settings,
+    default_quick_links_settings,
+    effective_product_section_settings,
+    get_definition,
+)
+from ..storefront_appearance.rendering import (
+    ResolvedStoreAppearance,
+    badge_settings_for,
+    card_settings_for,
+    global_renderer_template as store_appearance_global_renderer_template,
+    resolve_store_appearance_render_state,
+    section_variant_for as store_appearance_section_variant_for,
+    theme_overlay_state as store_appearance_theme_overlay_state,
+)
+from ..variant_contract import resolve_active_variant, resolve_renderer_template
+from . import category_selection, section_appearance_service, section_data_service, section_empty_state_service
+
+TILE_CLASSES = ["t1", "t2", "t3"]
+
+
+#: P5-W2 Repair A — request attribute holding the ONE canonical resolved
+#: appearance state for the current request, so every consumer (the universal
+#: render pipeline AND the shell context processor) reuses a single
+#: ``ResolvedStoreAppearance`` per request instead of resolving the same
+#: persisted Version twice.
+_REQUEST_RESOLVED_APPEARANCE_ATTR = "storefront_resolved_appearance"
+
+
+def resolved_store_appearance_for_request(request, version) -> ResolvedStoreAppearance:
+    """Return the canonical ``ResolvedStoreAppearance`` for ``version``,
+    resolving it at most once per request.
+
+    The first caller in a request (normally
+    ``storefront_context_service.build_universal_storefront_context``) resolves
+    and caches it on the request; later consumers (the shell context processor)
+    reuse the cached instance. Resolution still goes through the single
+    canonical ``resolve_store_appearance_render_state`` — this is a
+    request-scoped memoization, NOT a second resolver. A malformed NEW manifest
+    still raises loudly (the resolver's ``InvalidStoreAppearanceContract`` is
+    never swallowed here).
+    """
+    cached = getattr(request, _REQUEST_RESOLVED_APPEARANCE_ATTR, None)
+    if cached is not None and getattr(cached, "version_id", None) == version.pk:
+        return cached
+    resolved = resolve_store_appearance_render_state(version)
+    try:
+        setattr(request, _REQUEST_RESOLVED_APPEARANCE_ATTR, resolved)
+    except (AttributeError, TypeError):
+        # A non-standard request stand-in that refuses attribute assignment is
+        # acceptable — resolution still succeeded; we simply cannot memoize.
+        pass
+    return resolved
+
+
+_DESTINATION_SELECT_RELATED = (
+    "destination_category", "destination_product", "destination_brand", "destination_collection",
+)
+
+
+def _scoped_hero_slides(store, section):
+    """اسلایدهای *مخصوصِ همین نمونه* section (اگر مرچنت از داخل سازنده
+    بصری برایِ آن اسلاید اضافه کرده) — اگر این section هیچ اسلایدِ
+    اختصاصی نداشت، به اسلایدهای سراسریِ فروشگاه (section=None، رفتارِ
+    قدیمیِ پیش از این چکپوینت) برمی‌گردد. این دقیقاً همان مکانیزمی است که
+    اجازه می‌دهد دو نمونه‌ی اسلایدر مستقل (با اسلایدهای متفاوت) وجود
+    داشته باشند، بدون این‌که فروشگاه‌های قدیمی که هرگز این ویژگی را لمس
+    نکرده‌اند رفتارشان تغییر کند."""
+    # ARCH-02 — media contract. A section renders (1) its OWN active scoped rows,
+    # else (2) the store's shared default media (``section IS NULL``, the
+    # template-independent pool the R4 media manager shows as "default media").
+    # Nothing else: an unsaved (``pk=None``) candidate-preview section has no
+    # scoped rows by definition and goes straight to (2) — which is exactly what a
+    # real Apply produces (a freshly created section owns no rows), so a
+    # candidate preview can never differ from the applied result. The former
+    # "borrow rows from any same-key section of the Draft/Published version" tier
+    # was removed: it matched Draft AND Published copies of the same Placement
+    # and rendered every slide twice, and it showed media the Apply would not.
+    if section.pk is not None:
+        scoped = HeroSlide.objects.filter(section=section, is_active=True).select_related(
+            *_DESTINATION_SELECT_RELATED,
+        ).order_by("display_order", "id")
+        if scoped.exists():
+            return scoped
+    return HeroSlide.objects.filter(store=store, section__isnull=True, is_active=True).select_related(
+        *_DESTINATION_SELECT_RELATED,
+    ).order_by("display_order", "id")
+
+
+def _hero_banner_context(store, section):
+    from ..section_registry import default_slider_settings
+
+    slider_settings = {**default_slider_settings(), **(section.settings or {})}
+    return {
+        "hero_slides": _scoped_hero_slides(store, section),
+        "slider_settings": slider_settings,
+        # فقط مصرف‌شونده توسط Familyهایی که زیرِ Hero یک ردیفِ بنرِ کوچک
+        # می‌خواهند (مثلِ modern_fashion — نگاه کنید به گزارشِ
+        # 11_REFERENCE_FIDELITY_GAP_ANALYSIS.md)؛ برای بقیه بی‌اثر است.
+        "banners": _scoped_banners(store, section),
+    }
+
+
+def _image_slider_context(store, section):
+    return _hero_banner_context(store, section)
+
+
+def _scoped_banners(store, section):
+    # ARCH-02 — same media contract as ``_scoped_hero_slides`` (own scoped rows,
+    # else the store's shared default media; no cross-section borrowing).
+    if section.pk is not None:
+        scoped = PromotionalBanner.objects.filter(section=section, is_active=True).select_related(
+            *_DESTINATION_SELECT_RELATED,
+        ).order_by("display_order", "id")
+        if scoped.exists():
+            return scoped
+    return PromotionalBanner.objects.filter(store=store, section__isnull=True, is_active=True).select_related(
+        *_DESTINATION_SELECT_RELATED,
+    ).order_by("display_order", "id")
+
+
+def _single_banner_context(store, section):
+    return {"banners": _scoped_banners(store, section)[:1]}
+
+
+def _linked_image_context(store, section):
+    """V5 «عکس لینک‌دار» — ONLY this section's own picture row (no fallback to the store-wide banner pool, ever): a missing picture must show
+    nothing, never a random / default store banner. ``banners`` is a 0-or-1 list so the shared empty-state plumbing and the template agree."""
+    if getattr(section, "pk", None) is None:  # an unsaved candidate (gallery live preview) has no picture row yet
+        return {"banners": []}
+    banner = PromotionalBanner.objects.filter(
+        store=store, section=section, is_active=True,
+    ).select_related(*_DESTINATION_SELECT_RELATED).order_by("display_order", "id").first()
+    return {"banners": [banner] if banner is not None else []}
+
+
+def _multi_banner_context(store, section):
+    """Resolve a reusable slice of active promotional banners.
+
+    ``offset``/``item_limit`` live in the section JSON so several independent
+    banner blocks can compose different parts of the same Store-owned banner
+    pool without hard-coded banner IDs.  Values are clamped defensively; old
+    sections without either key keep the legacy behaviour (all banners).
+    """
+    settings = section.settings or {}
+    try:
+        offset = max(0, min(50, int(settings.get("offset", 0))))
+    except (TypeError, ValueError):
+        offset = 0
+    raw_limit = settings.get("item_limit")
+    if raw_limit in (None, ""):
+        return {"banners": _scoped_banners(store, section)}
+    try:
+        limit = max(1, min(24, int(raw_limit)))
+    except (TypeError, ValueError):
+        limit = 24
+    return {"banners": _scoped_banners(store, section)[offset:offset + limit]}
+
+
+def _category_grid_context(store, section):
+    """چکپوینتِ ۱۱: اگر مرچنت صراحتاً دسته‌بندی انتخاب کرده باشد
+    (``category_ids``)، دقیقاً همان‌ها به همان ترتیب نمایش داده می‌شوند —
+    وگرنه (فروشگاهی که هنوز این تنظیمات را لمس نکرده) دقیقاً همان
+    رفتارِ auto-pick قبل از این چکپوینت (۳+۱ دسته‌ی اولِ فعالِ سطحِ اول)
+    بازتولید می‌شود. ``pk__in`` ترتیب را حفظ نمی‌کند، پس فهرستِ
+    انتخاب‌شده دستی طبقِ همان ترتیبِ ذخیره‌شده بازسازی می‌شود (همان الگویِ
+    ``_best_sellers_context``)."""
+    category_ids = (section.settings or {}).get("category_ids") or []
+    if category_ids:
+        by_id = {
+            c.pk: c for c in Category.objects.filter(store=store, pk__in=category_ids, is_active=True)
+        }
+        categories = [by_id[cid] for cid in category_ids if cid in by_id]
+    else:
+        categories = category_selection.select_categories(
+            store, (section.settings or {}).get("category_source", "top_level"),
+        )
+    settings = {**default_category_grid_settings(), **(section.settings or {})}
+    try:
+        item_limit = max(2, min(12, int(settings.get("item_limit", 12))))
+    except (TypeError, ValueError):
+        item_limit = 12
+    top_categories = categories[:item_limit]
+    # Micro-fix pass — merchant: fashion_mosaic tiles must show the image
+    # edge-to-edge, but ``category.image`` is a deliberately composed
+    # thumbnail with large baked-in colored margins (see
+    # ``section_data_service.resolve_category_representative_media``'s own
+    # docstring for the full root-cause). Only the two media-first display
+    # modes that explicitly need uncropped representative photography pay
+    # for the extra per-category product lookup; every other category_grid
+    # variant keeps reading ``category.image`` exactly as before.
+    if settings.get("display_mode") in {"fashion_mosaic", "beauty_icons", "atelier_mosaic", "luxury_shortcuts", "grey_circles", "pastel_tiles", "gradient_tiles", "label_tiles", "icon_rail", "ring_circles", "photo_cards"}:
+        for category in top_categories:
+            category.representative_media = section_data_service.resolve_category_representative_media(category)
+    # ``min_slots`` reserves visible positions: the positions without a category render as neutral empty slots.
+    empty_slots = range(max(0, int(settings.get("min_slots") or 0) - len(top_categories)))
+    return {
+        "tiles": list(zip(categories[:3], TILE_CLASSES)),
+        "cream_category": categories[3] if len(categories) > 3 else None,
+        "top_categories": top_categories,
+        "category_grid_settings": settings,
+        "category_empty_slots": empty_slots,
+    }
+
+
+def _availability_mode(section):
+    """قاعده‌ی مالک برایِ ریل‌های کالا: در صفحه‌ی اصلی کالایِ ناموجود انتخاب
+    نمی‌شود (بخش می‌ماند و Empty State دارد)؛ در سایر صفحات موجودها اول
+    می‌آیند. ``section.page`` برای Sectionهای ذخیره‌نشده‌ی پیش‌نمایش هم
+    تنظیم می‌شود؛ اگر نبود، محافظه‌کارانه «موجودها اول» به کار می‌رود."""
+    page_type = getattr(getattr(section, "page", None), "page_type", None)
+    if page_type == "home":
+        return section_data_service.AVAILABILITY_EXCLUDE
+    return section_data_service.AVAILABILITY_FIRST
+
+
+def _catalog_product_wall_context(store, section):
+    """Site-target-overhaul Part 2D — the generic, ID-free multi-row
+    merchandising wall (see ``section_registry.CATALOG_PRODUCT_WALL_
+    SOURCE_MODES``'s own docstring for the full architecture rationale).
+
+    Resolves the CURRENT Store's own real, visible top-level categories
+    and/or merchant collections — the exact same auto-pick query
+    ``_category_grid_context`` above already uses when its own
+    ``category_ids`` is empty, plus the equivalent for
+    ``MerchantCollection`` — and returns one compact product group per
+    real, non-empty result, up to ``max_groups``. No ``source_id``, no
+    Store slug, no ``if template_key ==`` branch: this function is a pure
+    function of ``store`` and this section's own generic settings, so any
+    Ready Template may select this section for any Store."""
+    from ..section_registry import default_catalog_product_wall_settings
+
+    settings = {**default_catalog_product_wall_settings(), **(section.settings or {})}
+    source_mode = settings["source_mode"]
+    max_groups = settings["max_groups"]
+    products_per_group = settings["products_per_group"]
+    minimum_products = settings["minimum_products"] if settings["skip_empty_groups"] else 0
+    show_view_all = settings["show_view_all"]
+
+    from urllib.parse import urlencode
+
+    from django.urls import reverse
+
+    # Part 2D — with a modest catalog, a per-category/collection group can
+    # end up showing the exact same handful of products (just reordered)
+    # as one of this page's own generic ``product_section`` rows
+    # (discounted/newest/best_sellers/most_viewed, or a merchant-added
+    # one) — a real "duplicate merchandising row" a reviewer would spot
+    # immediately. Excluding whatever a SIBLING ``product_section`` on
+    # this same page already shows keeps every group here genuinely
+    # additive. Generic (any sibling instance, not a hardcoded data
+    # source) and fully local to this function — no shared render-pipeline
+    # state needs threading through ``build_page_render_items`` for it.
+    sibling_product_ids = set()
+    for sibling in section.page.sections.filter(section_key="product_section", is_active=True):
+        sibling_products, _ = section_data_service.resolve_products(
+            store, sibling.settings or {}, availability=_availability_mode(section),
+        )
+        sibling_product_ids.update(product.pk for product in sibling_products)
+
+    #: Over-fetch before filtering out sibling-shown products, so a group
+    #: can still reach ``products_per_group`` items when some of its
+    #: natural top results were already used elsewhere on the page.
+    _FETCH_MULTIPLIER = 3
+
+    groups = []
+
+    def _add_category(category):
+        if len(groups) >= max_groups:
+            return
+        candidates = section_data_service.products_in_category(
+            store, category, products_per_group * _FETCH_MULTIPLIER, _availability_mode(section),
+        )
+        products = [p for p in candidates if p.pk not in sibling_product_ids][:products_per_group]
+        if len(products) < minimum_products:
+            return
+        view_all_url = None
+        if show_view_all:
+            view_all_url = reverse("catalog:product-list") + "?" + urlencode({"category": category.slug})
+        groups.append({"title": category.name, "products": products, "view_all_url": view_all_url})
+
+    def _add_collection(collection):
+        if len(groups) >= max_groups:
+            return
+        candidates = section_data_service.products_in_collection(
+            store, collection, products_per_group * _FETCH_MULTIPLIER, _availability_mode(section),
+        )
+        products = [p for p in candidates if p.pk not in sibling_product_ids][:products_per_group]
+        if len(products) < minimum_products:
+            return
+        view_all_url = reverse("catalog:collection-detail", args=[collection.slug]) if show_view_all else None
+        groups.append({"title": collection.name, "products": products, "view_all_url": view_all_url})
+
+    if source_mode in ("visible_categories", "categories_then_collections") and len(groups) < max_groups:
+        categories = Category.objects.filter(
+            store=store, parent__isnull=True, is_active=True,
+        ).order_by("order", "name")
+        for category in categories:
+            _add_category(category)
+
+    if source_mode in ("visible_collections", "categories_then_collections") and len(groups) < max_groups:
+        from apps.catalog.models import MerchantCollection
+
+        collections = MerchantCollection.objects.filter(store=store, is_active=True).order_by("-created_at")
+        for collection in collections:
+            _add_collection(collection)
+
+    return {"catalog_product_wall_groups": groups, "catalog_product_wall_settings": settings}
+
+
+def _newest_products_context(store, section):
+    item_limit = (section.settings or {}).get("item_limit", 8)
+    products = section_data_service._arrange(
+        storefront_listing_products(store).select_related("brand").prefetch_related("images", "metafields"),
+        _availability_mode(section), "-created_at",
+    )[:item_limit]
+    return {"products": products}
+
+
+def _best_sellers_context(store, section):
+    """پرفروش‌ترین‌هایِ واقعی — از ``best_seller_service`` (محاسبه‌ی زنده
+    از OrderItem)، **نه** ``Product.sold_count`` که هیچ writer‌ای ندارد
+    (به مستندسازیِ ``best_seller_service`` مراجعه شود). ``pk__in`` ترتیبِ
+    رتبه را حفظ نمی‌کند، پس فهرست دستی طبقِ همان ترتیبِ رتبه‌بندی بازسازی
+    می‌شود (همان الگویِ ``collection_products_add``ی فازِ B)."""
+    item_limit = (section.settings or {}).get("item_limit", 8)
+    mode = _availability_mode(section)
+    product_ids = best_seller_service.best_selling_product_ids(store, limit=item_limit * 4)
+    if not product_ids:
+        return {"products": []}
+    products_by_id = {
+        p.pk: p
+        for p in storefront_listing_products(store).filter(pk__in=product_ids)
+        .select_related("brand").prefetch_related("images", "metafields")
+    }
+    products = section_data_service._arrange_list(
+        [products_by_id[pid] for pid in product_ids if pid in products_by_id], mode,
+    )[:item_limit]
+    return {"products": products}
+
+
+def _discounted_products_context(store, section):
+    item_limit = (section.settings or {}).get("item_limit", 6)
+    products = section_data_service._arrange(
+        storefront_listing_products(store).select_related("brand").prefetch_related("images", "metafields")
+        .filter(active_discount_q()),
+        _availability_mode(section), "-discount_percent",
+    )[:item_limit]
+    return {"products": products}
+
+
+def _amazing_offers_context(store, section):
+    """«پیشنهاد شگفت‌انگیز»: فقط کالاهایی که تخفیفشان *همین الان* معتبر است.
+
+    زمانِ پایانِ تایمر یک مقدارِ ذخیره‌شده است — زودترین
+    ``Product.discount_ends_at`` میانِ کالاهای نمایش‌داده‌شده — نه «الان + N
+    ساعت» که با هر رفرش از نو شروع شود. ایمنیِ قیمت هم از همان بازه می‌آید:
+    ``pricing_service.resolve_effective_price`` تخفیفِ منقضی را در سبد/پرداخت
+    اعمال نمی‌کند. اگر هیچ کالایی پایانِ ثبت‌شده نداشته باشد ``deadline`` برابرِ
+    ``None`` است و قالب هیچ تایمرِ ساختگی نشان نمی‌دهد. ``deadline_hours`` فقط
+    مدتِ پیش‌فرضِ «شروعِ کمپین» است که یک عملِ آگاهانه و مجاز
+    (``promotion_service.start_promotion``) یک‌بار مصرف می‌کند و به شکلِ
+    ``discount_ends_at`` ذخیره می‌شود — هنگامِ رندر هرگز مصرف نمی‌شود."""
+    settings = section.settings or {}
+    item_limit = settings.get("item_limit", 1)
+    products = list(
+        section_data_service._arrange(
+            storefront_listing_products(store).filter(active_discount_q())
+            .select_related("brand").prefetch_related("images", "metafields"),
+            _availability_mode(section), "-discount_percent",
+        )[:item_limit]
+    )
+    ends_at = earliest_discount_end(products)
+    return {
+        "products": products,
+        "product": products[0] if products else None,
+        "deadline": ends_at.isoformat() if ends_at else None,
+    }
+
+
+def _blog_posts_context(store, section):
+    """Journal and Home share the ONE canonical store-scoped editorial query."""
+    from apps.blog.services import published_posts_for_store
+
+    item_limit = (section.settings or {}).get("item_limit", 5)
+    posts = list(published_posts_for_store(store)[:item_limit])
+    # ``min_slots`` reserves visible card positions in the panel presentation (empty positions stay neutral).
+    empty_slots = range(max(0, int((section.settings or {}).get("min_slots") or 0) - len(posts)))
+    return {"posts": posts, "blog_empty_slots": empty_slots}
+
+
+def _featured_products_context(store, section):
+    # هیچ فیلد is_featured‌ای در Product وجود ندارد (شکاف تأییدشده در گزارش
+    # ممیزی) — تا زمانی که آن قابلیت واقعاً ساخته شود، این بخش از جدیدترین‌ها
+    # استفاده می‌کند تا هرگز داده‌ی جعلی/ثابت نشان ندهد.
+    return _newest_products_context(store, section)
+
+
+def _brand_carousel_context(store, section):
+    """چکپوینتِ ۱۱: همان الگویِ ``_category_grid_context`` — ``brand_ids``
+    خالی یعنی رفتارِ auto (همه‌ی برندهایِ فعال) دست‌نخورده می‌ماند."""
+    settings = {**default_brand_carousel_settings(), **(section.settings or {})}
+    brand_ids = settings["brand_ids"]
+    if brand_ids:
+        by_id = {b.pk: b for b in Brand.objects.filter(store=store, pk__in=brand_ids, is_active=True)}
+        brands = [by_id[bid] for bid in brand_ids if bid in by_id]
+    else:
+        brands = list(Brand.objects.filter(store=store, is_active=True).order_by("sort_order", "name"))
+
+    view_all_url = None
+    if settings["show_view_all"]:
+        destination = (section.settings or {}).get("destination") or {}
+        if destination.get("destination_type", "none") != "none":
+            from apps.content.services import resolve_destination_setting
+
+            resolved = resolve_destination_setting(store, destination)
+            view_all_url = resolved["url"]
+
+    return {"brands": brands, "brand_carousel_settings": settings, "view_all_url": view_all_url}
+
+
+def _collection_tiles_context(store, section):
+    """چکپوینتِ ۱۲: بخشِ جدید — خودِ MerchantCollectionها را نشان می‌دهد
+    (نه کالاهایِ داخلشان). ``collection_ids`` خالی = همه‌ی کالکشن‌های
+    فعال (ترتیبِ ایجاد، جدیدترین اول)."""
+    from apps.catalog.models import MerchantCollection
+
+    collection_ids = (section.settings or {}).get("collection_ids") or []
+    if collection_ids:
+        by_id = {
+            c.pk: c for c in MerchantCollection.objects.filter(store=store, pk__in=collection_ids, is_active=True)
+        }
+        collections = [by_id[cid] for cid in collection_ids if cid in by_id]
+    else:
+        collections = list(
+            MerchantCollection.objects.filter(store=store, is_active=True).order_by("-created_at")
+        )
+    # شمارشِ کالا با یک کوئریِ جمعی (annotate)، نه N+1 در تمپلیت
+    from django.db.models import Count
+
+    counts_qs = MerchantCollection.objects.filter(pk__in=[c.pk for c in collections]).annotate(item_count=Count("items"))
+    counts_by_id = {row.pk: row.item_count for row in counts_qs}
+    tiles = [{"collection": c, "item_count": counts_by_id.get(c.pk, 0)} for c in collections]
+    return {"collection_tiles": tiles}
+
+
+def _quick_links_context(store, section):
+    """چکپوینتِ ۱۲: «دسترسی سریع» — یک Menuِ موجود (همان زیرساختِ
+    Menu/MenuItem/Destinationِ ناوبریِ هدر/فوتر) را به‌شکلِ کارت‌هایِ
+    بصری نشان می‌دهد؛ هیچ مدلِ لینکِ جدیدی ساخته نشده.
+
+    ``Prefetch`` با یک queryset از پیش‌فیلترشده (نه ``prefetch_related``یِ
+    ساده + یک ``.filter()`` دیگر رویِ ``menu.items`` بعداً) — وگرنه آن
+    فیلترِ دوم یک کوئریِ کاملاً جدا اجرا می‌کرد و کشِ prefetch را بی‌اثر
+    می‌گذاشت (همان الگویِ ``apps.content.context_processors.navigation_menus``)."""
+    from django.db.models import Prefetch
+
+    from apps.content.models import Menu, MenuItem
+    from apps.content.services import resolve_destination_url
+
+    settings = {**default_quick_links_settings(), **(section.settings or {})}
+    menu_id = settings["menu_id"]
+    items = []
+    menu = None
+    if menu_id:
+        items_qs = MenuItem.objects.filter(is_active=True, parent__isnull=True).select_related(
+            "destination_category", "destination_product", "destination_brand",
+        ).order_by("display_order", "id")
+        menu = Menu.objects.filter(store=store, pk=menu_id, is_active=True).prefetch_related(
+            Prefetch("items", queryset=items_qs),
+        ).first()
+    if menu is not None:
+        for menu_item in menu.items.all():
+            url = resolve_destination_url(menu_item)
+            if url:
+                items.append({"title": menu_item.title, "url": url, "open_in_new_tab": menu_item.open_in_new_tab})
+    return {"quick_link_items": items}
+
+
+def _video_section_context(store, section):
+    """چکپوینتِ ۱۲: از همان تشخیصِ ارائه‌دهنده/محاسبه‌ی embed_url که برایِ
+    ویدیویِ کالا استفاده می‌شود عبور می‌کند (نه بازنویسیِ دوباره) — یک
+    نمونه‌ی موقتِ (ذخیره‌نشده‌یِ) ``ProductVideo`` فقط برایِ عبور از همان
+    منطق ساخته می‌شود."""
+    from apps.catalog.models import ProductVideo
+    from apps.catalog.services import product_video_service
+
+    items = []
+    for row in (section.settings or {}).get("videos") or []:
+        try:
+            provider, _external_id = product_video_service.detect_provider_and_id(row.get("url", ""))
+        except product_video_service.ProductVideoError:
+            continue
+        temp = ProductVideo(provider=provider, url=row["url"])
+        if provider == ProductVideo.Provider.INSTAGRAM:
+            items.append({"title": row.get("title", ""), "embed_url": None, "permalink": product_video_service.instagram_permalink(temp)})
+        else:
+            items.append({"title": row.get("title", ""), "embed_url": product_video_service.embed_url(temp), "permalink": None})
+    video_url = (section.settings or {}).get("video_url") or ""
+    if not video_url:
+        return {"video_embed_url": None, "video_is_instagram": False, "video_permalink": None, "video_items": items}
+
+    try:
+        provider, _external_id = product_video_service.detect_provider_and_id(video_url)
+    except product_video_service.ProductVideoError:
+        return {"video_embed_url": None, "video_is_instagram": False, "video_permalink": None, "video_items": items}
+
+    temp_video = ProductVideo(provider=provider, url=video_url)
+    if provider == ProductVideo.Provider.INSTAGRAM:
+        return {"video_embed_url": None, "video_is_instagram": True,
+                "video_permalink": product_video_service.instagram_permalink(temp_video), "video_items": items}
+    return {"video_embed_url": product_video_service.embed_url(temp_video), "video_is_instagram": False, "video_permalink": None,
+            "video_items": items}
+
+
+def _category_context_for_promo_cards(store, section):
+    item_limit = (section.settings or {}).get("item_limit", 4)
+    categories = Category.objects.filter(store=store, is_active=True).order_by("order", "name")[:item_limit]
+    return {"categories": categories}
+
+
+def _static_context(store, section):
+    return {}
+
+
+def _trust_features_context(store, section):
+    """FOLLOWUP-10 — آیتم‌های ردیفِ اعتماد با وضعیتِ نمایشِ عمومی (ادعای عملیاتی فقط با قابلیتِ واقعاً فعال)."""
+    from .trust_claims import resolve_items
+
+    items = resolve_items(store, section.settings or {})
+    return {"trust_items": items, "trust_public_items": [i for i in items if i["public_visible"]]}
+
+
+def _decorative_strip_context(store, section):
+    """The strip's view model. The image URL is resolved here (Store-scoped, fail-closed) — never in
+    the template and never from a raw stored URL."""
+    from apps.content.services import resolve_background_media_url
+
+    settings = section.settings or {}
+    image_url = None
+    if settings.get("background_mode") == "image" and settings.get("image_media_asset_id"):
+        image_url = resolve_background_media_url(
+            store, {"mode": "image", "media_asset_id": settings["image_media_asset_id"]},
+        )
+    return {"strip": decorative_strip.build_view(settings, image_url)}
+
+
+def _image_text_context(store, section):
+    """Destination (as every destination section) + the Store-scoped media-library picture, resolved server-side and fail-closed:
+    a missing / foreign asset yields no picture rather than a broken image. Absent unless a media asset is chosen."""
+    context = dict(_resolved_destination_context(store, section))
+    media_id = (section.settings or {}).get("image_media_asset_id")
+    if media_id:
+        from apps.content.services import resolve_background_media_url
+
+        context["image_media_url"] = resolve_background_media_url(store, {"mode": "image", "media_asset_id": media_id}) or ""
+    return context
+
+
+def _hero_stage_context(store, section):
+    """The header + hero stage's view model (``hero_stage.py`` owns the vocabulary). Everything Store-specific is resolved HERE,
+    server-side and fail-closed — never in the template: panel pictures through the Store-scoped media resolver (a missing / foreign
+    asset yields no picture, never a broken image), the CTA through the standard destination resolver, categories and the floating
+    product through the Store's own catalog queries. Nothing is invented: an empty catalog simply renders no category bar / no card."""
+    from apps.content.services import resolve_background_media_url
+
+    raw = section.settings or {}
+    view = hero_stage.resolve_stage_view(raw)
+    context = dict(_resolved_destination_context(store, section))
+    context["stage"] = view
+    panel_urls = []
+    for key in hero_stage.MEDIA_KEYS:
+        media_id = raw.get(key)
+        panel_urls.append(
+            (resolve_background_media_url(store, {"mode": "image", "media_asset_id": media_id}) or "") if media_id else ""
+        )
+    context["panel_urls"] = panel_urls
+    slot_keys = {slot["key"] for slot in view["slots"]}
+    context["stage_categories"] = (
+        category_selection.select_categories(store, "top_level")[: view["category_limit"]] if "categories" in slot_keys else []
+    )
+    product = None
+    if "product_card" in slot_keys:
+        products, _view_all = section_data_service.resolve_products(
+            store, {"data_source": view["product_source"], "item_limit": 1}, availability=_availability_mode(section),
+        )
+        product = products[0] if products else None
+    context["stage_product"] = product
+    return context
+
+
+def _first_top_level_item(items, use_container_layout, render_containers):
+    """The render item a visitor sees FIRST on the page, but only when it is a stand-alone full-width block: with Container/Cell layout
+    (the primary composition source the Studio and every Ready Template produce) it is the first Block of the first non-empty top-level,
+    single-Cell, un-framed Container; with the legacy row layout it is the first item that is not part of a multi-item row."""
+    if use_container_layout:
+        for composition in render_containers or ():
+            if not composition.get("has_placement"):
+                continue                       # a truly empty Container shows nothing (public skips it too)
+            container = composition["container"]
+            if container.parent_cell_id is not None or (composition.get("group") or {}).get("framed"):
+                return None
+            cells = composition.get("cells") or []
+            if len(cells) != 1 or cells[0].get("group") or not cells[0].get("items"):
+                return None
+            return cells[0]["items"][0]
+        return None
+    if not items:
+        return None
+    first = items[0]
+    section = first.get("section")
+    return None if section is None or getattr(section, "row_key", "") else first
+
+
+def header_embedded_for(items, *, use_container_layout: bool = False, render_containers=None) -> bool:
+    """Is the Store's global header rendered INSIDE the page's first section (the ``hero_stage``) instead of by the shell?
+
+    True only when the first top-level block of the page is a ``hero_stage`` whose ``header_mode`` is ``merged`` or ``overlay`` and that
+    is visible on every device. Anything else — another section first, a multi-cell row, a nested Group, a stage hidden on some device
+    (the header, and with it the cart, must never become unreachable), any other page type — keeps the shell header, so the decision
+    degrades safely to today's behaviour. ONE function for Preview, Draft preview, gallery preview and the live page."""
+    first = _first_top_level_item(items, use_container_layout, render_containers)
+    if first is None:
+        return False
+    section = first.get("section")
+    if section is None or section.section_key != hero_stage.SECTION_KEY:
+        return False
+    settings = first.get("context", {}).get("settings") or section.settings or {}
+    if hero_stage.header_mode_of(settings) == "independent":
+        return False
+    responsive = settings.get("responsive") or {}
+    return not any(responsive.get(flag) for flag in ("hide_on_desktop", "hide_on_tablet", "hide_on_mobile"))
+
+
+def _resolved_destination_context(store, section):
+    """بلوکِ ``destination`` این section (اگر داشته باشد) را به URL/تب‌جدید
+    واقعی حل می‌کند — برایِ انواعی که در ``destination`` capability
+    عضوند و لینکشان واقعاً «سطحِ خودِ section» است (نه per-slide/per-banner
+    مثلِ hero/banner که مقصدشان داخلِ خودِ مدلِ ``HeroSlide``/
+    ``PromotionalBanner`` است)."""
+    destination = (section.settings or {}).get("destination") or {}
+    if destination.get("destination_type", "none") == "none":
+        return {"destination": {"url": None, "open_new_tab": False, "rel": ""}}
+
+    from apps.content.services import resolve_destination_setting
+
+    return {"destination": resolve_destination_setting(store, destination)}
+
+
+def _product_section_context(store, section):
+    """برخلافِ همه‌ی builderهایِ دیگرِ این فایل، این یکی به تنظیماتِ
+    خاصِ همین section (``data_source``/``source_id``/``product_ids``)
+    وابسته است — پس در ``PER_INSTANCE_SECTION_KEYS`` زیر ثبت شده تا
+    ``build_render_items`` آن را برایِ هر نمونه جداگانه محاسبه کند، نه
+    یک‌بار برایِ کلِ section_key (بازنویسی‌شدن با کش، دقیقاً همان باگی
+    که این پرچم برایِ جلوگیری از آن اضافه شده)."""
+    products, view_all_url = section_data_service.resolve_products(
+        store, section.settings or {}, availability=_availability_mode(section),
+    )
+    destination = (section.settings or {}).get("destination") or {}
+    if destination.get("destination_type", "none") != "none":
+        from apps.content.services import resolve_destination_setting
+
+        resolved = resolve_destination_setting(store, destination)
+        if resolved["url"]:
+            view_all_url = resolved["url"]
+    context = {"products": products, "view_all_url": view_all_url}
+    if (section.settings or {}).get("tabs_source"):
+        context["tabs"] = section_data_service.resolve_product_tabs(
+            store, section.settings or {}, availability=_availability_mode(section),
+        )
+    return context
+
+
+#: کلیدهایی که context builder‌شان به تنظیماتِ خودِ همان نمونه‌ی section
+#: وابسته است (نه فقط به store) — برایِ این‌ها، کشِ سطح-تابعِ
+#: ``build_render_items`` باید per-instance باشد، وگرنه دو نمونه‌ی
+#: تکرارشده (duplicable) با تنظیماتِ متفاوت (مثلاً دو کالکشنِ متفاوت)
+#: محتوایِ یکسان (نمونه‌ی اول) نشان می‌دهند.
+PER_INSTANCE_SECTION_KEYS = {
+    "trust_features", "decorative_strip", "product_section", "image_text", "hero_stage", "hero_banner", "image_slider", "single_banner", "linked_image", "multi_banner",
+    "category_grid", "brand_carousel", "collection_tiles", "quick_links", "video_section", "story_rail",
+    #: Part 2D — same reason as ``product_section``/``category_grid``
+    #: above: this builder's output depends on the section's own
+    #: ``source_mode``/``max_groups``/etc. settings, not just the Store.
+    "catalog_product_wall",
+    #: Phase 3 — این دو context builder هم اکنون به تنظیماتِ خودِ همان
+    #: نمونه (``item_limit``/``deadline_hours``) وابسته‌اند، دقیقاً همان
+    #: دلیلِ بالا (``product_section``).
+    "amazing_offers", "blog_posts",
+    #: Task 6 (Group B) — همین دلیل: از این چکپوینت به بعد،
+    #: ``_newest_products_context``/``_best_sellers_context``/
+    #: ``_discounted_products_context``/``_category_context_for_promo_cards``
+    #: هم به ``item_limit``ی خودِ همان نمونه وابسته‌اند (پیش از این
+    #: چکپوینت، این چهار context builder اصلاً به ``section.settings``
+    #: نگاه نمی‌کردند — یک مقدارِ ثابتِ hardcode‌شده داشتند).
+    "newest_products", "best_sellers", "discounted_products", "promo_cards",
+}
+
+
+def _story_rail_context(store, section):
+    """ریلِ استوری — آیتم‌هایِ فعالِ همین Section (یا سراسریِ فروشگاه اگر
+    section-specific نداشته باشد). همان الگویِ hero_slides."""
+    from apps.content.models import StoryRailItem
+
+    # ARCH-02 — same media contract as ``_scoped_hero_slides`` (own scoped rows,
+    # else the store's shared default media; no cross-section borrowing).
+    if section.pk is not None:
+        scoped = StoryRailItem.objects.filter(section=section, is_active=True).order_by("display_order", "id")
+        if scoped.exists():
+            return {"story_items": scoped}
+    # Fallback: آیتم‌هایِ سراسریِ فروشگاه (section__isnull=True)
+    return {"story_items": StoryRailItem.objects.filter(store=store, section__isnull=True, is_active=True).order_by("display_order", "id")}
+
+
+#: Phase 5: توابعِ context-aware — امضایِ ``(store, section, page_context)``،
+#: نه ``(store, section)``یِ معمولِ بالا. ``page_context`` همان دیکشنریِ
+#: کاملی است که ویوِ مسیرِ عمومی (یا Preview، با یک نمونه‌یِ نماینده) از
+#: قبل برایِ رندرِ سخت‌کدشده‌ی خودِ صفحه ساخته — یعنی محصول/کالکشن/جستجو/
+#: سبدِ «جاری» هرگز از رویِ IDای که در ``settings`` ذخیره شده resolve
+#: نمی‌شود (که مسیرِ Draft/Publish را می‌شکست و تفکیکِ Store را به خطر
+#: می‌انداخت)، بلکه همیشه از همان کوئریِ موجود و از قبل تفکیک‌شده‌یِ Store
+#: که ویو خودش زده resolve می‌شود — صفر کوئریِ اضافه، صفر منطقِ تکراری.
+
+
+def _product_main_context(store, section, page_context):
+    product = page_context.get("product")
+    if product is None:
+        return {}
+    return {
+        "product": product,
+        "variant_selector": page_context.get("variant_selector"),
+        "product_price_json": page_context.get("product_price_json"),
+        "gift_wrap": page_context.get("gift_wrap"),
+        "gallery_slides": page_context.get("gallery_slides"),
+        "review_count": page_context.get("review_count", 0),
+        # V5 (PDP بستهٔ ۱) — فقط «چینش و ظاهر»: همین‌جا از settings ی همین Section حل می‌شود (lenient، هرگز exception نمی‌دهد)؛
+        # قیمت/موجودی/تنوع/فرم خرید همچنان از page_context بالا می‌آیند، نه از این view.
+        "pdp": pdp_settings.resolve_product_main_view(getattr(section, "settings", None)),
+    }
+
+
+def _brand_panel_view(brand, product=None):
+    """The real, Store-owned brand data the optional «برند» section can show — ``None`` when the product has no brand, the brand
+    belongs to another Store, or it carries nothing to say (no empty / decorative panel is ever rendered). Only an http(s)
+    website is ever linked."""
+    if brand is None:
+        return None
+    if product is not None and getattr(brand, "store_id", None) != getattr(product, "store_id", None):
+        return None
+    try:
+        logo_url = brand.logo.url if brand.logo else ""
+    except Exception:  # a missing / unreadable file simply means «no logo» — never a broken page
+        logo_url = ""
+    view = {
+        "name": brand.name, "name_en": brand.name_en, "logo_url": logo_url,
+        "description": brand.description, "country": brand.country,
+        "website": brand.website if str(brand.website or "").lower().startswith(("http://", "https://")) else "",
+    }
+    return view if any(view[key] for key in ("logo_url", "description", "country", "website")) else None
+
+
+def _product_description_context(store, section, page_context):
+    product = page_context.get("product")
+    if product is None:
+        return {}
+    brand_panel = _brand_panel_view(getattr(product, "brand", None), product)
+    return {
+        "product": product,
+        "spec_variant_summary": page_context.get("spec_variant_summary", {}),
+        "approved_reviews": page_context.get("approved_reviews"),
+        "review_count": page_context.get("review_count", 0),
+        "rating_breakdown": page_context.get("rating_breakdown", []),
+        "can_review": page_context.get("can_review", False),
+        "brand_panel": brand_panel,
+        "pdd": pdp_settings.resolve_product_description_view(
+            getattr(section, "settings", None), brand_available=brand_panel is not None,
+        ),
+    }
+
+
+def _product_video_context(store, section, page_context):
+    if page_context.get("product") is None:
+        return {}
+    return {"product_videos": page_context.get("product_videos") or []}
+
+
+def _related_products_context(store, section, page_context):
+    if page_context.get("product") is None:
+        return {}
+    return {"related_products": page_context.get("related_products")}
+
+
+def _product_listing_context(store, section, page_context):
+    """listing و search هر دو همین را استفاده می‌کنند — بدونِ «محصولِ
+    جاری»ای که فقدانش باید fail-safe شود؛ حتی صفحه‌ای که Preview هنوز
+    هیچ کوئری‌ای برایش نساخته (کلیدها غایب) با مقادیرِ خنثی رندر می‌شود،
+    نه crash."""
+    return {
+        "page_obj": page_context.get("page_obj"),
+        "products": page_context.get("products"),
+        "query": page_context.get("query", ""),
+        "sort_key": page_context.get("sort_key"),
+        "sort_options": page_context.get("sort_options"),
+        "filter_categories": page_context.get("filter_categories"),
+        "brands": page_context.get("brands"),
+        "selected_category": page_context.get("selected_category", ""),
+        "selected_brand": page_context.get("selected_brand", ""),
+        "min_price": page_context.get("min_price", ""),
+        "max_price": page_context.get("max_price", ""),
+        "discounted_only": page_context.get("discounted_only", False),
+        "querystring": page_context.get("querystring", ""),
+    }
+
+
+def _collection_header_context(store, section, page_context):
+    collection = page_context.get("collection")
+    if collection is None:
+        return {}
+    return {"collection": collection}
+
+
+def _collection_products_context(store, section, page_context):
+    collection = page_context.get("collection")
+    if collection is None:
+        return {}
+    return {
+        "collection": collection,
+        "products": page_context.get("products"),
+        "page_obj": page_context.get("page_obj"),
+    }
+
+
+def _cart_items_context(store, section, page_context):
+    return {
+        "cart": page_context.get("cart"),
+        "cart_items": page_context.get("cart_items") or [],
+        "item_count": page_context.get("item_count", 0),
+    }
+
+
+def _cart_summary_context(store, section, page_context):
+    return {
+        "cart": page_context.get("cart"),
+        "item_count": page_context.get("item_count", 0),
+        "totals": page_context.get("totals"),
+    }
+
+
+_CONTEXT_AWARE_BUILDERS: dict = {
+    "product_main": _product_main_context,
+    "product_description": _product_description_context,
+    "product_video": _product_video_context,
+    "related_products": _related_products_context,
+    "product_listing": _product_listing_context,
+    "collection_header": _collection_header_context,
+    "collection_products": _collection_products_context,
+    "cart_items": _cart_items_context,
+    "cart_summary": _cart_summary_context,
+}
+
+
+_CONTEXT_BUILDERS = {
+    "announcement_bar": _static_context,
+    "hero_banner": _hero_banner_context,
+    "image_slider": _image_slider_context,
+    "single_banner": _single_banner_context,
+    "linked_image": _linked_image_context,
+    "multi_banner": _multi_banner_context,
+    "category_grid": _category_grid_context,
+    "featured_products": _featured_products_context,
+    "newest_products": _newest_products_context,
+    "best_sellers": _best_sellers_context,
+    "discounted_products": _discounted_products_context,
+    "amazing_offers": _amazing_offers_context,
+    "brand_carousel": _brand_carousel_context,
+    "promo_cards": _category_context_for_promo_cards,
+    "rich_text": _static_context,
+    "image_text": _image_text_context,
+    "hero_stage": _hero_stage_context,
+    "blog_posts": _blog_posts_context,
+    "product_section": _product_section_context,
+    "catalog_product_wall": _catalog_product_wall_context,
+    "trust_features": _trust_features_context,
+    "collection_tiles": _collection_tiles_context,
+    "quick_links": _quick_links_context,
+    "faq": _static_context,
+    "testimonials": _static_context,
+    "video_section": _video_section_context,
+    "story_rail": _story_rail_context,
+    "surface_panel": _static_context,
+    "decorative_strip": _decorative_strip_context,
+}
+
+
+_BACKGROUND_FOCAL = {"left": "0%", "top": "0%", "center": "50%", "right": "100%", "bottom": "100%"}
+
+
+def _background_view(background, media_url) -> dict:
+    """Presentation of an ``image`` background, resolved server-side so Preview and Published share one result.
+
+    ``image_extra`` is appended to the wrapper's inline ``background-image`` (the historical ``cover``/``center``
+    output when nothing was customised); ``layer_style`` is the same image for the edge-to-edge ``.rsec-bleed`` layer;
+    ``overlay_style`` paints the optional colour overlay (a semantic colour: palette role or custom hex)."""
+    view = {"image_extra": ";background-size:cover;background-position:center", "layer_style": "", "overlay_style": "", "vars": ""}
+    background = background or {}
+    if background.get("mode") != "image" or not media_url:
+        return view
+    fit = "contain" if background.get("image_fit") == "contain" else "cover"
+    x = _BACKGROUND_FOCAL.get(background.get("image_position_x") or "center", "50%")
+    y = _BACKGROUND_FOCAL.get(background.get("image_position_y") or "center", "50%")
+    if fit != "cover" or (x, y) != ("50%", "50%"):
+        view["image_extra"] = f";background-size:{fit};background-position:{x} {y};background-repeat:no-repeat"
+    view["layer_style"] = (
+        f"background-color:transparent;background-image:url('{media_url}');"
+        f"background-size:{fit};background-position:{x} {y};background-repeat:no-repeat"
+    )
+    variables = [f"--sfb-bg-image:url('{media_url}')", f"--sfb-bg-size:{fit}", f"--sfb-bg-position:{x} {y}", "--sfb-bg-repeat:no-repeat"]
+    opacity = background.get("overlay_opacity") or 0
+    if opacity:
+        colour = semantic_colors.semantic_color_css(background.get("overlay_color")) or "#000000"
+        view["overlay_style"] = f"background-color:{colour};opacity:{opacity / 100:g}"
+        variables.append(f"--sfb-overlay:color-mix(in srgb,{colour} {opacity}%,transparent)")
+    view["vars"] = ";" + ";".join(variables)
+    return view
+
+
+def _campaign_panel_view(store, settings: dict) -> dict:
+    """Everything the campaign band's promotional panel needs, resolved server-side (never hard-coded in the template).
+
+    The panel's copy is the merchant's (``campaign_panel_title``/``_subtitle``; a legacy section follows its own
+    title/subtitle) — the engine never invents marketing copy. The visual is a registered icon KEY or a Store-scoped
+    MediaAsset (ownership re-checked at resolve time); colours are semantic (palette role or custom hex) with an
+    accessible automatic foreground."""
+    from apps.content.services import resolve_background_media_url
+
+    from .. import icon_registry
+    from ..section_registry import effective_campaign_copy
+
+    title, subtitle = effective_campaign_copy(settings)
+    mode = settings.get("campaign_visual_mode", "icon")
+    view = {
+        "enabled": settings.get("campaign_panel_enabled", True) is not False,
+        "title": title, "subtitle": subtitle, "visual": mode, "icon_svg": "", "media_url": "",
+    }
+    if mode == "icon":
+        view["icon_svg"] = icon_registry.icon_svg(settings.get("campaign_icon_key", icon_registry.DEFAULT_ICON_KEY))
+        if not view["icon_svg"]:
+            view["visual"] = "none"
+    elif mode == "media":
+        view["media_url"] = resolve_background_media_url(
+            store, {"mode": "image", "media_asset_id": settings.get("campaign_media_asset_id")},
+        ) or ""
+        if not view["media_url"]:
+            view["visual"] = "none"  # a missing / foreign asset renders no visual rather than a broken image
+    css: list[str] = []
+    band_css = f"--cp-w:{int(settings['campaign_panel_width'])}%" if settings.get("campaign_panel_width") else ""
+    if settings.get("campaign_visual_size"):
+        css.append(f"--cp-visual:{int(settings['campaign_visual_size'])}px")
+    for key, var in (("campaign_panel_radius", "--cp-radius"), ("campaign_panel_border_width", "--cp-bw"),
+                     ("campaign_panel_padding", "--cp-pad")):
+        if settings.get(key) is not None:
+            css.append(f"{var}:{int(settings[key])}px")
+    bg = settings.get("campaign_panel_bg", "")
+    fg = settings.get("campaign_panel_fg", "")
+    if bg:
+        css.append(f"--cp-bg:{semantic_colors.semantic_color_css(bg)}")
+        if not fg:  # automatic, accessible ink for the chosen fill
+            css.append(f"--cp-fg:{semantic_colors.semantic_foreground_css(bg)}")
+    if fg:
+        css.append(f"--cp-fg:{semantic_colors.semantic_color_css(fg)}")
+    if settings.get("campaign_panel_accent"):
+        css.append(f"--cp-accent:{semantic_colors.semantic_color_css(settings['campaign_panel_accent'])}")
+    if settings.get("campaign_panel_border_color"):
+        css.append(f"--cp-bc:{semantic_colors.semantic_color_css(settings['campaign_panel_border_color'])}")
+    view["style"] = ";".join(css)
+    view["band_style"] = band_css
+    view["align"] = settings.get("campaign_panel_align", "center")
+    return view
+
+
+def build_page_render_items(
+    page,
+    store,
+    page_context: dict | None = None,
+    *,
+    store_appearance: ResolvedStoreAppearance | None = None,
+    only_section_ids=None,
+) -> list[dict]:
+    """فهرست بخش‌های فعالِ **یک ``StorefrontPage`` مشخص**، هرکدام با
+    template_name + context آماده — Phase 1B: نسخه‌یِ صفحه‌آگاهِ عمومیِ
+    این تابع؛ ``build_render_items(version, store)`` (پایین) اکنون فقط
+    یک wrapperِ سازگاریِ نازک است که ``version.home_page()`` را حل کرده و
+    به همینجا صدا می‌زند — پیاده‌سازیِ واقعی همیشه اینجا زندگی می‌کند، نه
+    دوباره‌نویسیِ آن برایِ هر صفحه.
+
+    برایِ صفحه‌ای که هنوز هیچ Section‌ای ندارد (Phase 1A/1B: همه‌یِ
+    صفحاتِ غیرِ اصلی امروز عمداً خالی‌اند)، این تابع بدونِ خطا فقط یک
+    فهرستِ خالی برمی‌گرداند — نه محتوایِ ساختگی، نه crash؛ دقیقاً همان
+    الزامِ صریحِ کار («Do NOT auto-create arbitrary visual blocks»).
+
+    بخش‌هایی با section_key ناشناخته (مثلاً از یک نسخه‌ی قدیمی‌تر که آن نوع
+    را دیگر پشتیبانی نمی‌کند) بی‌صدا حذف می‌شوند — پیش‌نمایش/صفحه هرگز crash
+    نمی‌کند.
+
+    بهینه‌سازی کوئری: اکثرِ توابعِ ``_CONTEXT_BUILDERS`` به تنظیماتِ
+    نمونه‌ی خاصِ یک section وابسته نیستند (فقط به ``store``) — پس اگر
+    تاجر یک نوع section را چند بار تکرار کند (قابلیت پشتیبانی‌شده،
+    ``duplicable=True``)، نتیجه‌ی کوئری برای همان section_key در یک بار
+    رندر همیشه یکسان است و کش سطح-تابع زیر این کوئری‌های تکراری را در یک
+    درخواست حذف می‌کند. استثنا: کلیدهایِ ``PER_INSTANCE_SECTION_KEYS``
+    (فعلاً فقط ``product_section``) که تنظیماتِ per-instance دارند
+    (مثلاً کالکشنِ متفاوت در هر نمونه) — برایِ این‌ها کش با
+    ``(section_key, section.pk)`` کلیددهی می‌شود، نه فقط section_key، تا
+    نمونه‌ی دوم محتوایِ نمونه‌ی اول را «قرض» نگیرد. این یک لایه‌ی کش
+    خارجی/persistent نیست (که برای این ویو، همیشه باید Draft زنده را
+    نشان دهد، خطر بازگشت داده‌ی کهنه دارد) — فقط حذفِ کوئریِ تکراری در
+    یک درخواست."""
+    page_context = page_context or {}
+    sections = page.sections.filter(is_active=True).order_by("order", "id")
+    # A7 — resolve the typed Store Appearance state once for the exact
+    # version already selected by the caller. Public/Preview callers may
+    # pre-resolve and pass the same immutable state so global regions and
+    # section items share one resolution for the whole response.
+    if store_appearance is None:
+        store_appearance = resolve_store_appearance_render_state(page.version)
+    elif store_appearance.version_id != page.version_id:
+        raise ValueError("Store Appearance state belongs to another layout version")
+
+    # Existing typography/palette overrides remain sourced from the same
+    # physical version. Store Appearance augments this boundary; it does not
+    # duplicate or replace the existing appearance-token service.
+    global_appearance = page.version.effective_appearance_config()
+    return _build_items_from_sections(
+        sections,
+        store,
+        page_context,
+        global_appearance=global_appearance,
+        store_appearance=store_appearance,
+        only_section_ids=only_section_ids,
+    )
+
+
+def _build_items_from_sections(
+    sections,
+    store,
+    page_context: dict,
+    global_appearance: dict | None = None,
+    store_appearance: ResolvedStoreAppearance | None = None,
+    only_section_ids=None,
+) -> list[dict]:
+    """پیاده‌سازیِ مشترکِ واقعی — رویِ هر iterableای از آبجکت‌هایِ
+    ``StorefrontSection``-شکل کار می‌کند، نه فقط یک QuerySetِ ذخیره‌شده در
+    دیتابیس. ``build_page_render_items`` (بالا) این را با سطرهایِ واقعیِ
+    یک ``StorefrontPage`` صدا می‌زند؛ ``build_candidate_render_items``
+    (پایین) با نمونه‌هایِ **ذخیره‌نشده** (in-memory) برایِ پیش‌نمایشِ Template —
+    دقیقاً همان قرارداد context/cache/skip-unknown-key برایِ هر دو مسیر."""
+    from apps.content.services import resolve_background_media_url
+
+    items = []
+    context_cache: dict = {}
+    # PDTX (Phase 5 Task 5) — the canonical editable PDP trust owner is a
+    # ``trust_features`` section placed on the page. When one exists as a
+    # sibling here, ``product_main``'s hard-coded ``.guarantee`` strip must
+    # NOT also render (never two competing trust modules on one PDP). The
+    # sibling list is already fully in scope, so this is a free O(n) check —
+    # no DB query — and it is identical for the published path and the
+    # unsaved-default path, so backward compatibility (stores without the new
+    # section keep the hard-coded strip) is preserved automatically.
+    _sections_list = list(sections)
+    has_sibling_trust_features = any(
+        s.section_key == "trust_features" and getattr(s, "is_active", True)
+        for s in _sections_list
+    )
+    for section in _sections_list:
+        # Partial refresh: build ONLY the requested sections (page-wide facts such as ``has_sibling_trust_features``
+        # above were computed from the full list, so a fragment renders exactly like the full page would).
+        if only_section_ids is not None and section.pk not in only_section_ids:
+            continue
+        try:
+            definition = get_definition(section.section_key)
+        except UnknownSectionTypeError:
+            continue
+
+        # A7 — a non-default Store Appearance section component is a
+        # render-time selection over the existing registered Variant axis.
+        # The persisted Section itself is never rewritten here. The explicit
+        # safe ``legacy_default`` component deliberately defers to the
+        # Section's own saved setting, preserving every pre-engine template.
+        appearance_variant = (
+            store_appearance_section_variant_for(store_appearance, section.section_key)
+            if store_appearance is not None
+            else None
+        )
+        effective_settings = dict(section.settings or {})
+        render_section = section
+        # Phase 1 (Task 6) / Phase 4 (Task 6, Group F correction) — approved
+        # precedence: an EXPLICIT local override (stamped
+        # ``appearance_overrides.variant_explicit``/``card_style_explicit``
+        # by a genuine merchant edit) is the strongest normal override and
+        # wins over the inherited Store-level family default. Historical rows
+        # WITHOUT a marker keep the current inherited/global overlay behavior,
+        # so existing stores do not visually flip. The Store manifest
+        # selection itself is unchanged; only whether it overlays the local
+        # value differs. Computed here (before the card/badge overlay below)
+        # so both overlays can honor their own marker.
+        _local_overrides = effective_settings.get("appearance_overrides") or {}
+        _variant_explicit = bool(_local_overrides.get("variant_explicit"))
+        _card_style_explicit = bool(_local_overrides.get("card_style_explicit"))
+        if store_appearance is not None and definition.supports_capability("card"):
+            presentation_overlay = dict(badge_settings_for(store_appearance))
+            # ``badge`` has no merchant-facing local write path anywhere, so
+            # its overlay always applies. ``card_style`` does (the legacy
+            # card-settings form) — an explicit local choice must survive a
+            # conflicting Store-level card family selection, exactly like the
+            # variant axis below.
+            if not _card_style_explicit:
+                presentation_overlay.update(card_settings_for(store_appearance))
+            if presentation_overlay:
+                effective_card_settings = dict(effective_settings.get("card") or {})
+                effective_card_settings.update(presentation_overlay)
+                effective_settings["card"] = effective_card_settings
+        # When the local variant is explicit, the manifest variant no longer
+        # overlays the section for this render (neither the settings mirror nor
+        # the resolved ``active_variant`` below), so the saved local variant wins.
+        effective_appearance_variant = (
+            None if _variant_explicit else appearance_variant
+        )
+        if effective_appearance_variant is not None:
+            variant_setting_key = definition.variant_setting_key or "variant"
+            effective_settings[variant_setting_key] = effective_appearance_variant.key
+            # Context builders consistently read ``section.settings``. A
+            # shallow model copy preserves PK/FK identity for Store-scoped
+            # queries while keeping this overlay strictly in-memory.
+        if section.section_key == "product_section":
+            # The display type is the primary structural choice; row settings of another composition are dormant.
+            effective_settings = effective_product_section_settings(effective_settings)
+        if effective_settings != (section.settings or {}):
+            render_section = copy(section)
+            render_section.settings = effective_settings
+
+        # An unsaved candidate section (gallery live preview) has no pk: key it by identity so two instances of the same key
+        # (two banner rows, two product rows …) never share one cached context.
+        cache_key = (
+            (section.section_key, section.pk if section.pk is not None else id(section))
+            if section.section_key in PER_INSTANCE_SECTION_KEYS
+            else section.section_key
+        )
+        if cache_key not in context_cache:
+            if section.section_key in _CONTEXT_AWARE_BUILDERS:
+                builder = _CONTEXT_AWARE_BUILDERS[section.section_key]
+                context_cache[cache_key] = builder(store, render_section, page_context)
+            else:
+                builder = _CONTEXT_BUILDERS.get(section.section_key, _static_context)
+                context_cache[cache_key] = builder(store, render_section)
+        context = dict(context_cache[cache_key])
+        context["section"] = render_section
+        context["settings"] = effective_settings
+        # PDTX — only meaningful for product_main (its template guards the
+        # hard-coded guarantee strip on this flag); harmless elsewhere.
+        if section.section_key == "product_main":
+            context["suppress_guarantee_strip"] = has_sibling_trust_features
+        if store_appearance is not None:
+            context["store_appearance"] = store_appearance
+        # R4 Task 7 — computed AFTER copying the (possibly shared/cached)
+        # context, from THIS Section's own settings only, so one Hero's
+        # local override can never leak into a sibling instance's context,
+        # even when they share a cached context dict above. No DB access
+        # here — global_appearance was already resolved once for the
+        # whole page. Absent for the unsaved candidate-preview path
+        # (global_appearance is None there — no persisted version to derive it from, and never fabricated).
+        if global_appearance is not None:
+            effective_appearance = section_appearance_service.resolve_section_appearance(
+                global_appearance, context["settings"],
+            )
+            context["effective_section_appearance"] = effective_appearance
+            context["effective_section_typography"] = appearance_registry.resolve_typography(
+                effective_appearance.get("type_scale", "normal"),
+            )
+        # Phase 2: حلِ Store-scopedِ رسانه‌یِ پس‌زمینه (Phase 1:
+        # ``background.media_asset_id``) — همینجا (نه در template) چون
+        # نیازمندِ یک کوئریِ دیتابیسِ store-scoped است؛ همان تفکیکِ
+        # مسئولیتی که ``_resolved_destination_context`` برایِ ``destination``
+        # دارد. per-instance (نه context_cache) چون دو نمونه از یک
+        # section_key می‌توانند رسانه‌های متفاوت داشته باشند. ``None`` برایِ
+        # هر چیزی غیر از mode="image" یا هر ارجاعِ نامعتبر/خارجی — هرگز کرش.
+        context["background_media_url"] = resolve_background_media_url(
+            store, context["settings"].get("background"),
+        )
+        context["background_view"] = _background_view(
+            context["settings"].get("background"), context["background_media_url"],
+        )
+        if section.section_key == "product_section" and context["settings"].get("display_mode") == "campaign_band":
+            context["campaign"] = _campaign_panel_view(store, context["settings"])
+        # Sparse ``design`` block -> data-d flags + --d-* custom properties for the wrapper.
+        context["design_attrs"] = design_block.render_attributes(
+            context["settings"].get("design"), design_block.all_properties(section.section_key),
+        )
+        # Column counts: the section's own ``*_columns`` (product-section contract) win over the shared
+        # ``responsive`` block; a ``design`` block may still override them through ``--cols-*``.
+        _responsive = context["settings"].get("responsive") or {}
+        context["columns"] = {
+            "desktop": context["settings"].get("desktop_columns") or _responsive.get("desktop_columns") or 4,
+            "tablet": context["settings"].get("tablet_columns") or _responsive.get("tablet_columns") or 3,
+            "mobile": context["settings"].get("mobile_columns") or _responsive.get("mobile_columns") or 2,
+        }
+        # U1B1 — variant runtime wiring (variant_contract.py). Pure metadata
+        # lookup, no DB query, no mutation of ``section.settings``. For the
+        # 31 section types with no registered ``variants`` (the overwhelming
+        # majority today), ``resolve_active_variant`` short-circuits to
+        # ``None`` and ``resolve_renderer_template`` returns exactly
+        # ``definition.template_name`` — byte-identical to the pre-U1B1
+        # line this replaces. For the three proven precedents
+        # (category_grid/brand_carousel/product_section), every currently
+        # registered variant declares ``renderer=None`` (Pattern A), so the
+        # resolved template is still ``definition.template_name`` — no
+        # production render output changes. An unrecognized/legacy
+        # persisted value fails safely to ``default_variant`` here (never
+        # raises, never rewrites the stored Section) — see
+        # ``variant_contract.resolve_active_variant``'s own contract.
+        active_variant = effective_appearance_variant or resolve_active_variant(
+            definition, effective_settings
+        )
+        item = {
+            "section": render_section,
+            "definition": definition,
+            "template_name": resolve_renderer_template(definition, active_variant),
+            "label_fa": definition.label_fa,
+            "context": context,
+            # A7 — one immutable typed state is threaded through every item
+            # and its context. Existing templates may ignore it; component
+            # families added in later phases consume this same object rather
+            # than creating a Design-Lab-only renderer contract.
+            "store_appearance": store_appearance,
+            # Exposed for testability/observability (U1B1 §4) and for a
+            # future consumer (U1B2+) — no current template/consumer reads
+            # this key, so adding it changes nothing for existing callers.
+            "active_variant": active_variant,
+        }
+        # Template-owned data sections never disappear for lack of data: they render the shared empty state.
+        item["empty_state"] = section_empty_state_service.resolve(item)
+        # Sections that keep their own shell render the shared empty-state body inside their grid.
+        context["empty_state"] = item["empty_state"]
+        items.append(item)
+    return items
+
+
+def build_candidate_render_items(
+    sections,
+    store,
+    page_context: dict | None = None,
+    *,
+    global_appearance: dict | None = None,
+    store_appearance: ResolvedStoreAppearance | None = None,
+) -> list[dict]:
+    """Phase 5, Task 1 — render a page's worth of UNSAVED ``StorefrontSection``
+    instances (e.g. from ``preset_service.resolve_preset_candidate``) through
+    the exact same shared rendering path every other caller of
+    ``_build_items_from_sections`` already uses — not a second renderer.
+
+    ``_build_items_from_sections`` is already explicitly designed to accept
+    any iterable of StorefrontSection-*shaped* objects, saved or not — see
+    ``build_page_render_items``, the existing precedent this reuses. This is a thin
+    public wrapper for the candidate-preview case so callers never need the
+    private function directly."""
+    return _build_items_from_sections(
+        sections,
+        store,
+        page_context or {},
+        global_appearance=global_appearance,
+        store_appearance=store_appearance,
+    )
+
+
+def build_candidate_container_rows(candidate_page, items: list[dict]) -> list[dict]:
+    """Phase 5, Task 2 — the smallest read-only candidate adapter for the
+    "container settings must not be ignored" parity requirement (Task-1
+    corrective's ``ResolvedPresetCandidatePage.container_settings``).
+
+    Reuses the existing, already-tested ``group_items_into_rows`` — the same
+    pure, no-persisted-Container row-grouping path ``preview.html`` already
+    falls back to today for any Draft/Published version with no real
+    ``StorefrontContainer`` rows yet (``render_rows.html``'s own
+    ``{% else %}`` branch). ``build_container_render_items`` (the full
+    Container/Cell renderer) genuinely requires persisted rows — see its own
+    ``page.containers``/``item["section"].pk`` lookups — so it cannot render
+    an unsaved candidate without persisting something, which Task 2 must not
+    do. This function does not replace or fork that renderer; it only
+    attaches ``candidate_page``'s already-computed per-row-run
+    ``container_settings`` onto ``group_items_into_rows``'s output, in the
+    same order, so callers receive rows *and* their settings together
+    instead of the settings being silently discarded.
+
+    Row/settings order correspondence is structural, not coincidental: both
+    ``group_items_into_rows`` (contiguous ``row_key`` adjacency over
+    ``items``) and ``candidate_page.container_settings``
+    (``preset_service._entry_runs`` over the same, identically-ordered
+    preset entries that produced ``items``) group by the same contiguous
+    ``row_key`` rule over the same section sequence."""
+    rows = group_items_into_rows(items)
+    for row, container_settings in zip(rows, candidate_page.container_settings):
+        row["container_settings"] = container_settings
+    return rows
+
+
+#: Acceptance Batch 1 (post-U11) — the registry-level distinction the QA
+#: fix needs: section types whose whole reason for existing is an
+#: optional, auto-populated *product grid* (never static/editorial
+#: content), mapped to the context key each one's builder above always
+#: sets that grid under. On the public/live storefront, a genuinely empty
+#: grid here means "nothing to show" and the whole section is skipped —
+#: on the Builder/editor (which never calls ``hide_empty_public_sections``
+#: below), it still renders with its own "چیزی برای نمایش نیست" empty
+#: state so a merchant understands *why* a section looks empty while
+#: composing a page. ``product_listing``/``collection_products`` are
+#: deliberately excluded — those ARE the listing/collection/search page's
+#: own body, where an empty result set is itself meaningful feedback to a
+#: shopper (e.g. "no results for this filter"), not an optional
+#: promotional row that should just disappear.
+OPTIONAL_PRODUCT_DATA_SECTION_KEYS = {
+    "product_section": "products",
+    "featured_products": "products",
+    "newest_products": "products",
+    "best_sellers": "products",
+    "discounted_products": "products",
+    "amazing_offers": "products",
+    "related_products": "related_products",
+}
+
+
+def hide_empty_public_sections(items: list[dict]) -> list[dict]:
+    """Owner contract (exact template composition): a template-owned section is NEVER removed from the public
+    page because its data source is empty. Every data-driven section carries ``item["empty_state"]`` (see
+    ``section_empty_state_service``) and renders a polished, non-administrative empty presentation in its own
+    place; when the merchant later adds real data the SAME section displays it. Kept as the single public-path
+    hook (and for callers/tests that import it) — it now only passes items through."""
+    return list(items)
+
+
+def build_container_render_items(page, items: list[dict], *, include_empty: bool = False) -> list[dict]:
+    """Shape rendered Section items through the real Container/Cell layout.
+
+    ``items`` already contains the expensive, store-scoped Section contexts.
+    This helper only maps those items onto Cells. Inactive/unknown Sections are
+    treated as empty Cells. Public rendering skips completely empty Containers;
+    Builder preview may request ``include_empty=True`` so merchants can see and
+    fill an empty layout before content exists.
+
+    Phase 2B: a Cell may now hold more than one ordered Block. Each Cell's
+    Blocks are resolved through ``container_service.get_cell_blocks`` — the
+    single authoritative read path (new multi-block FK first, transparently
+    falling back to the legacy single-``section`` OneToOne only when the new
+    relationship is completely empty for that Cell, so a Section is never
+    counted/rendered twice — see that function's docstring for the exact
+    rule). Every ``cell_entry`` keeps its original, singular ``"item"`` key —
+    the *first* visible Block's render item, or ``None`` — exactly the
+    pre-Phase-2B contract every existing consumer/test already depends on
+    (e.g. ``test_published_context_uses_container_layout_as_source_of_truth``)
+    — and gains a new ``"items"`` key: the complete ordered list of visible
+    Blocks' render items, for templates that render every Block in a Cell.
+    """
+    from . import container_service
+
+    items_by_section_id = {
+        item["section"].pk: item
+        for item in items
+        if item.get("section") is not None and item["section"].pk is not None
+    }
+    from ..models import StorefrontContainer
+
+    # V5 Groups: the Containers nested in the Cells of this page, loaded once and grouped by the Cell that hosts them.
+    nested_by_cell: dict = {}
+    for nested in StorefrontContainer.all_objects.filter(page=page, parent_cell__isnull=False).prefetch_related(
+        "cells__section", "cells__blocks",
+    ).order_by("order", "id"):
+        nested_by_cell.setdefault(nested.parent_cell_id, []).append(nested)
+    store = getattr(getattr(getattr(page, "version", None), "layout", None), "store", None)
+
+    def compose(container, ratio: float = 1.0) -> dict:
+        cells = []
+        vertical = (container.settings or {}).get("axis") == "vertical"
+        grouped = container.parent_cell_id is not None or bool((container.settings or {}).get("group"))
+        has_content = False
+        has_placement = False
+        for cell in container.cells.all():
+            # U11 — N+1 fix: the containers were just fetched with ``prefetch_related("cells__section", "cells__blocks")``, so every Cell
+            # here is already fresh; ``get_cell_blocks`` would discard that prefetch and issue one live query per Cell
+            # (see ``blocks_from_prefetched_cell``'s docstring).
+            blocks = container_service.blocks_from_prefetched_cell(cell)
+            block_items = []
+            for block in blocks:
+                has_placement = True
+                block_item = items_by_section_id.get(block.pk)
+                if block_item is not None:
+                    has_content = True
+                    block_items.append(block_item)
+            # the share of the page's content width this Cell really gets (a vertical split stacks full-width rows)
+            cell_ratio = ratio if vertical else ratio * (cell.span / 12)
+            hosted = [compose(child, cell_ratio) for child in nested_by_cell.get(cell.pk, [])]
+            hosted = hosted[0] if hosted else None
+            if hosted is not None:
+                has_content = has_content or hosted["has_content"]
+                has_placement = has_placement or hosted["has_placement"]
+            cells.append({
+                "cell": cell,
+                "item": block_items[0] if block_items else None,
+                "items": block_items,
+                # Raw placed Sections (including inactive/hidden ones) — the builder-only "occupied but all Blocks are hidden" chrome
+                # needs this list; ``items`` above only ever contains *visible* Blocks' render contexts.
+                "blocks": blocks,
+                # V5 Groups: the nested Group hosted by this Cell (then it has no direct Blocks), else ``None``.
+                "group": hosted,
+                # V5 Groups: a shop component placed in a narrow Cell of a Group shows fewer columns (bucket of the real width share;
+                # absent for ordinary rows, whose shelves keep exactly the columns their own settings give)
+                "cw": _width_bucket(cell_ratio) if grouped else "",
+            })
+        settings = container_service.effective_container_settings(container.settings)
+        return {
+            "container": container,
+            "settings": settings,
+            "cells": cells,
+            "has_content": has_content,
+            # Hidden content has no active render item but still physically owns its Cell. Builder chrome must distinguish that from a
+            # truly empty Container so direct delete never risks hidden data.
+            "has_placement": has_placement,
+            "group": _group_view(container, settings, store),
+        }
+
+    rendered = []
+    containers = page.containers.prefetch_related(
+        "cells__section", "cells__blocks",
+    ).order_by("order", "id")
+    for container in containers:
+        composition = compose(container)
+        if not composition["has_content"] and not include_empty:
+            continue
+        rendered.append(composition)
+    return rendered
+
+
+def _width_bucket(ratio: float) -> str:
+    """Desktop columns a product-style shelf may use in a Cell that gets ``ratio`` of the content width: ≤¼ → 1, ≤½ → 2, ≤¾ → 3, else unchanged."""
+    if ratio <= 0.26:
+        return "1"
+    if ratio <= 0.51:
+        return "2"
+    if ratio <= 0.76:
+        return "3"
+    return ""
+
+
+def _group_view(container, settings: dict, store) -> dict:
+    """Presentation of a Group (``Container.settings``): everything the group frame / vertical axis needs, resolved server-side.
+
+    ``framed`` is true only when the Container actually carries Group presentation (a title, a description, a ``style`` or a gradient / picture
+    background) — every other Container keeps its exact pre-Group markup. Preview and the published page share this one result."""
+    from apps.content.services import resolve_background_media_url
+
+    from .. import group_style
+
+    style = settings.get("style") or {}
+    attrs = group_style.render_attributes(style)
+    mode = settings.get("background_mode")
+    media_url = ""
+    if mode == "image" and store is not None:
+        media_url = resolve_background_media_url(store, {"mode": "image", "media_asset_id": settings.get("background_media_asset_id")}) or ""
+    background = group_style.background_css(settings, media_url)
+    title = settings.get("title", "")
+    framed = bool(title or settings.get("description") or style or background)
+    vertical = settings.get("axis") == "vertical"
+    return {
+        "framed": framed,
+        "nested": container.parent_cell_id is not None,
+        "vertical": vertical,
+        "title": title,
+        "description": settings.get("description", ""),
+        "show_title": settings.get("title_visible", True) is not False and bool(title),
+        "attrs": attrs,
+        "background_css": background,
+    }
+
+
+def group_items_into_rows(items: list[dict]) -> list[dict]:
+    """تبدیلِ خروجیِ تخت ``build_page_render_items``/``build_render_items`` به
+    فهرستی از «ردیف‌ها» — Phase 1 (معماریِ Universal Block/Data)، آماده‌سازیِ
+    دادهٔ لازم برایِ Phase 2 (Universal Renderer).
+
+    این تابع **هیچ HTML/templateای رندر نمی‌کند** و هنوز توسطِ هیچ view/
+    templateی صدا زده نمی‌شود — یک تبدیلِ دادهٔ خالص است که قراردادِ
+    ``StorefrontSection.row_key``/``row_span`` (نگاه کنید به
+    ``services/row_service.py``) را به شکلی تبدیل می‌کند که مصرفِ آن توسطِ
+    یک الگویِ CSS Grid/Flex در Phase 2 مستقیم باشد، بدونِ اینکه Phase 2
+    مجبور باشد دوباره منطقِ گروه‌بندیِ مجاورت را بازنویسی کند.
+
+    ورودی همان فهرستِ ``item`` است (هرکدام حاویِ ``item["section"]``)؛
+    خروجی فهرستی از دیکشنری‌هایِ ``{"row_key": str, "items": [item, ...]}``
+    — یک section مستقل (row_key خالی) هم به‌شکلِ یک «ردیفِ تک‌عضوی»
+    (``row_key=""``) بازگردانده می‌شود، تا فراخوان همیشه یک قراردادِ یکسان
+    (فهرستی از ردیف‌ها) داشته باشد، نه دو شکلِ متفاوت برایِ section مستقل/
+    عضوِ ردیف.
+
+    گروه‌بندی صرفاً بر اساسِ **مجاورت** در همین فهرستِ ورودی انجام می‌شود
+    (نه جست‌وجویِ سراسریِ همه‌ی sectionهایِ هم‌row_key در کلِ صفحه) — دقیقاً
+    همان قاعدهٔ ``row_service._grouped_by_row_key``؛ اگر ورودی از قبل با
+    ``row_service.validate_page_row_layout`` تأیید شده باشد (که پیش از هر
+    ذخیره‌یِ row_key/row_span باید صدا زده شود)، این دو تعریفِ «مجاورت» همیشه
+    یکسان نتیجه می‌دهند."""
+    rows: list[dict] = []
+    for item in items:
+        section = item["section"]
+        key = section.row_key or ""
+        if rows and rows[-1]["row_key"] == key and key != "":
+            rows[-1]["items"].append(item)
+        else:
+            rows.append({"row_key": key, "items": [item]})
+    return rows
+
+
+def build_render_items(version, store) -> list[dict]:
+    """فهرست بخش‌های فعالِ **صفحه‌ی اصلیِ** یک نسخه — wrapperِ سازگاریِ
+    نازک، حفظ‌شده عمداً برایِ هر دو فراخوانِ تولیدیِ موجودِ پیش از Phase 1B
+    (``apps.catalog.views.home()`` و
+    ``storefront_builder.views.storefront_preview()``) که همیشه یک
+    ``StorefrontLayoutVersion`` پاس می‌دهند، نه یک ``StorefrontPage`` — و
+    برایِ کلِ مجموعه‌ی تست‌هایِ موجودِ ``test_render_service.py`` که همین
+    امضا را مستقیماً صدا می‌زنند. پیاده‌سازیِ واقعی از Phase 1B به بعد
+    ``build_page_render_items`` است؛ این تابع فقط ``version.home_page()``
+    را حل می‌کند و به آن تابع صدا می‌زند — تکراریِ منطق نیست."""
+    return build_page_render_items(version.home_page(), store)

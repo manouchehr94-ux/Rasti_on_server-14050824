@@ -1,0 +1,25 @@
+{% comment %}
+Single public subscriber form used by a section and every footer variant.
+The Store is resolved from Host at the view, not supplied by the client.
+The nearest wrapper div is intentionally the partial-swap target.
+{% endcomment %}
+{% if subscribed %}
+<p class="newsletter-success" role="status">ایمیل شما برای دریافت خبرنامه ثبت شد. متشکریم!</p>
+{% else %}
+<form class="newsletter-form" method="post" action="{% url 'content:newsletter-subscribe' %}"
+      hx-post="{% url 'content:newsletter-subscribe' %}" hx-target="closest div" hx-swap="innerHTML">
+  {% csrf_token %}
+  {% if error %}<p class="newsletter-error" role="alert">{{ error }}</p>{% endif %}
+  <div class="newsletter-form-fields">
+    <label class="newsletter-email-field">
+      <span class="sr-only">نشانی ایمیل</span>
+      <input type="email" name="email" required autocomplete="email" placeholder="ایمیل شما" class="form-input" dir="ltr">
+    </label>
+    <button type="submit" class="btn btn-primary">{{ button_label|default:"عضویت" }}</button>
+  </div>
+  <label class="newsletter-consent">
+    <input type="checkbox" name="consent" value="yes" required>
+    <span>مایلم خبرنامه این فروشگاه را از طریق ایمیل دریافت کنم.</span>
+  </label>
+</form>
+{% endif %}

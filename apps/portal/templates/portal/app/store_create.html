@@ -1,0 +1,34 @@
+{% extends "portal/onboarding/base_onboarding.html" %}
+{% block title %}فروشگاه تازه | راستی‌سی{% endblock %}
+{% block ob_page_class %} ob-page--narrow{% endblock %}
+{% block ob_body %}
+<h1 class="ob-title">فروشگاه تازه بسازید</h1>
+<p class="ob-lead">فقط یک نام لازم است؛ فروشگاهِ آزمایشیِ شما بلافاصله آماده می‌شود. صنف و بقیه‌ی جزئیات را در مرحله‌های کوتاهِ راه‌اندازیِ بعدی تنظیم می‌کنید.</p>
+
+<section class="ob-card ob-card--spaced" aria-labelledby="ob-create-title">
+  <div class="ob-card-head">
+    <h2 id="ob-create-title">مشخصاتِ فروشگاه</h2>
+  </div>
+
+  {% if form.non_field_errors %}<div class="ob-alert ob-alert-error" role="alert">{{ form.non_field_errors.0 }}</div>{% endif %}
+
+  <form method="post" id="storeCreateForm" novalidate data-ob-once>
+    {% csrf_token %}
+    <input type="hidden" name="submission_token" value="{{ submission_token }}">
+    <div class="ob-field{% if form.name.errors %} has-error{% endif %}">
+      <label class="ob-label" for="{{ form.name.id_for_label }}">نام فروشگاه<span class="ob-tag ob-tag-required">الزامی</span></label>
+      {{ form.name }}
+      <p class="ob-hint" id="{{ form.name.auto_id }}_helptext">{{ form.name.help_text }}</p>
+      {% for error in form.name.errors %}<p class="ob-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <p class="ob-note">انتخابِ صنف (و نصبِ دسته‌بندی‌ها و ویژگی‌هایِ آماده) در مرحله‌ی «صنف» انجام می‌شود؛ آنجا پیش‌نمایشِ کامل می‌بینید و نصب فقط پس از تأییدِ صریحِ شما انجام می‌شود. در این صفحه هیچ قالبی نصب نمی‌شود.</p>
+
+    <div class="ob-actions">
+      <a class="ob-btn ob-btn-quiet" href="{% url 'portal:app-home' %}">انصراف</a>
+      <span class="ob-actions-spacer"></span>
+      <button type="submit" class="ob-btn ob-btn-primary" data-loading-text="در حال ساخت فروشگاه…">ساخت فروشگاه</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

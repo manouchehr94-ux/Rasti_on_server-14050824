@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.dump
+*.sqlite3
+*.tar.gz
+*.zip
+node_modules/

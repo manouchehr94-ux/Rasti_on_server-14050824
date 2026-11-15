@@ -1,0 +1,63 @@
+{% load persian %}{% comment %}
+بخش بازاستفاده‌پذیرِ مجله. فقط مطالب منتشرشده لینک واقعی دارند؛
+برای کاورهای گم‌شده جایگزین بصری و برای داده خالی پیام مناسب دارد.
+{% endcomment %}
+{% if settings.style == "editorial_cards" %}
+{% comment %}Editorial cards: picture on top with a date badge, the title and a quiet «continue» link below. Text colours follow the section background (a dark band works), cards stay readable surfaces.{% endcomment %}
+<section class="section blog-editorial">
+  <div class="blog-editorial-head"><h2>{{ settings.title|default:"آخرین مطالب وبلاگ" }}</h2></div>
+  <div class="blog-editorial-row">
+    {% for post in posts %}
+    <a class="blog-editorial-card" href="{{ post.get_absolute_url }}">
+      <span class="blog-editorial-th">
+        {% if post.has_available_cover %}<img src="{{ post.cover_image.url }}" data-img-role="article" alt="" loading="lazy">{% else %}<span class="blog-editorial-emoji" aria-hidden="true">{{ post.cover_emoji|default:"📰" }}</span>{% endif %}
+        {% if post.published_at %}<time class="blog-editorial-date" datetime="{{ post.published_at|date:'Y-m-d' }}"><b>{{ post.published_at|jalali:"%d" }}</b><span>{{ post.published_at|jalali_month_name }}</span></time>{% endif %}
+      </span>
+      <span class="blog-editorial-body"><h4>{{ post.title }}</h4><span class="read">ادامه مطلب</span></span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% elif settings.style == "panel_carousel" %}
+<section class="section blog-panel" data-sfb-card-surface>
+  <div class="blog-panel-head"><h2>{{ settings.title|default:"آخرین مطالب وبلاگ" }}</h2><a class="more" href="{% url 'blog:index' %}">همه مطالب ←</a></div>
+  <div class="blog-panel-row">
+    {% for post in posts %}
+    <a class="blog-card blog-card--panel" data-sfb-card-surface href="{{ post.get_absolute_url }}">
+      {% if post.has_available_cover %}
+      <div class="th th-photo"><img src="{{ post.cover_image.url }}" data-img-role="article" alt="{{ post.title }}" loading="lazy">{% if post.category_label %}<span class="blog-badge">{{ post.category_label }}</span>{% endif %}</div>
+      {% else %}
+      <div class="th" style="background:{{ post.tint|default:'#f1ecfd' }}">{{ post.cover_emoji|default:"📰" }}{% if post.category_label %}<span class="blog-badge">{{ post.category_label }}</span>{% endif %}</div>
+      {% endif %}
+      <div class="bd">
+        <h4>{{ post.title }}</h4>
+        <span class="read">ادامه مطلب</span>
+      </div>
+    </a>
+    {% endfor %}
+    {% for _ in blog_empty_slots %}
+    <span class="blog-card blog-card--panel blog-card--empty" data-sfb-card-surface aria-hidden="true"><span class="th"></span></span>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="section">
+  <div class="sec-head"><h2><span class="bar"></span>{{ settings.title|default:"آخرین مطالب وبلاگ" }}</h2><a class="more" href="{% url 'blog:index' %}">همه مطالب ←</a></div>
+  <div class="grid blog-grid">
+    {% for post in posts %}
+    <a class="blog-card" data-sfb-card-surface href="{{ post.get_absolute_url }}">
+      {% if post.has_available_cover %}
+      <div class="th th-photo"><img src="{{ post.cover_image.url }}" data-img-role="article" alt="{{ post.title }}" loading="lazy"></div>
+      {% else %}
+      <div class="th" style="background:{{ post.tint|default:'#f1ecfd' }}">{{ post.cover_emoji|default:"📰" }}</div>
+      {% endif %}
+      <div class="bd">
+        <div class="meta">{% if post.category_label %}<span class="cat">{{ post.category_label }}</span>{% endif %}{% if post.published_at %}<span>{{ post.published_at|jalali }}</span>{% endif %}</div>
+        <h4>{{ post.title }}</h4>
+        <span class="read">ادامه مطلب<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

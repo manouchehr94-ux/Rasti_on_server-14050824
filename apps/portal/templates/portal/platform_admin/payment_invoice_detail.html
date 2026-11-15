@@ -1,0 +1,95 @@
+{% extends "portal/platform_admin/base.html" %}
+{% load persian %}
+{% block title %}فاکتورِ {{ invoice.number }} | پنل مدیریت پلتفرم{% endblock %}
+{% block content %}
+<a class="pa-back" href="{% url 'portal_platform_admin:payments' %}">← پرداخت‌ها و فاکتورها</a>
+<div class="pa-pagehead">
+  <div><h1>فاکتورِ <span class="pa-ltr">{{ invoice.number }}</span></h1><p>فروشگاه: {{ invoice.store.name }} · پلن: {{ invoice.plan_version.plan.name }}</p></div>
+  {% if invoice.status == "open" or invoice.status == "payment_pending" or invoice.status == "past_due" %}<div class="pa-actions"><a class="pa-btn pa-primary" href="{% url 'portal_platform_admin:payment-manual-add' %}">ثبتِ پرداختِ دستی</a></div>{% endif %}
+</div>
+
+<div class="pa-grid4">
+  <div class="pa-kpi pa-blue"><span>مبلغِ کل</span><b>{{ invoice.grand_total }}</b></div>
+  <div class="pa-kpi pa-green"><span>پرداخت‌شده</span><b>{{ invoice.amount_paid }}</b></div>
+  <div class="pa-kpi pa-orange"><span>باقی‌مانده</span><b>{{ invoice.amount_due }}</b></div>
+  <div class="pa-kpi pa-purple"><span>وضعیت</span><b class="pa-kpi-text">{{ invoice.get_status_display }}</b></div>
+</div>
+
+<div class="pa-card">
+  <div class="pa-cardhead"><h3>ردیف‌ها</h3></div>
+  <div class="pa-tablewrap">
+    <table>
+      <thead><tr><th>نوع</th><th>شرح</th><th>تعداد</th><th>مبلغِ واحد</th><th>جمع</th></tr></thead>
+      <tbody>
+        {% for line in invoice.lines.all %}
+        <tr><td>{{ line.get_line_type_display }}</td><td>{{ line.description }}</td><td>{{ line.quantity }}</td><td>{{ line.unit_amount }}</td><td>{{ line.subtotal }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="pa-help">ردیفی ثبت نشده.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<section class="pa-card" id="refunds">
+  <div class="pa-cardhead"><h3>بازپرداخت‌ها (دفتر مالی)</h3></div>
+  <div class="pa-tablewrap"><table>
+    <thead><tr><th class="pa-num">مبلغ</th><th>وضعیت</th><th>ارائه‌دهنده</th><th>دلیل</th><th class="pa-actcol"></th></tr></thead><tbody>
+    {% for row in refund_rows %}{% with refund=row.refund %}
+    <tr><td class="pa-num">{{ refund.amount }}</td><td>{{ row.state_label }}</td><td>{{ refund.provider }}</td><td>{{ refund.reason }}</td>
+      <td class="pa-actcol">
+        {% if row.state == "awaiting_review" %}
+        <p class="pa-help">در انتظار بررسی دستی. هیچ درخواستی به بانک یا درگاه ارسال نمیشود؛ تأیید فقط تصمیمِ مدیر را ثبت میکند و پولی جابهجا نمیشود.</p>
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-approve' refund.pk %}" data-confirm="تأیید برای پردازشِ دستی؟ هیچ پولی از سامانه جابهجا نمیشود و اشتراک/اعتبار تغییر نمیکند.">{% csrf_token %}
+          <input name="note" placeholder="یادداشت (اختیاری)" maxlength="200">
+          <button class="pa-btn pa-primary" type="submit">تأیید برای پردازشِ دستی</button></form>
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-reject' refund.pk %}" data-confirm="ردِ این درخواستِ بازپرداخت؟ مبلغِ رزروشده آزاد میشود.">{% csrf_token %}
+          <input name="reason" placeholder="دلیلِ رد" required minlength="4" maxlength="200">
+          <button class="pa-btn" type="submit">رد</button></form>
+        {% elif row.state == "approved_for_manual_processing" %}
+        <p class="pa-help">تأییدشده؛ هنوز انجام نشده است. پس از انتقالِ واقعیِ پول از مسیرِ بانکیِ مجاز، ارجاعِ بانکی را ثبت کنید. اشتراک و اعتبار فقط پس از تکمیلِ تأییدشده تغییر میکنند.</p>
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-complete' refund.pk %}" data-confirm="فقط پس از انتقالِ واقعیِ پول به مالک و داشتنِ ارجاعِ بانکی تأیید کنید.">{% csrf_token %}
+          <input class="pa-ltr" name="reference" placeholder="ارجاعِ بانکی" required minlength="6">
+          <button class="pa-btn pa-primary" type="submit">ثبتِ انجامِ تأییدشده</button></form>
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-reject' refund.pk %}" data-confirm="ردِ این درخواستِ بازپرداخت؟ مبلغِ رزروشده آزاد میشود.">{% csrf_token %}
+          <input name="reason" placeholder="دلیلِ رد" required minlength="4" maxlength="200">
+          <button class="pa-btn" type="submit">رد</button></form>
+        {% elif row.state == "unknown_needs_reconciliation" %}
+        <p class="pa-help">نتیجه نامشخص است؛ دوباره درخواست نکنید. پس از تطبیق با بانک، با ارجاعِ مستند تعیین تکلیف کنید.</p>
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-complete' refund.pk %}" data-confirm="فقط اگر در بانک ثابت شده که پول برگشته است.">{% csrf_token %}
+          <input class="pa-ltr" name="reference" placeholder="ارجاعِ بانکی" required minlength="6">
+          <button class="pa-btn" type="submit">ثبتِ انجامِ تأییدشده</button></form>
+        {% endif %}
+        {% if row.state == "awaiting_review" or row.state == "approved_for_manual_processing" or row.state == "unknown_needs_reconciliation" %}
+        <form method="post" class="pa-form-inline" action="{% url 'portal_platform_admin:payment-refund-complete' refund.pk %}" data-confirm="فقط اگر با مدرک مشخص است که بازپرداخت انجام نشده است.">{% csrf_token %}
+          <input type="hidden" name="resolution" value="not_executed">
+          <input class="pa-ltr" name="reference" placeholder="ارجاعِ مستند" required minlength="6">
+          <button class="pa-btn" type="submit">انجام نشد</button></form>
+        {% endif %}</td></tr>
+    {% endwith %}    {% empty %}<tr><td colspan="5" class="pa-help">بازپرداختی ثبت نشده.</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% if invoice.amount_paid > 0 %}
+  <form method="post" class="pa-cardfoot pa-stack" action="{% url 'portal_platform_admin:payment-invoice-refund' invoice.pk %}">{% csrf_token %}
+    <input type="hidden" name="idempotency_key" value="{{ refund_form_key }}">
+    <div class="pa-fields">
+      <div class="pa-field"><label for="rf-amount">مبلغ</label><input id="rf-amount" class="pa-ltr" name="amount" required inputmode="numeric"></div>
+      <div class="pa-field"><label for="rf-reason">دلیل</label><input id="rf-reason" name="reason" required><span class="pa-help">الزامی.</span></div>
+    </div>
+    <div><button class="pa-btn" type="submit">درخواستِ بازپرداخت</button></div>
+    <p class="pa-help">کارت‌به‌کارت/زیبال/زرین‌پال بازپرداخت را «در انتظارِ پردازشِ دستی» می‌گذارند؛ پس از انتقالِ واقعیِ پول «تکمیلِ دستی» را بزنید.</p></form>
+  {% endif %}
+</section>
+
+<div class="pa-card">
+  <div class="pa-cardhead"><h3>تلاش‌های پرداخت</h3></div>
+  <div class="pa-tablewrap">
+    <table>
+      <thead><tr><th>وضعیت</th><th>ارائه‌دهنده</th><th>ایجاد</th><th>تکمیل</th></tr></thead>
+      <tbody>
+        {% for attempt in invoice.payment_attempts.all %}
+        <tr><td>{{ attempt.get_status_display }}</td><td>{{ attempt.provider }}</td><td>{{ attempt.created_at|jalali_dt }}</td><td>{{ attempt.completed_at|jalali_dt|default:"—" }}</td></tr>
+        {% empty %}<tr><td colspan="4" class="pa-help">تلاشی ثبت نشده.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

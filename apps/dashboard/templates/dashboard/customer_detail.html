@@ -1,0 +1,149 @@
+{% extends "dashboard/base_admin.html" %}
+{% load persian dashboard_extras %}
+
+{% block title %}{{ customer.full_name }} | پنل مدیریت {{ SHOP_NAME }}{% endblock %}
+{% block page_title %}{{ customer.full_name }}{% endblock %}
+{% block page_sub %}پروفایل مشتری و سابقه‌ی سفارش‌ها{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:14px">
+  <a class="btn btn-sm" href="{% url 'dashboard:customer-list' %}">→ بازگشت به فهرست مشتری‌ها</a>
+</div>
+
+<div class="grid g-2" style="gap:16px;margin-bottom:16px">
+  <div class="card">
+    <div class="card-head"><h3>👤 مشخصات</h3>
+      {% if customer.is_vip %}<span class="badge b-purple">مشتری ویژه VIP</span>{% else %}<span class="badge b-gray">عادی</span>{% endif %}
+    </div>
+    <div class="card-body" style="font-size:12.5px;line-height:2">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div class="avatar" style="width:48px;height:48px;font-size:16px">{{ customer.full_name|slice:":2" }}</div>
+        <div><b style="font-size:14px;display:block">{{ customer.full_name }}</b><span dir="ltr">{{ customer.phone }}</span></div>
+      </div>
+      {% if customer.email %}ایمیل: <span dir="ltr">{{ customer.email }}</span><br>{% endif %}
+      شهر: {{ customer.city|default:"—" }}<br>
+      تاریخ تولد: {% if customer.birth_date %}{{ customer.birth_date|jalali }}{% else %}ثبت نشده{% endif %}<br>
+      پیامک تبلیغاتی: {% if customer.accepts_promotional_sms %}رضایتِ ثبت‌شده{% else %}بدونِ رضایت{% endif %}{% if customer.promo_sms_consent_source %} ({{ customer.get_promo_sms_consent_source_display }}){% endif %} · ایمیل تبلیغاتی: {% if customer.accepts_promotional_email %}رضایتِ ثبت‌شده{% else %}بدونِ رضایت{% endif %}{% if customer.promo_email_consent_source %} ({{ customer.get_promo_email_consent_source_display }}){% endif %}<br>
+      تاریخ عضویت: {{ customer.created_at|jalali }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>📦 خلاصه‌ی خرید</h3></div>
+    <div class="card-body" style="display:flex;gap:22px;flex-wrap:wrap">
+      <div><div class="val" style="font-size:20px;font-weight:800">{{ orders.count|fa_number }}</div><div class="lbl" style="font-size:12px;color:var(--muted)">تعداد سفارش</div></div>
+      <div><div class="val" style="font-size:20px;font-weight:800">{{ paid_total|default:0|toman }}</div><div class="lbl" style="font-size:12px;color:var(--muted)">مجموع خرید پرداخت‌شده</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="grid g-2" style="gap:16px;margin-bottom:16px">
+  <div class="card">
+    <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+      <h3>🏷️ برچسب‌ها و وضعیتِ داخلی</h3>
+      <form method="post" action="{% url 'dashboard:customer-refresh-stats' customer.pk %}">{% csrf_token %}
+        <button class="btn btn-sm" type="submit">بروزرسانیِ آمار</button>
+      </form>
+    </div>
+    <div class="card-body" style="font-size:12.5px">
+      {% if can_manage_notes %}
+      <form method="post" action="{% url 'dashboard:customer-status-update' customer.pk %}" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+        {% csrf_token %}
+        <label>وضعیتِ داخلی:</label>
+        <select class="inp" name="internal_status" style="width:150px">
+          {% for value, label in internal_status_choices %}
+          <option value="{{ value }}" {% if profile.internal_status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm" type="submit">ذخیره</button>
+      </form>
+      {% else %}
+      <div style="margin-bottom:12px">وضعیتِ داخلی: <b>{{ profile.get_internal_status_display }}</b></div>
+      {% endif %}
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        {% for tag in all_tags %}
+        <form method="post" action="{% url 'dashboard:customer-tag-toggle' customer.pk %}" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="tag_id" value="{{ tag.pk }}">
+          {% if tag.pk in assigned_tag_ids %}
+          <input type="hidden" name="action" value="remove">
+          <button class="badge b-blue" style="border:none;cursor:pointer" {% if not can_manage_tags %}disabled{% endif %}>{{ tag.name }} ✕</button>
+          {% else %}
+          <input type="hidden" name="action" value="add">
+          <button class="badge b-gray" style="border:none;cursor:pointer" {% if not can_manage_tags %}disabled{% endif %}>{{ tag.name }} +</button>
+          {% endif %}
+        </form>
+        {% empty %}
+        <span style="color:var(--muted)">هنوز برچسبی برای این فروشگاه تعریف نشده — <a href="{% url 'dashboard:customer-tag-list' %}">مدیریتِ برچسب‌ها</a></span>
+        {% endfor %}
+      </div>
+      {% if profile.stats_refreshed_at %}
+      <div style="color:var(--muted);font-size:11.5px">آخرین به‌روزرسانیِ آمار: {{ profile.stats_refreshed_at|jalali }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>📝 یادداشت‌های داخلی</h3></div>
+    <div class="card-body" style="font-size:12.5px">
+      {% if can_manage_notes %}
+      <form method="post" action="{% url 'dashboard:customer-note-add' customer.pk %}" style="margin-bottom:12px">
+        {% csrf_token %}
+        <textarea class="inp" name="body" rows="2" style="width:100%" placeholder="یادداشتِ تازه..." required></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <label><input type="checkbox" name="is_pinned"> سنجاق</label>
+          <button class="btn btn-sm btn-primary" type="submit">ثبت یادداشت</button>
+        </div>
+      </form>
+      {% endif %}
+      {% for note in notes %}
+      <div style="padding:8px 0;{% if not forloop.last %}border-bottom:1px dashed var(--border){% endif %}">
+        {% if note.is_pinned %}<span class="badge b-amber">سنجاق‌شده</span>{% endif %}
+        <div>{{ note.body }}</div>
+        <div style="color:var(--muted);font-size:11px">{{ note.author.username|default:"—" }} — {{ note.created_at|jalali }}</div>
+        {% if can_manage_notes %}
+        <form method="post" action="{% url 'dashboard:customer-note-delete' customer.pk note.pk %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm" type="submit">حذف</button></form>
+        {% endif %}
+      </div>
+      {% empty %}
+      <div style="color:var(--muted);text-align:center;padding:16px 0">هنوز یادداشتی ثبت نشده است</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% if customer.addresses.all %}
+<div class="card" style="margin-bottom:16px">
+  <div class="card-head"><h3>📍 آدرس‌ها</h3></div>
+  <div class="card-body">
+    {% for address in customer.addresses.all %}
+    <div style="padding:8px 0;{% if not forloop.last %}border-bottom:1px dashed var(--border){% endif %};font-size:12.5px">
+      <b>{{ address.receiver_name }}</b>{% if address.is_default %} <span class="badge b-blue">پیش‌فرض</span>{% endif %}<br>
+      {{ address.province }}، {{ address.city }} — {{ address.full_address }}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-head"><h3>سفارش‌های مشتری</h3></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>کد سفارش</th><th>تاریخ</th><th>مبلغ کل</th><th>پرداخت</th><th>وضعیت سفارش</th><th>عملیات</th></tr></thead>
+    <tbody>
+      {% for order in orders %}
+      <tr>
+        <td><b dir="ltr">{{ order.code }}</b></td>
+        <td>{{ order.created_at|jalali }}</td>
+        <td><b>{{ order.grand_total|toman }}</b></td>
+        <td><span class="badge {{ order.payment_status|payment_status_badge }}">{{ order.get_payment_status_display }}</span></td>
+        <td><span class="badge {{ order.status|order_status_badge }}">{{ order.get_status_display }}</span></td>
+        <td><a class="btn btn-sm" href="{% url 'dashboard:order-detail' order.code %}">👁️ مشاهده</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">این مشتری هنوز سفارشی ثبت نکرده است</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

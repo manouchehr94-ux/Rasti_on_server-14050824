@@ -1,0 +1,91 @@
+{% extends "portal/onboarding/base_onboarding.html" %}
+{% block title %}انتخابِ صنف | راه‌اندازی | راستی‌سی{% endblock %}
+{% block ob_page_class %}{% if not installation %} ob-page--wide{% else %} ob-page--narrow{% endif %}{% endblock %}
+{% block ob_body %}
+{% include "portal/onboarding/_wizard_head.html" %}
+
+<section class="ob-card" aria-labelledby="ob-industry-title">
+  {% if installation %}
+  {# ── از قبل نصب‌شده: خلاصه + ادامه‌ی idempotent ── #}
+  <div class="ob-card-head">
+    <h2 id="ob-industry-title">صنفِ فروشگاه</h2>
+    <p>قالبِ صنفِ این فروشگاه نصب شده است. نصبِ قالب فقط یک‌بار برای هر فروشگاه ممکن است، پس نیازی به کاری در این مرحله نیست.</p>
+  </div>
+  <div class="ob-installed">
+    <span class="ob-ic-icon" aria-hidden="true">{{ installed_summary.icon|default:"🏷️" }}</span>
+    <div>
+      <h3>{% if installation.custom_industry_name %}{{ installation.custom_industry_name }}{% else %}{{ installation.industry_template.name }}{% endif %}</h3>
+      {% if installation.custom_industry_name %}<p>قالبِ پایه: {{ installation.industry_template.name }}</p>{% endif %}
+      <p>{{ installed_summary.sector_label }} · نسخه‌ی {{ installation.installed_version }}</p>
+      <p>{{ installation.categories_created }} دسته‌بندی و {{ installation.attributes_created }} ویژگی ساخته شد. می‌توانید آن‌ها را از پنلِ مدیریت ویرایش کنید؛ نصبِ قالبِ دیگری ممکن نیست.</p>
+    </div>
+  </div>
+  <form method="post" id="ob-industry-form" data-ob-once>{% csrf_token %}</form>
+  {% include "portal/onboarding/_actions.html" with form_id="ob-industry-form" continue_label="ادامه به ظاهر فروشگاه" loading_text="در حال ادامه…" %}
+
+  {% else %}
+  <div class="ob-card-head">
+    <h2 id="ob-industry-title">{% if template_cards %}صنفِ فروشگاهتان را انتخاب کنید{% else %}صنفِ فروشگاه{% endif %}</h2>
+    {% if template_cards %}<p>با انتخابِ صنف، دسته‌بندی‌ها و ویژگی‌هایِ پایه‌یِ همان کسب‌وکار ساخته می‌شود تا از صفر شروع نکنید. انتخابِ صنف الزامی است؛ اگر صنفِ شما در فهرست نیست، «سایر (صنف آزاد)» را انتخاب کنید.</p>{% else %}<p>انتخابِ صنف برایِ ساختِ فروشگاه الزامی است.</p>{% endif %}
+  </div>
+
+  {% if template_cards %}
+  <form method="post" id="ob-industry-form" data-ob-industry data-ob-once>
+    {% csrf_token %}
+    <div class="ob-industry-tools">
+      <div class="ob-search">
+        <label class="ob-sr-only" for="ob-industry-search">جست‌وجوی صنف</label>
+        <input type="search" id="ob-industry-search" data-ob-search placeholder="جست‌وجوی صنف؛ مثلاً پوشاک، دیجیتال، خوراک…" autocomplete="off">
+      </div>
+      <div class="ob-chips" role="group" aria-label="رسته‌ی صنف">
+        {% for code, label in industry_sector_tabs %}
+        <button type="button" class="ob-chip" data-ob-sector="{{ code }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}">{{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ob-industry-list" role="radiogroup" aria-label="فهرستِ صنف‌ها">
+      {% for card in template_cards %}
+      <label class="ob-industry-card" data-ob-card data-id="{{ card.id }}" data-slug="{{ card.slug }}" data-name="{{ card.name }}" data-sector="{{ card.sector }}" data-sector-label="{{ card.sector_label }}">
+        <input type="radio" name="industry_template_id" value="{{ card.id }}"{% if selected_template_id == card.id|stringformat:'s' %} checked{% endif %}>
+        <span class="ob-ic-check" aria-hidden="true">✓</span>
+        <span class="ob-ic-icon" aria-hidden="true">{{ card.icon|default:"🏷️" }}</span>
+        <span class="ob-ic-name">{{ card.name }}</span>
+        <span class="ob-ic-sector">{{ card.sector_label }}</span>
+        {% if card.description %}<span class="ob-ic-desc">{{ card.description|truncatechars:64 }}</span>{% endif %}
+        <span class="ob-ic-meta">{{ card.category_count }} دسته‌بندی</span>
+      </label>
+      {% endfor %}
+    </div>
+    {# «سایر (صنف آزاد)»: نامِ واقعیِ صنف؛ فقط با انتخابِ همین کارت نشان داده می‌شود (مرجعِ اعتبارسنجی سرور است) #}
+    <div class="ob-custom-industry{% if custom_name_error %} has-error{% endif %}" data-ob-custom-industry{% if not custom_name_error %} hidden{% endif %}>
+      <label for="ob-custom-industry-name"><b>نامِ صنفِ شما</b> <span class="ob-required" aria-hidden="true">*</span></label>
+      <input type="text" id="ob-custom-industry-name" name="custom_industry_name" maxlength="80" minlength="2" autocomplete="off" data-ob-custom-input
+             value="{{ custom_industry_name }}" placeholder="مثلاً: لوازم‌التحریرِ هنری"
+             aria-describedby="ob-custom-industry-help{% if custom_name_error %} ob-custom-industry-error{% endif %}"{% if custom_name_error %} aria-invalid="true"{% endif %}>
+      <p class="ob-help" id="ob-custom-industry-help">اگر صنفِ شما در فهرست نیست، نامِ دقیقِ کسب‌وکارتان را بنویسید (۲ تا ۸۰ نویسه). این نام در تنظیماتِ فروشگاه ثبت می‌شود.</p>
+      {% if custom_name_error %}<p class="ob-error" id="ob-custom-industry-error" role="alert">{{ custom_name_error }}</p>{% endif %}
+    </div>
+    <div class="ob-industry-empty" data-ob-no-results hidden>صنفی با این جست‌وجو پیدا نشد. عبارتِ دیگری را امتحان کنید یا از فهرست، صنفِ «سایر» را انتخاب کنید.</div>
+    <p class="ob-sr-only" role="status" data-ob-selection-status></p>
+
+  </form>
+
+  <div class="ob-sticky-foot">
+    <div class="ob-confirm{% if confirm_error %} has-error{% endif %}" data-ob-confirm>
+      <p class="ob-confirm-title" data-ob-confirm-title>صنف انتخاب‌شده: <span data-ob-selected-name>هنوز انتخاب نشده</span></p>
+      <p class="ob-confirm-note">دسته‌بندی‌ها و ویژگی‌های پایه‌ی این صنف برای فروشگاه ساخته می‌شوند. نصب فقط یک‌بار برای هر فروشگاه ممکن است.</p>
+      <label class="ob-check"><input type="checkbox" name="confirm_industry_install" value="1" data-ob-confirm-check form="ob-industry-form"{% if confirm_error %} aria-invalid="true" aria-describedby="ob-confirm-error"{% endif %}> این صنف را برای فروشگاهم نصب کن</label>
+      {% if confirm_error %}<p class="ob-error" id="ob-confirm-error">برای نصب باید کادرِ تأییدِ بالا را علامت بزنید.</p>{% endif %}
+    </div>
+  {% include "portal/onboarding/_actions.html" with form_id="ob-industry-form" continue_label="نصبِ صنفِ انتخاب‌شده" install_mode=True loading_text="در حال نصب…" %}
+  </div>
+
+  {% else %}
+  {# ── فهرستِ صنف‌ها هنوز در سامانه بارگذاری نشده: ادامه ممکن نیست (انتخابِ صنف الزامی است)؛ پیامِ صادقانه، نه رد کردن بی‌صدا ── #}
+  <div class="ob-alert ob-alert-info" role="status" data-testid="industry-registry-not-ready">فهرستِ صنف‌ها هنوز در سامانه آماده نشده است. این مشکل از طرفِ شما نیست؛ لطفاً کمی بعد دوباره تلاش کنید یا با پشتیبانیِ راستی‌سی تماس بگیرید.</div>
+  <div class="ob-actions"><a class="ob-btn ob-btn-quiet" href="{% if ob_previous_url %}{{ ob_previous_url }}{% else %}{% url 'portal:app-home' %}{% endif %}">قبلی</a></div>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

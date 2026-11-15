@@ -1,0 +1,29 @@
+{% extends "portal/onboarding/base_onboarding.html" %}
+{% block title %}معرفیِ فروشگاه | راه‌اندازی | راستی‌سی{% endblock %}
+{% block ob_page_class %} ob-page--narrow{% endblock %}
+{% block ob_body %}
+{% include "portal/onboarding/_wizard_head.html" %}
+
+<section class="ob-card" aria-labelledby="ob-identity-title">
+  <div class="ob-card-head">
+    <h2 id="ob-identity-title">معرفیِ فروشگاه</h2>
+    <p>فقط «نام فروشگاه» الزامی است. بقیه‌ی موارد را می‌توانید همین حالا یا بعداً از پنلِ مدیریت پر کنید؛ چیزی که وارد نکنید، ذخیره نمی‌شود.</p>
+  </div>
+
+  {% include "portal/onboarding/_form_errors.html" %}
+
+  <form method="post" id="ob-identity-form" novalidate data-ob-once>
+    {% csrf_token %}
+    <div class="ob-form-grid">
+      {% include "portal/onboarding/_field.html" with field=form.name required=True full=True %}
+      {% include "portal/onboarding/_field.html" with field=form.tagline full=True %}
+      {% include "portal/onboarding/_field.html" with field=form.description full=True %}
+      {% include "portal/onboarding/_field.html" with field=form.contact_phone %}
+      {% include "portal/onboarding/_field.html" with field=form.contact_email %}
+      {% include "portal/onboarding/_field.html" with field=form.contact_address full=True %}
+    </div>
+  </form>
+
+  {% include "portal/onboarding/_actions.html" with form_id="ob-identity-form" continue_label="ذخیره و ادامه به انتخاب صنف" loading_text="در حال ذخیره…" %}
+</section>
+{% endblock %}

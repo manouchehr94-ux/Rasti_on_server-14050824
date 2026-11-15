@@ -1,0 +1,189 @@
+{% load persian %}
+{% if is_empty %}
+<div class="card empty">
+  <div class="em">🛒</div>
+  <h3>سبد خرید شما خالی است</h3>
+  <p>برای ادامه، ابتدا کالاهای موردنظر را از فروشگاه به سبد خرید اضافه کنید.</p>
+  <a class="btn btn-primary" href="{% url 'catalog:product-list' %}">مشاهده محصولات فروشگاه</a>
+</div>
+{% else %}
+<div class="co-grid">
+  <!-- main -->
+  <div class="col-main">
+    <div class="card">
+      <div class="card-h"><span class="ic">📍</span>اطلاعات گیرنده سفارش</div>
+      <div class="card-b" id="address-fields">
+        <div class="frow">
+          <div class="fg">
+            <label>نام و نام خانوادگی *</label>
+            <input class="inp" name="receiver_name" value="{{ address_form.receiver_name.value|default_if_none:'' }}">
+            {% for err in address_form.receiver_name.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="fg">
+            <label>شماره موبایل *</label>
+            <input class="inp" name="phone" value="{{ address_form.phone.value|default_if_none:'' }}" dir="ltr">
+            {% for err in address_form.phone.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
+        <div class="frow">
+          <div class="fg">
+            <label>استان *</label>
+            <input class="inp" name="province" value="{{ address_form.province.value|default_if_none:'' }}">
+            {% for err in address_form.province.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="fg">
+            <label>شهر *</label>
+            <input class="inp" name="city" value="{{ address_form.city.value|default_if_none:'' }}">
+            {% for err in address_form.city.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
+        <div class="fg">
+          <label>کد پستی</label>
+          <input class="inp" name="postal_code" value="{{ address_form.postal_code.value|default_if_none:'' }}" dir="ltr">
+          {% for err in address_form.postal_code.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+        </div>
+        <div class="fg">
+          <label>آدرس پستی کامل *</label>
+          <textarea class="inp" name="full_address" rows="2">{{ address_form.full_address.value|default_if_none:'' }}</textarea>
+          {% for err in address_form.full_address.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+        </div>
+        <div class="fg">
+          <label for="id_birth_date">تاریخ تولد (اختیاری)</label>
+          <input class="inp" id="id_birth_date" name="birth_date" dir="ltr" inputmode="numeric" autocomplete="bday"
+                 value="{{ address_form.birth_date.value|jalali_input }}" placeholder="۱۳۷۰/۰۵/۲۳" aria-describedby="bd-help">
+          <small id="bd-help" style="color:var(--muted,#6b7280)">تاریخ شمسی؛ برای دریافت هدیه‌ی تولد. در صورت خالی‌گذاشتن، تاریخ ذخیره‌شده‌ی شما تغییری نمی‌کند.</small>
+          {% for err in address_form.birth_date.errors %}<div class="coup-err">{{ err }}</div>{% endfor %}
+        </div>
+        <fieldset class="fg" style="border:0;padding:0;margin:0 0 12px">
+          <legend style="font-size:13px;margin-bottom:6px">پیام‌های تبلیغاتی (اختیاری)</legend>
+          <label style="display:block"><input type="checkbox" name="accepts_promotional_sms" value="on" {% if address_form.accepts_promotional_sms.value %}checked{% endif %}> دریافت پیامک تبلیغاتی (تخفیف و مناسبت‌ها)</label>
+          <label style="display:block"><input type="checkbox" name="accepts_promotional_email" value="on" {% if address_form.accepts_promotional_email.value %}checked{% endif %}> دریافت ایمیل تبلیغاتی</label>
+          <small style="color:var(--muted,#6b7280)">پیام‌های مربوط به سفارش و پرداخت همیشه ارسال می‌شوند. هر زمان از «حساب من» قابل لغو است.</small>
+        </fieldset>
+        <div class="fg" style="margin-bottom:0">
+          <label>توضیحات سفارش (اختیاری)</label>
+          <input class="inp" name="note" value="{{ address_form.note.value|default_if_none:'' }}" placeholder="مثلاً: لطفاً قبل از ارسال هماهنگ کنید">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="ic">🚚</span>روش ارسال</div>
+      <div class="card-b">
+        {% for row in shipping_rows %}
+        <label class="rc">
+          <input type="radio" name="ship" value="{{ row.method.id }}" {% if row.selected %}checked{% endif %}
+                 hx-post="{% url 'orders:checkout-set-shipping' row.method.id %}" hx-target="#checkout-container" hx-swap="innerHTML">
+          <span class="rcb">
+            <span class="rd"></span>
+            <span class="ic">🚚</span>
+            <span class="tx"><b>{{ row.method.name }}</b><small>{{ row.method.description }}</small></span>
+            <span class="pr{% if row.free %} free{% endif %}">{% if row.free %}رایگان{% else %}{{ row.method.cost|toman }}{% endif %}</span>
+          </span>
+        </label>
+        {% empty %}
+        <p class="ck-blocker" role="status" style="color:var(--muted);font-size:13px">روش ارسالی برای این فروشگاه تعریف نشده است.</p>
+        {% endfor %}
+        {% if totals.free_shipping %}
+        <div style="font-size:11.5px;color:var(--green);font-weight:700;margin-top:4px">🎉 به دلیل خرید بالای {{ SHOP_FREE_SHIPPING_THRESHOLD|toman }}، ارسال برای شما رایگان شد!</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="ic">🛍️</span>کالاهای سبد خرید (<span>{{ item_count|fa_number }}</span> قلم)</div>
+      <div class="card-b" style="padding-top:4px">
+        {% for item in cart_items %}
+        <div class="citem">
+          <div class="thumb{% if item.display_image %} has-img{% endif %}" style="background:{{ item.product.tint|default:'#eceef3' }}">{% if item.display_image %}<img src="{{ item.display_image.url }}" data-img-role="thumb" alt="{{ item.display_image.alt }}" loading="lazy" decoding="async" width="74" height="74">{% else %}<span class="thumb-fallback" aria-hidden="true">{{ item.product.icon|default:"🛍️" }}</span>{% endif %}</div>
+          <div class="info">
+            <b>{{ item.product.name }}</b>
+            {% if item.variant %}
+            <div class="meta">
+              <span>{% if item.variant.value_hex %}<span class="sw" style="background:{{ item.variant.value_hex }}"></span>{% endif %}{{ item.variant.attribute }}: {{ item.variant.value }}</span>
+            </div>
+            {% endif %}
+          </div>
+          <div class="right">
+            <div class="lp">
+              {{ item.unit_price|toman }}
+              {% if item.regular_price > item.unit_price %}<small>{{ item.regular_price|toman }}</small>{% endif %}
+            </div>
+            <div class="stepper">
+              <button type="button" hx-post="{% url 'orders:checkout-item-update' item.id %}" hx-vals='{"quantity": {{ item.quantity|add:"-1" }}}' hx-target="#checkout-container" hx-swap="innerHTML">−</button>
+              <input value="{{ item.quantity|fa_number }}" readonly>
+              <button type="button" hx-post="{% url 'orders:checkout-item-update' item.id %}" hx-vals='{"quantity": {{ item.quantity|add:"1" }}}' hx-target="#checkout-container" hx-swap="innerHTML">+</button>
+            </div>
+            <button type="button" class="rm" hx-post="{% url 'orders:checkout-item-remove' item.id %}" hx-target="#checkout-container" hx-swap="innerHTML">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+              حذف
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- summary -->
+  <div class="col-sum">
+    <div class="card">
+      <div class="card-h"><span class="ic">🎟️</span>کد تخفیف</div>
+      <div class="card-b">
+        {% if coupon %}
+        <div class="applied">🎉 کد «{{ coupon.code }}» اعمال شد — {{ coupon.label|default:coupon.get_type_display }}
+          <span class="x" hx-post="{% url 'orders:checkout-coupon-remove' %}" hx-target="#checkout-container" hx-swap="innerHTML">✕</span>
+        </div>
+        {% else %}
+        <div class="coupon">
+          <input class="inp" id="coup-in" name="code" value="{{ coupon_input }}" placeholder="کد تخفیف را وارد کنید" dir="ltr">
+          <button type="button" hx-post="{% url 'orders:checkout-coupon-apply' %}" hx-include="#coup-in" hx-target="#checkout-container" hx-swap="innerHTML">اعمال</button>
+        </div>
+        {% if coupon_error %}<div class="coup-err">⚠️ {{ coupon_error }}</div>{% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="ic">💳</span>روش پرداخت</div>
+      <div class="card-b">
+        {% for row in payment_rows %}
+        <label class="rc">
+          <input type="radio" name="pay" value="{{ row.gateway.id }}" {% if row.selected %}checked{% endif %}
+                 hx-post="{% url 'orders:checkout-set-payment' row.gateway.id %}" hx-target="#checkout-container" hx-swap="innerHTML">
+          <span class="rcb">
+            <span class="rd"></span>
+            <span class="ic">💳</span>
+            <span class="tx"><b>{{ row.gateway.name }}</b><small>{{ row.gateway.description }}</small></span>
+          </span>
+        </label>
+        {% empty %}
+        <p class="ck-blocker" role="status" style="color:var(--muted);font-size:13px">پرداخت آنلاین هنوز برای این فروشگاه فعال نشده است.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><span class="ic">🧾</span>خلاصه سفارش</div>
+      <div class="card-b">
+        {% include "cart/partials/totals_breakdown.html" with breakdown=totals.breakdown grand_label="مبلغ قابل پرداخت" %}
+        {% if savings > 0 %}
+        <div class="save-note">🎁 شما در این خرید {{ savings|toman }} صرفه‌جویی کردید!</div>
+        {% endif %}
+        {% if readiness.can_place_order %}
+        <button type="button" class="btn btn-primary btn-block" style="margin-top:14px;height:52px;font-size:15px"
+                hx-post="{% url 'orders:checkout-pay' %}" hx-include="#address-fields" hx-vals='{"expected_total": "{{ totals.grand_total|floatformat:"0u" }}"}' hx-target="#checkout-container" hx-swap="innerHTML">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          ادامه و پرداخت
+        </button>
+        {% else %}
+        <div class="ck-unavailable" role="alert" style="margin-top:14px;padding:12px 14px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:13px;line-height:1.9">
+          {% for message in readiness.blockers %}<div>{{ message }}</div>{% endfor %}
+        </div>
+        <button type="button" class="btn btn-primary btn-block" style="margin-top:10px;height:52px;font-size:15px;opacity:.5;cursor:not-allowed" disabled aria-disabled="true">ثبت سفارش در دسترس نیست</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,46 @@
+{% extends "portal/base_platform.html" %}
+{% load persian %}
+{% block title %}خریدِ اشتراک | راستیسی{% endblock %}
+{% block robots_meta %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<div class="p-wrap">
+<div class="p-form-card" style="max-width:560px">
+  <h2 style="text-align:center;margin-bottom:8px">پلن‌های راستیسی</h2>
+  {% if current_subscription %}
+  <p style="text-align:center;font-size:13px;color:var(--p-muted);margin-bottom:20px">
+    اشتراکِ فعلی: {{ current_subscription.plan_version.plan.public_title|default:current_subscription.plan_version.plan.name }}
+    ({{ current_subscription.get_status_display }})
+  </p>
+  {% endif %}
+  {% if request.GET.payment == "ok" %}<div class="p-alert">پرداخت تأیید شد و اشتراک شما اعمال شد.</div>{% elif request.GET.payment == "failed" %}<div class="p-alert p-alert-error">پرداخت تأیید نشد؛ می‌توانید دوباره تلاش کنید.</div>{% elif request.GET.payment == "action" %}<div class="p-alert p-alert-error">پرداخت شما نیازمند بررسی پشتیبانی است؛ دوباره پرداخت نکنید.</div>{% elif request.GET.payment == "pending" %}<div class="p-alert">پرداخت هنوز تأیید نشده است.</div>{% endif %}
+  {% if messages %}{% for message in messages %}<div class="p-alert p-alert-error">{{ message }}</div>{% endfor %}{% endif %}
+  {% if not has_payment_methods %}<div class="p-alert p-alert-error" role="alert">در حال حاضر هیچ روشِ پرداختی فعال نیست؛ خرید موقتاً در دسترس نیست.</div>{% endif %}
+  <p style="text-align:center;font-size:12px;color:var(--p-muted);margin:0 0 12px">روشِ پرداخت (درگاه بانکی یا کارت‌به‌کارت) در مرحله‌ی بعد انتخاب می‌شود.</p>
+  <div style="display:grid;gap:12px">
+    {% for offer in plan_offers %}
+    <div style="border:1px solid {% if offer.version.plan_id == selected_plan_id %}var(--p-primary,#6c4cf1){% else %}var(--p-line){% endif %};border-radius:12px;padding:16px;display:grid;gap:10px"{% if offer.version.plan_id == selected_plan_id %} aria-current="true"{% endif %}>
+      <div style="font-weight:600">{{ offer.version.plan.public_title|default:offer.version.plan.name }}{% if offer.version.plan_id == selected_plan_id %} <span style="font-size:11px;color:var(--p-muted)">— انتخابِ شما در صفحه‌ی تعرفه</span>{% endif %}</div>
+      {% for period in offer.periods %}
+      <form method="post" action="{% url 'portal:billing-checkout' store.public_id offer.version.pk %}" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        {% csrf_token %}
+        <input type="hidden" name="billing_interval" value="{{ period.interval }}">
+        <div style="font-size:13px"><b data-testid="period-price">{{ period.price|toman_raw }}</b> تومان / {{ period.label }}{% if period.compare_at %} <s style="font-size:11px;color:var(--p-muted)">{{ period.compare_at|toman_raw }}</s>{% endif %}{% if period.savings_percent %} <span style="font-size:11px;color:var(--p-muted)">({{ period.savings_percent|fa_number }}٪ تخفیف)</span>{% endif %}</div>
+        {% if has_payment_methods %}<button type="submit" class="p-btn p-btn-primary">خرید</button>{% else %}<button type="button" class="p-btn" disabled aria-disabled="true" title="روشِ پرداختی فعال نیست">در دسترس نیست</button>{% endif %}
+      </form>
+      {% endfor %}
+    </div>
+    {% empty %}
+    <p style="text-align:center;font-size:13px;color:var(--p-muted)">در حال حاضر پلنِ پولیِ قابلِ‌خریدی موجود نیست.</p>
+    {% endfor %}
+  </div>
+
+  <form method="post" action="{% url 'portal:enter-admin' store.public_id %}" style="margin-top:20px">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="/admin-portal/billing/">
+    <button type="submit" class="p-btn p-btn-ghost" style="width:100%;font-size:12px">
+      مشاهده‌ی فاکتورها و حسابِ صورتحسابِ کاملِ فروشگاه در پنلِ مدیریت
+    </button>
+  </form>
+</div>
+</div>
+{% endblock %}

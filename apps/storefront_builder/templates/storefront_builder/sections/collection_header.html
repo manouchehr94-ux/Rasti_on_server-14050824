@@ -1,0 +1,20 @@
+{% comment %}
+Phase 5 — عنوان/توضیح/تصویرِ کالکشنِ جاری؛ «جاری» همیشه از مسیر resolve
+می‌شود (هرگز یک ID ذخیره‌شده در settings) — غیابِ آن (مثلاً صفحه‌ی
+فهرستِ کالکشن‌ها که «کالکشنِ جاری»ای ندارد) یعنی چیزی رندر نمی‌شود، نه
+crash. بردکرامب اینجا تکرار نمی‌شود — قالبِ صفحه (``collection_detail.html``)
+خودش همیشه یک بردکرامبِ ثابت دارد، دقیقاً همان الگویِ product_detail/listing.
+{% endcomment %}
+{% if collection %}
+<div class="wrap">
+  <div class="collection-hero" style="display:flex;gap:16px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+    {% if collection.image %}
+    <img class="collection-header-thumb" src="{{ collection.image.url }}" data-img-role="collection" alt="{{ collection.name }}" width="96" height="96">
+    {% endif %}
+    <div style="min-width:0">
+      <h1 style="margin:0 0 6px">{{ collection.name }}</h1>
+      {% if collection.description %}<p style="color:var(--muted);margin:0;max-width:640px">{{ collection.description }}</p>{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}

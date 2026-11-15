@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% comment %}
+The ONE public storefront shell. Every storefront page — the six builder page types AND the domain-owned pages (checkout,
+payment result, account, order detail, wishlist, CMS pages) — extends this template and gets its header / footer / bottom
+nav from the Store's published engine layout (``storefront_context_service.build_universal_storefront_context``, or
+``render_domain_page`` for domain-owned bodies). There is no second hard-coded header or footer. The page body lives only
+in the content block; commerce content is never rewritten by the shell.
+{% endcomment %}
+
+{% block header %}
+{% if not header_embedded %}{% include header_variant_template with header_config=layout_header_config is_live_storefront=True is_builder_preview=False %}{% endif %}
+{% endblock %}
+
+{% block footer %}
+{% if FOOTER_SETTINGS and not FOOTER_SETTINGS.is_enabled %}<footer class="footer"></footer>{% else %}{% include footer_variant_template with footer_config=layout_footer_config is_live_storefront=True is_builder_preview=False %}{% endif %}
+{% include "storefront_builder/partials/global_footer/_shared/floating_actions.html" with footer_config=layout_footer_config %}
+{% if mobile_bottom_nav_template %}{% include mobile_bottom_nav_template with footer_config=layout_footer_config is_live_storefront=True is_builder_preview=False %}{% endif %}
+{% endblock %}

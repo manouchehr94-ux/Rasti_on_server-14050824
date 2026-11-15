@@ -1,0 +1,56 @@
+{% extends "portal/platform_admin/base.html" %}
+{% load persian %}
+{% block title %}اشتراک فروشگاه‌ها | پنل مدیریت پلتفرم{% endblock %}
+{% block content %}
+<div class="pa-pagehead"><div><h1>اشتراک فروشگاه‌ها</h1><p>اشتراکِ جاریِ هر فروشگاه — تمدید/تغییرِ پلن از صفحه‌ی فروشگاه انجام می‌شود.</p></div></div>
+
+<form method="get" class="pa-card" role="search"><div class="pa-cardbody pa-filters">
+  <div class="pa-field pa-grow"><label for="flt-q">جستجو</label><input id="flt-q" type="search" name="q" value="{{ query }}"></div>
+  <div class="pa-field"><label for="flt-status">وضعیت</label><select id="flt-status" name="status">
+      <option value="">همه‌ی وضعیت‌ها</option>
+      {% for value, label in status_choices %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  <div class="pa-field"><label for="flt-plan">پلن</label><select id="flt-plan" name="plan">
+      <option value="">همه‌ی پلن‌ها</option>
+      {% for plan in plans %}<option value="{{ plan.pk }}" {% if plan_id == plan.pk|stringformat:"s" %}selected{% endif %}>{{ plan.name }}</option>{% endfor %}
+    </select></div>
+  <div class="pa-filter-actions"><button class="pa-btn pa-primary" type="submit">اعمالِ فیلتر</button><a class="pa-btn" href="{% url 'portal_platform_admin:subscriptions' %}">پاک‌کردن</a></div>
+</div></form>
+
+<div class="pa-card">
+  {% if page.object_list %}
+  <div class="pa-tablewrap">
+    <table>
+      <thead><tr><th>فروشگاه</th><th>پلن</th><th>وضعیت</th><th>دوره‌ی جاری</th><th>پایانِ تریال</th><th class="pa-actcol"></th></tr></thead>
+      <tbody>
+        {% for sub in page.object_list %}
+        <tr>
+          <td>{{ sub.store.name }}</td>
+          <td>{{ sub.plan_version.plan.name }}</td>
+          <td>
+            {% if sub.status == "active" %}<span class="pa-badge pa-ok">فعال</span>
+            {% elif sub.status == "trialing" %}<span class="pa-badge pa-info">آزمایشی</span>
+            {% elif sub.status == "suspended" or sub.status == "cancelled" or sub.status == "expired" %}<span class="pa-badge pa-off">{{ sub.get_status_display }}</span>
+            {% else %}<span class="pa-badge pa-warn">{{ sub.get_status_display }}</span>{% endif %}
+          </td>
+          <td>{{ sub.current_period_end|jalali|default:"—" }}</td>
+          <td>{{ sub.trial_end_at|jalali|default:"—" }}</td>
+          <td class="pa-actcol"><div class="pa-row pa-nowrap">
+            <a class="pa-btn pa-small pa-soft" href="{% url 'portal_platform_admin:store-detail' sub.store.public_id %}?tab=subscription">مدیریت</a>
+            {% if sub.status == "active" %}
+            <form method="post" action="{% url 'portal_platform_admin:subscription-suspend' sub.pk %}">{% csrf_token %}<button class="pa-btn pa-small pa-danger" type="submit">تعلیق</button></form>
+            {% elif sub.status == "suspended" %}
+            <form method="post" action="{% url 'portal_platform_admin:subscription-resume' sub.pk %}">{% csrf_token %}<button class="pa-btn pa-small" type="submit">ازسرگیری</button></form>
+            {% endif %}
+          </div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "portal/platform_admin/_pagination.html" %}
+  {% else %}
+  <div class="pa-empty"><div class="pa-empty-icon"><svg class="pa-i"><use href="#i-file"/></svg></div><p>اشتراکی یافت نشد.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

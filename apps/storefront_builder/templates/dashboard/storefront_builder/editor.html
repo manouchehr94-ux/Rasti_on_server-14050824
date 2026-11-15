@@ -1,0 +1,1681 @@
+{% extends "dashboard/base_admin.html" %}
+{% load static storefront_builder_extras %}
+{% block title %}راستی‌سی — سازنده ظاهر{% endblock %}
+{% block page_title %}سازنده ظاهر{% endblock %}
+{% block page_sub %}ویرایش بصری صفحات فروشگاه{% endblock %}
+
+{% block extra_css %}
+{% if not layout.r4_editor_enabled %}
+<link rel="stylesheet" href="{% static 'css/storefront_builder.css' %}">
+<link rel="stylesheet" href="{% static 'css/storefront_builder_v22.css' %}">
+<link rel="stylesheet" href="{% static 'css/storefront_builder_r3.css' %}">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if layout.r4_editor_enabled %}
+{% comment %}
+Pre-Task-10 CORRECTIVE closure (Item 2, second legacy retirement pass) —
+R4 is this Store's live default editor, so every merchant-facing surface
+below (composition editing, settings editing, toggle/lock, granular
+reset, Appearance/Header/Footer forms — everything the sfb-r3-shell
+Alpine SPA and its R3 modal used to expose) is now genuine duplicate
+dead-weight UI, per family_certification_matrix.md/legacy_disposition.md.
+Physically removing it here (not merely reclassifying the doc row) is
+what closes Gap 3 in full. The ONLY two capabilities re-verified to have
+no R4 equivalent — restore/history browsing and the industry-vertical
+layout preset — are preserved below, unconditionally reachable. The FULL
+legacy shell (the other branch below, byte-for-byte unchanged) still
+renders whenever r4_editor_enabled is False — the documented per-Store
+rollback safety valve. Retiring the duplicate UI must never also retire
+the one remaining editor for a Store deliberately pinned back to it, so
+this branch is conditional, not an outright deletion of the legacy body
+below.
+{% endcomment %}
+<div class="card">
+  <h2>ادیتور نسخه قدیمی</h2>
+  <p>ادیتور جدید (R4) اکنون ابزار اصلی و مرجع نوشتن برای ویرایش ظاهر این فروشگاه است. این صفحه فقط دو قابلیتی را نگه داشته که هنوز معادلی در R4 ندارند؛ بقیه‌ی امکانات ویرایش (بخش‌ها، چیدمان، ظاهر/هدر/فوتر و…) اکنون فقط از ادیتور جدید در دسترس‌اند.</p>
+  <a class="btn" href="{% url 'dashboard:storefront-builder-r4-editor' %}?page={{ page_type }}">✦ رفتن به ادیتور جدید (R4)</a>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3>تاریخچه و بازگردانی نسخه‌ها</h3>
+  <p>نسخه‌های قبلاً منتشرشده را مرور و در صورت نیاز، محتوای یکی از آن‌ها را در یک پیش‌نویس جدید بازگردانی کن.</p>
+  <a class="btn" href="{% url 'dashboard:storefront-builder-history' %}">تاریخچه نسخه‌ها</a>
+</div>
+
+{% if industry_installation %}
+<div class="card" style="margin-top:14px">
+  <h3>چیدمان پیشنهادی صنف</h3>
+  <p>چیدمان پیشنهادیِ صنفِ نصب‌شده روی این فروشگاه را در یک پیش‌نویس جدید اعمال کن.</p>
+  <button type="button" class="btn" id="r4IndustryApplyButton"
+          data-r4-apply-url="{% url 'dashboard:storefront-builder-r4-apply-industry-layout' %}"
+          data-r4-base-draft-id="{{ draft.pk }}"
+          data-r4-base-revision="{{ draft.edit_revision }}"
+          {% if layout.published_version_id %}data-r4-confirm="اعمال چیدمان پیشنهادی، Draft فعلی را جایگزین می‌کند. ادامه می‌دهید؟"{% endif %}>
+    چیدمان پیشنهادی صنف
+  </button>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('r4IndustryApplyButton');
+  if (!btn) { return; }
+  btn.addEventListener('click', function () {
+    var confirmMsg = btn.getAttribute('data-r4-confirm');
+    var force = false;
+    if (confirmMsg) {
+      if (!confirm(confirmMsg)) { return; }
+      force = true;
+    }
+    fetch(btn.getAttribute('data-r4-apply-url'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || '',
+      },
+      body: JSON.stringify({
+        base_draft_id: parseInt(btn.getAttribute('data-r4-base-draft-id'), 10),
+        base_revision: parseInt(btn.getAttribute('data-r4-base-revision'), 10),
+        force: force,
+      }),
+    }).then(function (resp) {
+      if (resp.status === 409) {
+        alert('این صفحه قدیمی شده — لطفاً صفحه را دوباره بارگذاری کنید و امتحان کنید');
+        return;
+      }
+      if (!resp.ok) {
+        alert('اعمال چیدمان صنف ناموفق بود');
+        return;
+      }
+      window.location.reload();
+    });
+  });
+})();
+</script>
+{% endif %}
+{% else %}
+<div class="sfb-shell sfb-prototype-shell sfb-v3-shell sfb-v22-workspace sfb-r3-shell"
+     :class="{
+       'sfb-fullscreen': fullscreen,
+       'sfb-v3-sidebar-collapsed': sidebarCollapsed,
+       'sfb-v3-inspector-collapsed': inspectorCollapsed,
+       'sfb-v22-preview-mode': builderMode === 'preview',
+       'sfb-v22-edit-mode': builderMode === 'edit'
+     }"
+     x-data="storefrontEditor()"
+     x-init="init()"
+     data-page-type="{{ page_type }}"
+     data-initial-section-id="{% if sections %}{{ sections.0.pk }}{% endif %}"
+     data-history-state-url="{% url 'dashboard:storefront-builder-edit-history-state' %}"
+     data-undo-url="{% url 'dashboard:storefront-builder-undo' %}"
+     data-redo-url="{% url 'dashboard:storefront-builder-redo' %}"
+     data-section-list-url="{% url 'dashboard:storefront-builder-section-list' %}"
+     data-section-add-url="{% url 'dashboard:storefront-builder-section-add' %}"
+     data-container-state-url="{% url 'dashboard:storefront-builder-container-state' %}"
+     data-container-add-url="{% url 'dashboard:storefront-builder-container-add' %}"
+     data-container-settings-url-template="{% url 'dashboard:storefront-builder-container-settings' 0 %}"
+     data-container-move-url-template="{% url 'dashboard:storefront-builder-container-move' 0 %}"
+     data-container-remove-url-template="{% url 'dashboard:storefront-builder-container-remove' 0 %}"
+     data-cell-add-section-url="{% url 'dashboard:storefront-builder-cell-add-section' %}"
+     data-cell-clear-url-template="{% url 'dashboard:storefront-builder-cell-clear' 0 %}"
+     data-block-move-url-template="{% url 'dashboard:storefront-builder-block-move' 0 %}"
+     data-block-remove-url-template="{% url 'dashboard:storefront-builder-block-remove' 0 %}"
+     data-appearance-url="{% url 'dashboard:storefront-builder-appearance' %}"
+     @beforeunload.window="handleBeforeUnload($event)"
+     @keydown.escape.window="handleEscape()"
+     @keydown.window="handleGlobalKeydown($event)"
+     @close-settings-drawer.window="clearInspector()">
+
+  {% include "dashboard/storefront_builder/partials/r3_toolbar.html" %}
+
+  <header class="sfb-prototype-topbar sfb-v3-topbar">
+    <div class="sfb-v3-topbar-right">
+      <div class="sfb-v3-brand" aria-label="RastiSi">
+        <span class="sfb-v3-logo-mark">R</span>
+        <strong>RastiSi</strong>
+      </div>
+      <a class="sfb-v22-back-admin" href="{% url 'dashboard:dashboard' %}" title="بازگشت به مرکز مدیریت">← مدیریت</a>
+      <span class="sfb-v3-top-sep" aria-hidden="true">/</span>
+      <label class="sfb-v3-page-picker">
+        <span class="sr-only">صفحه</span>
+        <select aria-label="انتخاب صفحه" @change="changePage($event.target.value)">
+          {% for value, label in page_types %}
+          <option value="{{ value }}" {% if value == page_type %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <span class="sfb-prototype-status sfb-v3-save-status" :class="{ 'is-dirty': inspectorDirty }" aria-live="polite">
+        <span aria-hidden="true" x-text="inspectorDirty ? '●' : '✓'"></span>
+        <span x-text="saveStatusLabel">پیش‌نویس ذخیره شده</span>
+      </span>
+    </div>
+
+    <div class="sfb-v3-topbar-center">
+      <div class="sfb-v22-mode-switch" role="group" aria-label="حالت سازنده">
+        <button type="button" :class="{ active: builderMode === 'preview' }" @click="setBuilderMode('preview')">پیش‌نمایش</button>
+        <button type="button" :class="{ active: builderMode === 'edit' }" @click="setBuilderMode('edit')">ویرایش</button>
+      </div>
+      <div class="sfb-v3-device-switcher" role="group" aria-label="اندازه پیش‌نمایش">
+        <button type="button" class="sfb-v3-device-btn" :class="{ active: device === 'desktop' }" @click="setDevice('desktop')" title="دسکتاپ" aria-label="دسکتاپ">▱</button>
+        <button type="button" class="sfb-v3-device-btn" :class="{ active: device === 'tablet' }" @click="setDevice('tablet')" title="تبلت" aria-label="تبلت">▯</button>
+        <button type="button" class="sfb-v3-device-btn" :class="{ active: device === 'mobile' }" @click="setDevice('mobile')" title="موبایل" aria-label="موبایل">▯</button>
+      </div>
+      <div class="sfb-v3-zoom-control" aria-label="بزرگ‌نمایی بوم">
+        <button type="button" @click="changeZoom(-10)" aria-label="کوچک‌نمایی">−</button>
+        <span x-text="zoom + '%'">100%</span>
+        <button type="button" @click="changeZoom(10)" aria-label="بزرگ‌نمایی">＋</button>
+      </div>
+    </div>
+
+    <div class="sfb-v3-topbar-left">
+      <button type="button" class="sfb-v3-icon-btn" :disabled="historyBusy || !canUndo" @click="historyStep('undo')"
+              :title="undoLabel ? 'بازگشت: ' + undoLabel : 'چیزی برای بازگشت نیست'" aria-label="Undo">↶</button>
+      <button type="button" class="sfb-v3-icon-btn" :disabled="historyBusy || !canRedo" @click="historyStep('redo')"
+              :title="redoLabel ? 'جلو: ' + redoLabel : 'چیزی برای جلو رفتن نیست'" aria-label="Redo">↷</button>
+      <span class="sfb-v3-divider" aria-hidden="true"></span>
+      <button type="button" class="sfb-v22-action-btn" @click="openStructurePanel()" title="ساختار صفحه"><span class="sfb-v22-action-icon">☰</span><span>ساختار صفحه</span></button>
+      <button type="button" class="sfb-v22-action-btn" @click="openAddModal($event)" title="افزودن بخش"><span class="sfb-v22-action-icon">＋</span><span>افزودن بخش</span></button>
+      <button type="button" class="sfb-v22-action-btn is-primary-context" @click="openAppearancePanel()" title="ظاهر فروشگاه"><span class="sfb-v22-action-icon">◉</span><span>ظاهر فروشگاه</span></button>
+      <a class="sfb-v3-ghost-btn" href="{% url 'dashboard:storefront-builder-templates' %}">▦ <span>قالب‌های آماده</span></a>
+      <a class="sfb-v3-ghost-btn" href="{% url 'dashboard:storefront-builder-preview' %}?page={{ page_type }}" target="_blank" rel="noopener">◎ <span>پیش‌نمایش</span></a>
+      {% if layout.r4_editor_enabled %}
+      {# Pre-Task-10 remediation (R4 live cutover) — R4 is now the default #}
+      {# canonical merchant editor (dashboard nav already routes there); #}
+      {# this legacy-editor-side link is a convenience for a merchant who #}
+      {# is on this page directly. Still gated on the existing #}
+      {# r4_editor_enabled per-Store flag (unchanged authorization: same #}
+      {# STOREFRONT_LAYOUT_MANAGE-permitted page already resolves `layout` #}
+      {# — no new query, no weakened authorization), now a non-blocking #}
+      {# compatibility flag rather than a rollout gate — only False for a #}
+      {# Store explicitly pinned back to the legacy editor. #}
+      <a class="sfb-v3-ghost-btn" href="{% url 'dashboard:storefront-builder-r4-editor' %}?page={{ page_type }}">✦ <span>ادیتور جدید (R4)</span></a>
+      {% endif %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-publish' %}" class="sfb-prototype-publish-form"
+            onsubmit="return confirm('این پیش‌نویس روی فروشگاه عمومی منتشر شود؟')">
+        {% csrf_token %}
+        {# R4 Task 8 (Batch 2, lifecycle-hardening) — storefront_publish's own
+           stale-aware path (r4_mutation_service.publish_draft) already existed
+           and is already correct; this form simply never sent the token that
+           would engage it. Without this, two browser tabs on the legacy
+           editor could publish over each other's changes with no conflict
+           detection at all, even though the exact same protection R4 already
+           gets was one hidden field away. #}
+        <input type="hidden" name="base_revision" value="{{ draft.edit_revision }}">
+        <button type="submit" class="sfb-v3-primary-btn">انتشار <span aria-hidden="true">←</span></button>
+      </form>
+    </div>
+  </header>
+
+  <button type="button" class="sfb-v3-exit-fullscreen" x-show="fullscreen" x-cloak
+          @click="fullscreen = false; $nextTick(() => syncPreviewViewport())"
+          aria-label="خروج از تمام‌صفحه">← خروج از تمام‌صفحه</button>
+
+  <main class="sfb-prototype-main sfb-v3-main"
+        :class="['sfb-mobile-panel-' + mobilePanel]">
+
+    <button type="button" class="sfb-v22-drawer-backdrop"
+            x-show="builderMode === 'edit' && (!sidebarCollapsed || !inspectorCollapsed)" x-cloak
+            @click="closeBuilderDrawers()" aria-label="بستن پنل ویرایش"></button>
+
+    <aside class="sfb-library-panel sfb-v3-sidebar-right" aria-label="ابزارهای سازنده">
+      <nav class="sfb-v3-sidebar-tabs" aria-label="پنل ابزارها">
+        <button type="button" :class="{ active: sidebarTab === 'add' }" @click="sidebarTab = 'add'"><span>⊞</span><small>افزودن</small></button>
+        <button type="button" :class="{ active: sidebarTab === 'layers' }" @click="sidebarTab = 'layers'"><span>◇</span><small>ساختار</small></button>
+        <button type="button" :class="{ active: sidebarTab === 'style' }" @click="sidebarTab = 'style'"><span>◉</span><small>استایل</small></button>
+        <button type="button" :class="{ active: sidebarTab === 'pages' }" @click="sidebarTab = 'pages'"><span>▤</span><small>صفحات</small></button>
+      </nav>
+
+      <section class="sfb-v3-sidebar-panel" x-show="sidebarTab === 'add'" x-cloak>
+        <button type="button" class="sfb-v3-add-layout-entry" @click="openAddModal($event)">
+          <span class="sfb-v3-add-layout-icon">▦</span>
+          <span><strong>افزودن چیدمان</strong><small>۱ تا ۴ ستون آزاد؛ محتوا را بعداً داخل هر ستون قرار بده</small></span>
+          <span aria-hidden="true">＋</span>
+        </button>
+        <div class="sfb-v3-panel-search">
+          <span aria-hidden="true">⌕</span>
+          <input class="sfb-prototype-search" type="search" x-model.trim="libraryQuery" placeholder="جستجوی کامپوننت..." aria-label="جستجوی کامپوننت">
+        </div>
+        <div class="sfb-v3-free-layout-note">
+          هر کامپوننت را داخل هر ستون دلخواه قرار بده؛ چند کامپوننت می‌توانند داخل یک ستون باشند.
+        </div>
+        <div class="sfb-prototype-library-scroll sfb-v3-library-scroll">
+          {% for category, definitions in section_library_groups %}
+          <section class="sfb-add-section-category sfb-prototype-group sfb-v3-library-category" x-show="groupHasMatches($el)" x-cloak>
+            <div class="sfb-v3-category-title"><span>{{ category }}</span><small>{{ definitions|length }}</small></div>
+            <div class="sfb-add-section-list sfb-prototype-blocks sfb-v3-component-grid">
+              {% for definition in definitions %}
+              <button type="button"
+                      class="sfb-lib-card sfb-prototype-block-btn sfb-v3-component-item"
+                      data-library-label="{{ definition.label_fa }} {{ definition.description_fa }} {{ category }}"
+                      data-section-key="{{ definition.key }}"
+                      draggable="true"
+                      title="کلیک برای افزودن یا بکش و داخل هر ستون رها کن"
+                      x-show="matchesLibrary($el.dataset.libraryLabel)"
+                      @dragstart="beginLibraryDrag($event, '{{ definition.key }}', '{{ definition.label_fa|escapejs }}')"
+                      @dragend="endLibraryDrag()"
+                      @click="if (!libraryDragging) addContentBlock('{{ definition.key }}')">
+                <span class="sfb-lib-card-icon sfb-prototype-block-icon sfb-v3-component-preview">{{ definition.icon|icon_svg }}</span>
+                <span class="sfb-lib-card-copy"><b>{{ definition.label_fa }}</b></span>
+              </button>
+              {% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+
+          <section class="sfb-prototype-group sfb-v3-library-category">
+            <div class="sfb-v3-category-title"><span>سراسری</span><small>4</small></div>
+            <div class="sfb-v3-component-grid">
+              <button type="button" class="sfb-v3-component-item" @click="openPanelUrl('{% url 'dashboard:storefront-builder-header' %}', 'هدر فروشگاه')"><span class="sfb-v3-global-icon">⌃</span><b>هدر</b></button>
+              <button type="button" class="sfb-v3-component-item" @click="openPanelUrl('{% url 'dashboard:storefront-builder-footer' %}', 'فوتر فروشگاه')"><span class="sfb-v3-global-icon">⌄</span><b>فوتر</b></button>
+              <button type="button" class="sfb-v3-component-item" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'ظاهر سایت')"><span class="sfb-v3-global-icon">◉</span><b>ظاهر</b></button>
+              <a class="sfb-v3-component-item" href="{% url 'dashboard:menu-list' %}"><span class="sfb-v3-global-icon">☰</span><b>مگامنو</b></a>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="sfb-v3-sidebar-panel sfb-v3-layers-panel" x-show="sidebarTab === 'layers'" x-cloak>
+        <div class="sfb-v3-panel-title"><strong>ساختار صفحه</strong><small>چیدمان یا بلاک را برای ویرایش انتخاب کن</small></div>
+        <div class="sfb-v3-layout-layer-list" aria-label="چیدمان‌های صفحه">
+          <div class="sfb-v3-layout-layer-head"><strong>چیدمان‌ها</strong><button type="button" @click="openAddModal($event)">＋ افزودن</button></div>
+          {% for container in containers %}
+          <button type="button" class="sfb-v3-layout-layer"
+                  :class="{ active: selectedContainerId === {{ container.pk }} && !selectedSectionId }"
+                  @click="selectContainer({{ container.pk }})">
+            <span class="sfb-v3-layout-layer-icon">▦</span>
+            <span><b>چیدمان {{ forloop.counter }}</b><small>{{ container.cells.count }} ستون · {% if container.layout_key == "single" %}100٪{% elif container.layout_key == "half" %}50/50{% elif container.layout_key == "third_left" %}33/67{% elif container.layout_key == "third_right" %}67/33{% elif container.layout_key == "quarter_left" %}25/75{% elif container.layout_key == "quarter_right" %}75/25{% elif container.layout_key == "thirds" %}سه‌ستونه{% elif container.layout_key == "quarters" %}چهارستونه{% else %}{{ container.layout_key }}{% endif %}</small></span>
+            <span aria-hidden="true">‹</span>
+          </button>
+          {% empty %}
+          <button type="button" class="sfb-v3-layout-layer is-empty" @click="openAddModal($event)"><span>＋</span><span><b>اولین چیدمان را بساز</b><small>یک ساختار ستونی آزاد اضافه کن</small></span></button>
+          {% endfor %}
+        </div>
+        <div class="sfb-v3-panel-title sfb-v3-blocks-title"><strong>بلاک‌ها</strong><small>محتوای صفحه</small></div>
+        <div class="sfb-v3-layers-tree">
+          {% include "dashboard/storefront_builder/partials/section_list.html" %}
+        </div>
+      </section>
+
+      <section class="sfb-v3-sidebar-panel sfb-v3-style-panel" x-show="sidebarTab === 'style'" x-cloak>
+        <div class="sfb-v3-panel-title"><strong>پالت‌های آماده</strong><small>رنگ کل سایت را یکجا تغییر بده</small></div>
+        <div class="sfb-v3-palette-grid">
+          {% for palette in builder_palettes|slice:":6" %}
+          <form method="post" action="{% url 'dashboard:storefront-builder-appearance' %}" class="sfb-v3-palette-card{% if palette.slug == active_palette_slug %} active{% endif %}">
+            {% csrf_token %}
+            <input type="hidden" name="palette_slug" value="{{ palette.slug }}">
+            <button type="submit" title="اعمال {{ palette.name_fa }}">
+              <span class="sfb-v3-palette-preview">
+                <i style="background:{{ palette.colors.background }}"></i>
+                <i style="background:{{ palette.colors.primary }}"></i>
+                <i style="background:{{ palette.colors.text }}"></i>
+              </span>
+              <b>{{ palette.name_fa }}</b>
+            </button>
+          </form>
+          {% endfor %}
+        </div>
+        <div class="sfb-v3-panel-title sfb-v3-active-colors-title"><strong>رنگ‌های فعال</strong><button type="button" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'استایل سایت')">ویرایش کامل</button></div>
+        <div class="sfb-v3-active-colors">
+          <button type="button" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'استایل سایت')"><span>پس‌زمینه</span><i style="background:{{ builder_resolved_colors.background }}"></i><small>{{ builder_resolved_colors.background }}</small></button>
+          <button type="button" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'استایل سایت')"><span>سطح کارت</span><i style="background:{{ builder_resolved_colors.surface }}"></i><small>{{ builder_resolved_colors.surface }}</small></button>
+          <button type="button" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'استایل سایت')"><span>متن اصلی</span><i style="background:{{ builder_resolved_colors.text }}"></i><small>{{ builder_resolved_colors.text }}</small></button>
+          <button type="button" @click="openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'استایل سایت')"><span>رنگ اصلی</span><i style="background:{{ builder_resolved_colors.primary }}"></i><small>{{ builder_resolved_colors.primary }}</small></button>
+        </div>
+      </section>
+
+      <section class="sfb-v3-sidebar-panel sfb-v3-pages-panel" x-show="sidebarTab === 'pages'" x-cloak>
+        <div class="sfb-v3-panel-title"><strong>صفحات فروشگاه</strong><small>صفحه‌ای را برای ویرایش انتخاب کن</small></div>
+        <div class="sfb-v3-pages-list">
+          {% for value, label in page_types %}
+          <button type="button" class="sfb-v3-page-item{% if value == page_type %} active{% endif %}" @click="changePage('{{ value }}')">
+            <span aria-hidden="true">▤</span><b>{{ label }}</b>{% if value == page_type %}<small>در حال ویرایش</small>{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+        <div class="sfb-v3-sidebar-utility-links">
+          <a href="{% url 'dashboard:storefront-builder-history' %}">تاریخچه نسخه‌ها</a>
+          {% if draft.template_baseline_snapshot.pages|dictget:page_type %}
+          <form method="post" action="{% url 'dashboard:storefront-builder-page-reset' %}"
+                onsubmit="return confirm('این صفحه به ترکیبِ اولیه‌یِ قالب بازنشانی می‌شود — بخش‌هایِ دستیِ همین صفحه هم از بین می‌روند. ادامه می‌دهید؟')">
+            {% csrf_token %}<input type="hidden" name="page" value="{{ page_type }}">
+            <button type="submit">⟲ بازنشانی این صفحه به قالب</button>
+          </form>
+          {% endif %}
+          {% if draft.template_baseline_snapshot %}
+          <form method="post" action="{% url 'dashboard:storefront-builder-reset-to-baseline' %}"
+                onsubmit="return confirm('کل ظاهر فروشگاه (همه‌یِ صفحاتِ پوشش‌داده‌شده، هدر، فوتر، ظاهر) به قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+            {% csrf_token %}
+            <button type="submit">⟲ بازنشانی کل ظاهر فروشگاه به قالب</button>
+          </form>
+          {% endif %}
+          {% if industry_installation %}
+          <form method="post" action="{% url 'dashboard:storefront-builder-apply-industry-layout' %}" {% if layout.published_version_id %}onsubmit="if(!confirm('اعمال چیدمان پیشنهادی، Draft فعلی را جایگزین می‌کند. ادامه می‌دهید؟')){return false;} this.confirm.value='1'; return true;"{% endif %}>
+            {% csrf_token %}<input type="hidden" name="confirm" value="0"><button type="submit">چیدمان پیشنهادی صنف</button>
+          </form>
+          {% endif %}
+        </div>
+      </section>
+    </aside>
+
+    <section class="sfb-workspace sfb-v3-canvas-area">
+      <div class="sfb-v3-canvas-breadcrumb" aria-label="مسیر انتخاب">
+        <button type="button" @click="clearInspector(); inspectorCollapsed = false">صفحه اصلی</button>
+        <span>‹</span>
+        <button type="button" class="active" x-text="selectedSectionId ? sectionLabel(selectedSectionId) : (selectedContainerId ? 'چیدمان' : 'بوم')">بوم</button>
+      </div>
+
+      <div class="sfb-canvas-shell sfb-preview-frame-wrap sfb-v3-canvas-frame" :class="'sfb-device-' + device" :data-device="device">
+        <div class="sfb-canvas">
+          <iframe id="sfbPreviewFrame" class="sfb-preview-viewport"
+                  src="{% url 'dashboard:storefront-builder-preview' %}?page={{ page_type }}"
+                  data-desktop-viewport-width="1200"
+                  data-tablet-viewport-width="768"
+                  data-mobile-viewport-width="390"
+                  @load="restorePreviewContext()"
+                  title="پیش‌نمایش {{ page.get_page_type_display }}"
+                  data-preview-url="{% url 'dashboard:storefront-builder-preview' %}?page={{ page_type }}"
+                  data-settings-url-template="{% url 'dashboard:storefront-builder-section-settings' 0 %}"
+                  data-reorder-url="{% url 'dashboard:storefront-builder-section-reorder' %}"
+                  data-move-url-template="{% url 'dashboard:storefront-builder-section-move' 0 %}"
+                  data-duplicate-url-template="{% url 'dashboard:storefront-builder-section-duplicate' 0 %}"
+                  data-toggle-url-template="{% url 'dashboard:storefront-builder-section-toggle' 0 %}"
+                  data-lock-url-template="{% url 'dashboard:storefront-builder-section-lock' 0 %}"
+                  data-remove-url-template="{% url 'dashboard:storefront-builder-section-remove' 0 %}"></iframe>
+        </div>
+      </div>
+
+      <button type="button" class="sfb-floating-add sfb-v3-floating-add" @click="openAddModal($event)" aria-haspopup="dialog" aria-controls="sfbAddModal"><span>＋</span> افزودن Section</button>
+    </section>
+
+    <aside class="sfb-inspector-panel sfb-v3-inspector" aria-label="Inspector تنظیمات">
+      <div class="sfb-v3-inspector-head">
+        <button type="button" class="sfb-v3-inspector-close" @click="inspectorCollapsed = true; $nextTick(() => syncPreviewViewport())" aria-label="بستن Inspector">×</button>
+        <div class="sfb-v3-inspector-title-wrap">
+          <span class="sfb-v3-inspector-icon">✦</span>
+          <div><strong id="sfbInspectorHeading" tabindex="-1" x-text="inspectorTitle">تنظیمات</strong><small x-text="selectedSectionId ? 'Section · ' + sectionLabel(selectedSectionId) : (selectedContainerId ? 'Layout · container' : 'یک بخش را انتخاب کن')">یک بخش را انتخاب کن</small></div>
+        </div>
+      </div>
+      <nav class="sfb-v3-inspector-tabs" aria-label="دسته تنظیمات">
+        <button type="button" :class="{ active: inspectorTab === 'design' }" @click="inspectorTab = 'design'">طراحی</button>
+        <button type="button" :class="{ active: inspectorTab === 'content' }" @click="inspectorTab = 'content'">محتوا</button>
+        <button type="button" :class="{ active: inspectorTab === 'advanced' }" @click="inspectorTab = 'advanced'">پیشرفته</button>
+      </nav>
+      <div class="sfb-v3-device-tabs" role="group" aria-label="تنظیمات دستگاه">
+        <button type="button" :class="{ active: device === 'desktop' }" @click="setDevice('desktop')">دسکتاپ</button>
+        <button type="button" :class="{ active: device === 'tablet' }" @click="setDevice('tablet')">تبلت</button>
+        <button type="button" :class="{ active: device === 'mobile' }" @click="setDevice('mobile')">موبایل</button>
+      </div>
+      <div class="sfb-inspector-content sfb-v3-inspector-body" id="sfbInspectorBody" :data-inspector-tab="inspectorTab">
+        <div class="sfb-empty-inspector sfb-v3-empty-inspector">
+          <span>✦</span>
+          <strong>یک بخش یا چیدمان را انتخاب کن</strong>
+          <p>با یک کلیک روی Canvas، تنظیمات واقعی همان مورد اینجا باز می‌شود.</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="sfb-library-cell-drop-layer"
+       x-show="libraryDragging" x-cloak
+       @dragover.prevent="updateLibraryCellDropOverlay($event)"
+       @drop.prevent="dropLibraryToCellOverlay($event)"
+       aria-hidden="true">
+    <template x-for="zone in libraryCellDropZones" :key="zone.cellId">
+      <div class="sfb-library-cell-drop-zone" :class="{ active: activeLibraryDropCellId === zone.cellId }" :style="zone.style">
+        <span x-text="activeLibraryDropCellId === zone.cellId ? 'اینجا رها کن' : 'افزودن به ستون'"></span>
+      </div>
+    </template>
+  </div>
+
+
+  {% include "dashboard/storefront_builder/partials/r3_edit_modal.html" %}
+
+  <div class="sfb-v22-deep-workspace" x-show="deepWorkspaceOpen" x-cloak @keydown.escape.window="if (deepWorkspaceOpen) closeDeepWorkspace()">
+    <div class="sfb-v22-deep-head">
+      <button type="button" class="sfb-v22-deep-back" @click="closeDeepWorkspace()">← بازگشت به سازنده</button>
+      <div class="sfb-v22-deep-title"><strong x-text="deepWorkspaceTitle">ویرایش مرتبط</strong><small>همان صفحه واقعی مدیریت؛ پس از بازگشت، پیش‌نمایش تازه می‌شود.</small></div>
+    </div>
+    <iframe class="sfb-v22-deep-frame" :src="deepWorkspaceUrl" title="ویرایش مرتبط"></iframe>
+  </div>
+
+  <nav class="sfb-mobile-builder-nav" aria-label="ناوبری سازنده در موبایل">
+    <button type="button" :class="{ active: mobilePanel === 'library' }" :aria-pressed="mobilePanel === 'library'" @click="setMobilePanel('library')"><span>＋</span><span>افزودن</span></button>
+    <button type="button" :class="{ active: mobilePanel === 'canvas' }" :aria-pressed="mobilePanel === 'canvas'" @click="setMobilePanel('canvas')"><span>▣</span><span>صفحه</span></button>
+    <button type="button" :class="{ active: mobilePanel === 'inspector' }" :aria-pressed="mobilePanel === 'inspector'" @click="setMobilePanel('inspector')"><span>⚙</span><span>تنظیمات</span></button>
+  </nav>
+
+  {# Server-authoritative placement mirror; section_list now lives visibly in the Structure tab. #}
+  <div class="sfb-section-state" aria-hidden="true">
+    {% include "dashboard/storefront_builder/partials/container_state.html" %}
+  </div>
+
+  <div id="sfbAddModal" class="sfb-add-modal sfb-v3-modal" x-show="modalOpen" x-cloak @click.self="closeAddModal()">
+    <div class="sfb-add-modal-card sfb-layout-modal-card sfb-v3-modal-card" x-ref="addModal" role="dialog" aria-modal="true" aria-labelledby="sfbAddModalTitle" tabindex="-1" @keydown.tab="trapModalFocus($event)">
+      <div class="sfb-add-modal-head sfb-v3-modal-head">
+        <div><strong id="sfbAddModalTitle">افزودن Section</strong><p>ساختار ستون‌ها را انتخاب کن؛ محتوا بعداً و مستقل داخل هر ستون قرار می‌گیرد.</p></div>
+        <button type="button" class="sfb-add-modal-close" @click="closeAddModal()" aria-label="بستن">×</button>
+      </div>
+      <div class="sfb-add-modal-body">
+        <div class="sfb-v3-modal-kicker">چیدمان آزاد</div>
+        <div class="sfb-layout-choice-grid sfb-v3-layout-grid">
+          <button type="button" class="sfb-layout-choice" @click="createContainer('single')"><span class="sfb-span-preview one"><i></i></span><b>100%</b><small>یک ستون</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('half')"><span class="sfb-span-preview two"><i></i><i></i></span><b>50 / 50</b><small>دو ستون مساوی</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('third_left')"><span class="sfb-span-preview split-left"><i></i><i></i></span><b>33 / 67</b><small>یک‌سوم + دو‌سوم</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('third_right')"><span class="sfb-span-preview split-right"><i></i><i></i></span><b>67 / 33</b><small>دو‌سوم + یک‌سوم</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('quarter_left')"><span class="sfb-span-preview split-quarter-left"><i></i><i></i></span><b>25 / 75</b><small>کوچک + بزرگ</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('quarter_right')"><span class="sfb-span-preview split-quarter-right"><i></i><i></i></span><b>75 / 25</b><small>بزرگ + کوچک</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('thirds')"><span class="sfb-span-preview three"><i></i><i></i><i></i></span><b>33 × 3</b><small>سه ستون</small></button>
+          <button type="button" class="sfb-layout-choice" @click="createContainer('quarters')"><span class="sfb-span-preview four"><i></i><i></i><i></i><i></i></span><b>25 × 4</b><small>چهار ستون</small></button>
+          <button type="button" class="sfb-layout-choice sfb-v3-open-library-choice" @click="closeAddModal(false); sidebarTab='add'; sidebarCollapsed=false"><span>＋</span><b>کامپوننت</b><small>افزودن به ستون انتخابی</small></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if not layout.r4_editor_enabled %}
+<script>
+// Shared low-level POST used by every settings form's save path (R2 sidebar
+// autosave and the R3 modal's explicit Save/Done buttons alike) — one
+// persistence implementation, not two. A successful save always redirects
+// (see storefront_section_settings' `return redirect(...)`); a validation
+// failure re-renders the same partial with field_errors instead, so
+// `redirected` doubles as the success/failure signal for callers.
+async function postFormAjax(form) {
+  const response = await fetch(form.action, {
+    method: 'POST',
+    body: new FormData(form),
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  });
+  return { ok: response.ok && response.redirected, response };
+}
+
+function storefrontEditor() {
+  return {
+    device: 'desktop',
+    fullscreen: false,
+    builderMode: 'edit',
+    r3ModalOpen: false,
+    r3ModalKind: '',
+    r3ModalTitle: '',
+    r3ModalReturnTitle: '',
+    r3LibraryQuery: '',
+    r3MoreOpen: false,
+    r3StructureTick: 0,
+    r3LastFocus: null,
+    r3Error: '',
+    r3SaveBusy: false,
+    deepWorkspaceOpen: false,
+    deepWorkspaceUrl: '',
+    deepWorkspaceTitle: '',
+    entryFocus: '',
+    previewScrollY: 0,
+    restorePreviewScroll: false,
+    modalOpen: false,
+    mobilePanel: 'canvas',
+    sidebarTab: 'add',
+    inspectorTab: 'design',
+    sidebarCollapsed: true,
+    inspectorCollapsed: true,
+    zoom: 100,
+    selectedSectionId: null,
+    selectedContainerId: null,
+    targetCellId: null,
+    libraryDrawerOpen: false,
+    inspectorDrawerOpen: false,
+    lastModalFocus: null,
+    libraryQuery: '',
+    libraryDragging: false,
+    libraryDragKey: '',
+    libraryDragLabel: '',
+    libraryCellDropZones: [],
+    activeLibraryDropCellId: null,
+    activeLibraryDropContainerId: null,
+    libraryDropIndex: null,
+    libraryDropBeforeId: '',
+    libraryDropTop: 0,
+    libraryDropEmpty: false,
+    inspectorTitle: 'تنظیمات بخش',
+    inspectorDirty: false,
+    historyBusy: false,
+    sectionCommandBusy: {},
+    containerCommandBusy: {},
+    contentBusy: false,
+    inspectorAutosaveTimer: null,
+    inspectorSaving: false,
+    inspectorSaveQueued: false,
+    canUndo: {{ edit_history.can_undo|yesno:"true,false" }},
+    canRedo: {{ edit_history.can_redo|yesno:"true,false" }},
+    undoLabel: '{{ edit_history.undo_label|escapejs }}',
+    redoLabel: '{{ edit_history.redo_label|escapejs }}',
+    pageType: 'home',
+    desktopViewportWidth: 1200,
+    tabletViewportWidth: 768,
+    mobileViewportWidth: 390,
+    previewScale: 1,
+    previewResizeObserver: null,
+    get saveStatusLabel() {
+      if (this.inspectorSaving) return 'در حال ذخیره…';
+      return this.inspectorDirty ? 'تغییرات ذخیره‌نشده' : 'پیش‌نویس ذخیره شده';
+    },
+    init() {
+      this.pageType = this.$root.dataset.pageType || 'home';
+      document.body.classList.add('sfb-prototype-active');
+      document.body.addEventListener('htmx:afterSwap', (evt) => {
+        if (evt.detail.target.id === 'storefrontSectionList') {
+          // Legacy compatibility mutations still return the hidden Section list.
+          // Re-fetch the placement state first; the Container-state swap below
+          // becomes the single Preview reload point.
+          const containerUrl = this.$root.dataset.containerStateUrl + '?page=' + encodeURIComponent(this.pageType);
+          htmx.ajax('GET', containerUrl, { target: '#storefrontContainerState', swap: 'outerHTML' });
+          this.refreshHistoryState();
+        }
+        if (evt.detail.target.id === 'storefrontContainerState') {
+          document.getElementById('sfbPreviewFrame').contentWindow.location.reload();
+          this.refreshHistoryState();
+        }
+        if (evt.detail.target.id === 'sfbInspectorBody' && this.isCompactLayout() && this.mobilePanel === 'inspector') {
+          this.$nextTick(() => this.focusPanel('inspector'));
+        }
+        if (evt.detail.target.id === 'sfbInspectorBody') this.focusInspectorEntry();
+      });
+      document.body.addEventListener('sfbSectionAdded', (evt) => {
+        const sectionId = parseInt(evt.detail && evt.detail.sectionId, 10);
+        if (sectionId) this.$nextTick(() => this.selectSection(sectionId));
+      });
+      document.body.addEventListener('sfbRowLayoutChanged', (evt) => {
+        const sectionId = parseInt(evt.detail && evt.detail.sectionId, 10);
+        if (sectionId) this.$nextTick(() => this.selectSection(sectionId, { scroll: false }));
+      });
+      document.body.addEventListener('sfbContainerAdded', (evt) => {
+        const containerId = parseInt(evt.detail && evt.detail.containerId, 10);
+        if (containerId) this.$nextTick(() => this.selectContainer(containerId));
+      });
+      document.body.addEventListener('sfbContentAdded', (evt) => {
+        const detail = evt.detail || {};
+        const sectionId = parseInt(detail.sectionId, 10);
+        const containerId = parseInt(detail.containerId, 10);
+        const cellId = parseInt(detail.cellId, 10);
+        this.targetCellId = null;
+        if (sectionId) this.$nextTick(() => this.selectSection(sectionId, { containerId, cellId, scroll: false }));
+      });
+      document.body.addEventListener('sfbBlockMoved', (evt) => {
+        const detail = evt.detail || {};
+        const sectionId = parseInt(detail.sectionId, 10);
+        const containerId = parseInt(detail.containerId, 10);
+        const cellId = parseInt(detail.cellId, 10);
+        if (sectionId) this.$nextTick(() => this.selectSection(sectionId, { containerId, cellId, scroll: false, openInspector: true }));
+      });
+      document.body.addEventListener('sfbContainerChanged', (evt) => {
+        const containerId = parseInt(evt.detail && evt.detail.containerId, 10);
+        if (containerId && this.selectedContainerId === containerId && !this.selectedSectionId) {
+          this.$nextTick(() => this.selectContainer(containerId, { openInspector: false }));
+        }
+      });
+      const inspector = document.getElementById('sfbInspectorBody');
+      if (inspector) {
+        inspector.addEventListener('input', (evt) => {
+          this.inspectorDirty = true;
+          if (evt.target) this.queueInspectorAutosave(evt.target, evt.target.matches('input[type="range"], input[type="color"]') ? 450 : 900);
+        });
+        inspector.addEventListener('change', (evt) => {
+          this.inspectorDirty = true;
+          this.queueInspectorAutosave(evt.target, 250);
+        });
+        inspector.addEventListener('submit', () => { this.inspectorDirty = false; });
+      }
+      // #sfbR3ModalBody lives inside r3_edit_modal.html's <template
+      // x-teleport="body">, which Alpine only clones into <body> once its
+      // walker reaches that directive — strictly *after* this root's own
+      // x-init runs. document.getElementById('sfbR3ModalBody') here would
+      // therefore find nothing yet. document.body already exists, so
+      // delegate on it instead (submit bubbles); this also means the
+      // listener survives every htmx.ajax(...) innerHTML swap into
+      // #sfbR3ModalBody without ever needing to be re-registered.
+      document.body.addEventListener('submit', (evt) => {
+        if (!evt.target.matches('#sfbR3ModalBody form[data-sfb-autosave="true"]')) return;
+        evt.preventDefault();
+        this.saveActiveR3Settings({ closeOnSuccess: false });
+      });
+      window.addEventListener('message', (evt) => {
+        if (evt.origin !== window.location.origin) return;
+        if (!evt.data || !evt.data.type) return;
+        if (evt.data.type === 'sfb:selectSection' && this.builderMode === 'edit') this.openR3Section(evt.data.sectionId, evt.data);
+        if (evt.data.type === 'sfb:openSectionSettings' && this.builderMode === 'edit') this.openR3Section(evt.data.sectionId, evt.data);
+        if (evt.data.type === 'sfb:openHeaderSettings' && this.builderMode === 'edit') this.openR3Panel('{% url 'dashboard:storefront-builder-header' %}', 'ویرایش هدر', 'header');
+        if (evt.data.type === 'sfb:openFooterSettings' && this.builderMode === 'edit') this.openR3Panel('{% url 'dashboard:storefront-builder-footer' %}', 'ویرایش فوتر', 'footer');
+        if (evt.data.type === 'sfb:openEntityEditor' && this.builderMode === 'edit' && evt.data.entityId) {
+          const entityId = String(evt.data.entityId);
+          const kind = evt.data.entityKind || '';
+          let editUrl = '';
+          if (kind === 'product') editUrl = '{% url 'dashboard:product-edit' 0 %}'.replace('/products/0/edit/', '/products/' + entityId + '/edit/');
+          if (kind === 'category') editUrl = '{% url 'dashboard:category-edit' 0 %}'.replace('/categories/0/edit/', '/categories/' + entityId + '/edit/');
+          if (kind === 'brand') editUrl = '{% url 'dashboard:brand-edit' 0 %}'.replace('/brands/0/edit/', '/brands/' + entityId + '/edit/');
+          if (kind === 'collection') editUrl = '{% url 'dashboard:collection-edit' 0 %}'.replace('/collections/0/edit/', '/collections/' + entityId + '/edit/');
+          if (kind === 'media' && evt.data.sectionId && evt.data.mediaKind) {
+            editUrl = '{% url 'dashboard:storefront-builder-section-media-edit' 0 'hero-slides' 0 %}'.replace('/sections/0/media/hero-slides/0/edit/', '/sections/' + evt.data.sectionId + '/media/' + encodeURIComponent(evt.data.mediaKind) + '/' + entityId + '/edit/');
+          }
+          if (editUrl) this.openDeepWorkspace(editUrl, evt.data.entityTitle ? 'ویرایش «' + evt.data.entityTitle + '»' : 'ویرایش مورد انتخاب‌شده');
+        }
+        if (evt.data.type === 'sfb:selectContainer') this.selectContainer(evt.data.containerId);
+        if (evt.data.type === 'sfb:addToCell') this.openCellLibrary(evt.data.cellId, evt.data.containerId);
+        if (evt.data.type === 'sfb:dropLibraryToCell') this.addContentBlockToCell(evt.data.sectionKey, evt.data.cellId, evt.data.containerId);
+        if (evt.data.type === 'sfb:reorderSections') this.reorderSections(evt.data.sectionIds);
+        if (evt.data.type === 'sfb:sectionCommand') this.sectionCommand(evt.data.sectionId, evt.data.command);
+        if (evt.data.type === 'sfb:containerCommand') this.containerCommand(evt.data.containerId, evt.data.command);
+        if (evt.data.type === 'sfb:cellCommand') this.cellCommand(evt.data.cellId, evt.data.command, evt.data.sectionId);
+        if (evt.data.type === 'sfb:moveBlock') this.moveBlock(evt.data.sectionId, evt.data.targetCellId, evt.data.atIndex);
+        if (evt.data.type === 'sfb:blockCommand') this.blockCommand(evt.data.sectionId, evt.data.command, evt.data);
+        if (evt.data.type === 'sfb:historyStep') this.historyStep(evt.data.direction);
+      });
+      const initialId = parseInt(this.$root.dataset.initialSectionId || '', 10);
+      if (initialId) this.$nextTick(() => this.selectSection(initialId, { scroll: false, openInspector: false }));
+      this.$nextTick(() => {
+        this.installPreviewViewportObserver();
+        this.applyEntryPointFromUrl();
+        this.syncBuilderMode();
+      });
+    },
+    isCompactLayout() { return window.matchMedia('(max-width: 860px)').matches; },
+    setBuilderMode(mode) {
+      if (!['preview', 'edit'].includes(mode)) return;
+      this.builderMode = mode;
+      if (mode === 'preview') {
+        this.sidebarCollapsed = true;
+        this.inspectorCollapsed = true;
+      }
+      this.$nextTick(() => {
+        this.syncPreviewViewport();
+        this.syncBuilderMode();
+      });
+    },
+    syncBuilderMode() {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (!iframe || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({ type: 'sfb:setMode', mode: this.builderMode }, window.location.origin);
+    },
+    openStructurePanel() {
+      this.setBuilderMode('edit');
+      this.sidebarTab = 'layers';
+      this.inspectorCollapsed = true;
+      if (this.isCompactLayout()) this.setMobilePanel('library');
+      this.sidebarCollapsed = false;
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    openAppearancePanel() {
+      this.setBuilderMode('edit');
+      this.sidebarCollapsed = true;
+      this.inspectorCollapsed = false;
+      this.openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'ظاهر فروشگاه');
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    closeBuilderDrawers() {
+      this.sidebarCollapsed = true;
+      this.inspectorCollapsed = true;
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    openDeepWorkspace(url, title) {
+      this.openR3Deep(url, title, this.r3ModalTitle || 'ویرایش');
+      return;
+      if (!url) return;
+      const iframe = document.getElementById('sfbPreviewFrame');
+      try { this.previewScrollY = iframe && iframe.contentWindow ? iframe.contentWindow.scrollY : 0; } catch (_error) { this.previewScrollY = 0; }
+      const target = new URL(url, window.location.origin);
+      target.searchParams.set('embed', '1');
+      this.deepWorkspaceUrl = target.toString();
+      this.deepWorkspaceTitle = title || 'ویرایش مرتبط';
+      this.deepWorkspaceOpen = true;
+    },
+    closeDeepWorkspace() {
+      this.deepWorkspaceOpen = false;
+      this.deepWorkspaceUrl = '';
+      const iframe = document.getElementById('sfbPreviewFrame');
+      this.restorePreviewScroll = true;
+      if (iframe && iframe.contentWindow) iframe.contentWindow.location.reload();
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    restorePreviewContext() {
+      this.syncPreviewViewport();
+      this.syncPreviewSelection();
+      this.syncBuilderMode();
+      if (!this.restorePreviewScroll) return;
+      this.restorePreviewScroll = false;
+      const iframe = document.getElementById('sfbPreviewFrame');
+      try { if (iframe && iframe.contentWindow) iframe.contentWindow.scrollTo(0, this.previewScrollY || 0); } catch (_error) { /* same-origin preview expected */ }
+    },
+    focusInspectorEntry() {
+      if (!this.entryFocus) return;
+      const focusKey = this.entryFocus;
+      if (focusKey === 'logo') this.inspectorTab = 'content';
+      this.$nextTick(() => window.setTimeout(() => {
+        const body = document.getElementById('sfbInspectorBody');
+        if (!body) return;
+        let target = body.querySelector('[data-sfb-focus="' + focusKey + '"]');
+        if (!target && focusKey === 'logo') {
+          target = [...body.querySelectorAll('a,button,label,strong')].find((el) => /لوگو/.test(el.textContent || '')) || null;
+        }
+        if (target) {
+          target.classList.add('sfb-v22-focus-target');
+          if (!target.hasAttribute('tabindex') && !/^(A|BUTTON|INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) target.setAttribute('tabindex', '-1');
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          if (typeof target.focus === 'function') target.focus({ preventScroll: true });
+          window.setTimeout(() => target.classList.remove('sfb-v22-focus-target'), 2400);
+        }
+        this.entryFocus = '';
+      }, 80));
+    },
+    applyEntryPointFromUrl() {
+      const params = new URL(window.location.href).searchParams;
+      const panel = params.get('panel');
+      this.entryFocus = params.get('focus') || '';
+      if (!panel) return;
+      this.setBuilderMode('edit');
+      this.inspectorCollapsed = false;
+      if (panel === 'appearance') this.openPanelUrl('{% url 'dashboard:storefront-builder-appearance' %}', 'ظاهر و طراحی');
+      if (panel === 'header') this.openPanelUrl('{% url 'dashboard:storefront-builder-header' %}', 'هدر فروشگاه');
+      if (panel === 'footer') this.openPanelUrl('{% url 'dashboard:storefront-builder-footer' %}', 'فوتر فروشگاه');
+    },
+    openR3Modal(kind, title, trigger = null) {
+      this.r3LastFocus = trigger || document.activeElement;
+      this.r3ModalKind = kind || 'panel';
+      this.r3ModalTitle = title || 'ویرایش';
+      this.r3Error = '';
+      this.r3MoreOpen = false;
+      this.r3ModalOpen = true;
+      document.documentElement.classList.add('sfb-r3-modal-open');
+      this.$nextTick(() => {
+        const modal = document.getElementById('sfbR3Modal');
+        if (modal) modal.focus({ preventScroll: true });
+      });
+    },
+    closeR3Modal() {
+      const returnTo = this.r3LastFocus;
+      this.r3ModalOpen = false;
+      this.r3ModalKind = '';
+      this.r3ModalTitle = '';
+      this.r3ModalReturnTitle = '';
+      this.r3Error = '';
+      this.r3LibraryQuery = '';
+      this.deepWorkspaceUrl = '';
+      this.selectedSectionId = null;
+      this.selectedContainerId = null;
+      this.targetCellId = null;
+      this.syncPreviewSelection();
+      document.documentElement.classList.remove('sfb-r3-modal-open');
+      this.$nextTick(() => {
+        if (returnTo && typeof returnTo.focus === 'function' && document.contains(returnTo)) returnTo.focus({ preventScroll: true });
+      });
+    },
+    openR3Add(trigger = null) {
+      this.targetCellId = null;
+      this.openR3Modal('add', 'افزودن به صفحه', trigger);
+    },
+    openR3Structure(trigger = null) {
+      this.setBuilderMode('edit');
+      this.r3StructureTick++;
+      this.openR3Modal('structure', 'ترتیب صفحه', trigger);
+    },
+    async r3AddSection(sectionKey) {
+      if (!sectionKey || this.contentBusy) return;
+      this.contentBusy = true;
+      this.r3Error = '';
+      const values = { section_key: sectionKey, page: this.pageType };
+      if (this.targetCellId) values.cell_id = this.targetCellId;
+      try {
+        const request = htmx.ajax('POST', this.$root.dataset.cellAddSectionUrl, {
+          values,
+          target: '#storefrontContainerState', swap: 'outerHTML'
+        });
+        await Promise.resolve(request);
+        this.r3StructureTick++;
+        this.closeR3Modal();
+        this.reloadPreview();
+        await this.refreshHistoryState();
+      } catch (_error) {
+        this.r3Error = 'افزودن این بخش انجام نشد. دوباره تلاش کنید.';
+      } finally {
+        this.contentBusy = false;
+      }
+    },
+    openR3Section(sectionId, detail = {}) {
+      sectionId = parseInt(sectionId, 10) || null;
+      if (!sectionId) return;
+      const placement = this.placementForSection(sectionId);
+      this.selectedSectionId = sectionId;
+      this.selectedContainerId = parseInt(detail.containerId, 10) || placement.containerId || null;
+      this.targetCellId = parseInt(detail.cellId, 10) || placement.cellId || null;
+      this.syncPreviewSelection();
+      this.openR3Modal('section', 'ویرایش «' + this.sectionLabel(sectionId) + '»');
+      const frame = document.getElementById('sfbPreviewFrame');
+      const template = frame && frame.getAttribute('data-settings-url-template');
+      if (!template) return;
+      const url = template.replace('/0/settings/', '/' + sectionId + '/settings/');
+      htmx.ajax('GET', url, { target: '#sfbR3ModalBody', swap: 'innerHTML' });
+    },
+    openR3Panel(url, title, kind = 'panel') {
+      if (!url) return;
+      this.openR3Modal(kind, title || 'ویرایش');
+      htmx.ajax('GET', url, { target: '#sfbR3ModalBody', swap: 'innerHTML' });
+    },
+    openR3Deep(url, title, parentTitle = '') {
+      if (!url) return;
+      const target = new URL(url, window.location.origin);
+      target.searchParams.set('embed', '1');
+      this.r3ModalReturnTitle = parentTitle || this.r3ModalTitle || 'ویرایش';
+      this.deepWorkspaceUrl = target.toString();
+      this.openR3Modal('deep', title || 'ویرایش مرتبط');
+    },
+    backR3Deep() {
+      const sectionId = this.selectedSectionId;
+      if (sectionId) {
+        this.openR3Section(sectionId, { containerId: this.selectedContainerId, cellId: this.targetCellId });
+        return;
+      }
+      this.closeR3Modal();
+      this.reloadPreview();
+    },
+    r3StructureGroups() {
+      this.r3StructureTick;
+      const root = document.getElementById('storefrontContainerState');
+      if (!root) return [];
+      return [...root.querySelectorAll(':scope > [data-container-id]')].map((container, groupIndex) => {
+        const items = [...container.querySelectorAll('[data-section-id]')]
+          .filter((node) => node.dataset.sectionId)
+          .map((node, itemIndex) => ({
+            id: parseInt(node.dataset.sectionId || '', 10),
+            key: node.dataset.sectionKey || '',
+            label: node.dataset.sectionLabel || 'بخش فروشگاه',
+            active: node.dataset.sectionActive !== '0',
+            locked: node.dataset.sectionLocked === '1',
+            cellId: parseInt(node.dataset.cellId || '', 10) || null,
+            itemIndex,
+          }));
+        return {
+          id: parseInt(container.dataset.containerId || '', 10),
+          order: parseInt(container.dataset.containerOrder || groupIndex, 10),
+          items,
+          label: items.length === 1 ? items[0].label : (items.length ? items.map((item) => item.label).join(' + ') : 'چیدمان خالی'),
+        };
+      }).filter((group) => group.id);
+    },
+    refreshR3StructureState() {
+      const url = this.$root.dataset.containerStateUrl + '?page=' + encodeURIComponent(this.pageType);
+      const request = htmx.ajax('GET', url, { target: '#storefrontContainerState', swap: 'outerHTML' });
+      Promise.resolve(request).then(() => { this.r3StructureTick++; this.reloadPreview(); });
+      return request;
+    },
+    r3MoveGroup(containerId, direction) {
+      this.containerCommand(containerId, direction);
+      window.setTimeout(() => this.refreshR3StructureState(), 260);
+    },
+    r3ItemCommand(item, command) {
+      if (!item || !item.id) return;
+      if (command === 'edit') { this.openR3Section(item.id, { cellId: item.cellId }); return; }
+      if (command === 'remove') this.blockCommand(item.id, 'remove');
+      else this.sectionCommand(item.id, command);
+      window.setTimeout(() => this.refreshR3StructureState(), 320);
+    },
+    r3OpenAppearance(kind = 'colors') {
+      this.openR3Panel('{% url 'dashboard:storefront-builder-appearance' %}', kind === 'colors' ? 'رنگ‌های فروشگاه' : 'ظاهر فروشگاه', kind);
+    },
+    setDevice(device) {
+      if (!['desktop', 'tablet', 'mobile'].includes(device)) return;
+      this.device = device;
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    changeZoom(delta) {
+      this.zoom = Math.max(60, Math.min(130, this.zoom + delta));
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    installPreviewViewportObserver() {
+      const canvas = this.$root.querySelector('.sfb-canvas');
+      if (!canvas) return;
+      if (this.previewResizeObserver) this.previewResizeObserver.disconnect();
+      if (window.ResizeObserver) {
+        this.previewResizeObserver = new ResizeObserver(() => this.syncPreviewViewport());
+        this.previewResizeObserver.observe(canvas);
+      } else {
+        window.addEventListener('resize', () => this.syncPreviewViewport());
+      }
+      this.syncPreviewViewport();
+    },
+    syncPreviewViewport() {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (!iframe) return;
+      const canvas = iframe.closest('.sfb-canvas');
+      if (!canvas) return;
+      const widths = {
+        desktop: parseInt(iframe.dataset.desktopViewportWidth || this.desktopViewportWidth, 10) || 1200,
+        tablet: parseInt(iframe.dataset.tabletViewportWidth || this.tabletViewportWidth, 10) || 768,
+        mobile: parseInt(iframe.dataset.mobileViewportWidth || this.mobileViewportWidth, 10) || 390,
+      };
+      const requestedWidth = widths[this.device] || widths.desktop;
+      const availableWidth = Math.max(1, canvas.clientWidth - 2);
+      const fitScale = Math.min(1, availableWidth / requestedWidth);
+      const scale = Math.max(.35, fitScale * (this.zoom / 100));
+      this.previewScale = scale;
+      iframe.style.width = requestedWidth + 'px';
+      iframe.style.height = Math.ceil(canvas.clientHeight / scale) + 'px';
+      iframe.style.transform = 'scale(' + scale + ')';
+      iframe.style.transformOrigin = 'top center';
+      iframe.style.left = '50%';
+      iframe.style.marginLeft = (-requestedWidth / 2) + 'px';
+      iframe.style.position = 'absolute';
+    },
+    syncPreviewSelection() {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (!iframe || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({
+        type: 'sfb:setSelection',
+        sectionId: this.selectedSectionId,
+        containerId: this.selectedContainerId,
+        cellId: this.targetCellId,
+      }, window.location.origin);
+    },
+    toggleLibraryDrawer() {
+      if (this.isCompactLayout()) {
+        this.setMobilePanel('library');
+        return;
+      }
+      this.sidebarTab = 'add';
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    openInspectorDrawer() {
+      if (!this.selectedSectionId) return;
+      if (this.isCompactLayout()) {
+        this.setMobilePanel('inspector');
+        return;
+      }
+      this.inspectorCollapsed = false;
+      const sectionId = this.selectedSectionId;
+      this.selectSection(sectionId, { scroll: false, openInspector: true });
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    closeDesktopDrawers() {
+      this.sidebarCollapsed = true;
+      this.inspectorCollapsed = true;
+      this.$nextTick(() => this.syncPreviewViewport());
+    },
+    openSelectedContainerSettings() {
+      if (!this.selectedContainerId) return;
+      this.selectContainer(this.selectedContainerId);
+    },
+    openCellLibrary(cellId, containerId) {
+      this.targetCellId = parseInt(cellId, 10) || null;
+      this.selectedContainerId = parseInt(containerId, 10) || this.selectedContainerId;
+      this.selectedSectionId = null;
+      this.syncPreviewSelection();
+      if (this.isCompactLayout()) {
+        this.setMobilePanel('library');
+      } else {
+        this.sidebarTab = 'add';
+        this.sidebarCollapsed = false;
+        this.$nextTick(() => {
+          const search = this.$root.querySelector('.sfb-prototype-search');
+          if (search) search.focus({ preventScroll: true });
+          this.syncPreviewViewport();
+        });
+      }
+    },
+    createContainer(layoutKey) {
+      if (!layoutKey) return;
+      htmx.ajax('POST', this.$root.dataset.containerAddUrl, {
+        values: { layout_key: layoutKey, page: this.pageType },
+        target: '#storefrontContainerState', swap: 'outerHTML'
+      });
+      this.closeAddModal(false);
+    },
+    addContentBlock(sectionKey) {
+      if (!sectionKey || this.contentBusy) return;
+      this.contentBusy = true;
+      const values = { section_key: sectionKey, page: this.pageType };
+      if (this.targetCellId) values.cell_id = this.targetCellId;
+      try {
+        const request = htmx.ajax('POST', this.$root.dataset.cellAddSectionUrl, {
+          values,
+          target: '#storefrontContainerState', swap: 'outerHTML'
+        });
+        Promise.resolve(request).finally(() => { this.contentBusy = false; });
+      } catch (error) {
+        this.contentBusy = false;
+        throw error;
+      }
+      if (!this.isCompactLayout()) this.sidebarCollapsed = false;
+    },
+    addContentBlockToCell(sectionKey, cellId, containerId) {
+      cellId = parseInt(cellId, 10) || null;
+      containerId = parseInt(containerId, 10) || null;
+      if (!sectionKey || !cellId) return;
+      this.targetCellId = cellId;
+      this.selectedContainerId = containerId || this.selectedContainerId;
+      this.selectedSectionId = null;
+      this.syncPreviewSelection();
+      this.addContentBlock(sectionKey);
+    },
+    placementForSection(sectionId) {
+      const state = document.querySelector('#storefrontContainerState [data-section-id="' + sectionId + '"]');
+      if (!state) return {};
+      const container = state.closest('[data-container-id]');
+      return {
+        cellId: parseInt(state.getAttribute('data-cell-id') || '', 10) || null,
+        containerId: container ? (parseInt(container.getAttribute('data-container-id') || '', 10) || null) : null,
+      };
+    },
+    selectContainer(containerId, options = {}) {
+      containerId = parseInt(containerId, 10) || null;
+      if (!containerId) return;
+      this.selectedContainerId = containerId;
+      this.selectedSectionId = null;
+      this.targetCellId = null;
+      this.inspectorTitle = 'تنظیم چیدمان';
+      this.inspectorTab = 'design';
+      this.syncPreviewSelection();
+      if (options.openInspector !== false) {
+        if (this.isCompactLayout()) this.setMobilePanel('inspector', { focus: false });
+        else this.inspectorCollapsed = false;
+      }
+      const template = this.$root.dataset.containerSettingsUrlTemplate;
+      const url = template.replace('/0/settings/', '/' + containerId + '/settings/');
+      htmx.ajax('GET', url, { target: '#sfbInspectorBody', swap: 'innerHTML' });
+    },
+    setMobilePanel(panel, options = {}) {
+      if (!['library', 'canvas', 'inspector'].includes(panel)) return;
+      this.mobilePanel = panel;
+      if (options.focus !== false) this.$nextTick(() => this.focusPanel(panel));
+    },
+    focusPanel(panel) {
+      if (!this.isCompactLayout()) return;
+      if (panel === 'library') {
+        const search = this.$root.querySelector('.sfb-prototype-search');
+        if (search) search.focus({ preventScroll: true });
+        return;
+      }
+      if (panel === 'inspector') {
+        const heading = document.getElementById('sfbInspectorHeading');
+        if (heading) heading.focus({ preventScroll: true });
+        return;
+      }
+      const frame = document.getElementById('sfbPreviewFrame');
+      if (frame) frame.focus({ preventScroll: true });
+    },
+    changePage(pageType) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('page', pageType);
+      window.location.assign(url.toString());
+    },
+    matchesLibrary(label) {
+      const query = this.libraryQuery.trim().toLocaleLowerCase('fa');
+      if (!query) return true;
+      return String(label || '').toLocaleLowerCase('fa').includes(query);
+    },
+    groupHasMatches(groupEl) {
+      if (!this.libraryQuery.trim()) return true;
+      return [...groupEl.querySelectorAll('[data-library-label]')].some((el) => this.matchesLibrary(el.dataset.libraryLabel));
+    },
+    beginLibraryDrag(event, sectionKey, label) {
+      this.libraryDragging = true;
+      this.libraryDragKey = sectionKey;
+      this.libraryDragLabel = label;
+      this.libraryCellDropZones = [];
+      this.activeLibraryDropCellId = null;
+      this.activeLibraryDropContainerId = null;
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/x-rastisi-section-key', sectionKey);
+        event.dataTransfer.setData('text/plain', sectionKey);
+      }
+      this.$nextTick(() => this.refreshLibraryCellDropZones());
+    },
+    endLibraryDrag() {
+      window.setTimeout(() => {
+        this.libraryDragging = false;
+        this.libraryDragKey = '';
+        this.libraryDragLabel = '';
+        this.libraryCellDropZones = [];
+        this.activeLibraryDropCellId = null;
+        this.activeLibraryDropContainerId = null;
+        this.libraryDropIndex = null;
+        this.libraryDropBeforeId = '';
+        this.libraryDropEmpty = false;
+      }, 0);
+    },
+    refreshLibraryCellDropZones() {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (!iframe || !iframe.contentDocument) {
+        this.libraryCellDropZones = [];
+        return;
+      }
+      try {
+        const scale = Math.max(this.previewScale, 0.01);
+        const iframeRect = iframe.getBoundingClientRect();
+        this.libraryCellDropZones = [...iframe.contentDocument.querySelectorAll('.rcontainer-cell[data-cell-id]')]
+          .map((cell) => {
+            const rect = cell.getBoundingClientRect();
+            const left = iframeRect.left + (rect.left * scale);
+            const top = iframeRect.top + (rect.top * scale);
+            const width = rect.width * scale;
+            const height = rect.height * scale;
+            return {
+              cellId: parseInt(cell.getAttribute('data-cell-id') || '', 10),
+              containerId: parseInt(cell.getAttribute('data-container-id') || '', 10),
+              left, top, right: left + width, bottom: top + height,
+              style: 'left:' + left + 'px;top:' + top + 'px;width:' + width + 'px;height:' + height + 'px;',
+            };
+          })
+          .filter((zone) => zone.cellId && zone.containerId && zone.width !== 0);
+      } catch (_error) {
+        this.libraryCellDropZones = [];
+      }
+    },
+    updateLibraryCellDropOverlay(event) {
+      if (!this.libraryDragging) return;
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (iframe && iframe.contentWindow) {
+        const iframeRect = iframe.getBoundingClientRect();
+        const insideIframe = (
+          event.clientX >= iframeRect.left && event.clientX <= iframeRect.right &&
+          event.clientY >= iframeRect.top && event.clientY <= iframeRect.bottom
+        );
+        if (insideIframe) {
+          const edge = 64;
+          const scrollStep = 30 / Math.max(this.previewScale, 0.01);
+          if (event.clientY < iframeRect.top + edge) iframe.contentWindow.scrollBy(0, -scrollStep);
+          if (event.clientY > iframeRect.bottom - edge) iframe.contentWindow.scrollBy(0, scrollStep);
+        }
+      }
+      this.refreshLibraryCellDropZones();
+      const zone = this.libraryCellDropZones.find((candidate) => (
+        event.clientX >= candidate.left && event.clientX <= candidate.right &&
+        event.clientY >= candidate.top && event.clientY <= candidate.bottom
+      ));
+      this.activeLibraryDropCellId = zone ? zone.cellId : null;
+      this.activeLibraryDropContainerId = zone ? zone.containerId : null;
+    },
+    dropLibraryToCellOverlay(event) {
+      if (!this.libraryDragging) return;
+      const sectionKey = this.libraryDragKey || (
+        event.dataTransfer && (
+          event.dataTransfer.getData('application/x-rastisi-section-key') ||
+          event.dataTransfer.getData('text/plain')
+        )
+      );
+      const cellId = this.activeLibraryDropCellId;
+      const containerId = this.activeLibraryDropContainerId;
+      if (sectionKey && cellId) this.addContentBlockToCell(sectionKey, cellId, containerId);
+      this.endLibraryDrag();
+    },
+    sectionLabel(sectionId) {
+      const row = document.querySelector('.sfb-layer[data-id="' + sectionId + '"] .sfb-layer-name');
+      if (row) return row.textContent.trim();
+      const state = document.querySelector('#storefrontContainerState [data-section-id="' + sectionId + '"]');
+      return state && state.dataset.sectionLabel ? state.dataset.sectionLabel : 'محتوای انتخاب‌شده';
+    },
+    selectSection(sectionId, options = {}) {
+      this.selectedSectionId = parseInt(sectionId, 10) || null;
+      const placement = this.placementForSection(this.selectedSectionId);
+      this.selectedContainerId = parseInt(options.containerId, 10) || placement.containerId || null;
+      this.targetCellId = parseInt(options.cellId, 10) || placement.cellId || null;
+      if (this.isCompactLayout() && options.openInspector !== false) this.setMobilePanel('inspector', { focus: false });
+      if (!this.isCompactLayout() && options.openInspector !== false) this.inspectorCollapsed = false;
+      this.inspectorTab = options.inspectorTab || this.inspectorTab || 'design';
+      this.syncPreviewSelection();
+      document.querySelectorAll('.sfb-layer.sfb-row-selected').forEach((el) => el.classList.remove('sfb-row-selected'));
+      const row = document.querySelector('.sfb-layer[data-id="' + sectionId + '"]');
+      if (row) {
+        row.classList.add('sfb-row-selected');
+        if (options.scroll !== false) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      this.inspectorTitle = 'تنظیمات «' + this.sectionLabel(sectionId) + '»';
+      const iframe = document.getElementById('sfbPreviewFrame');
+      const template = iframe.getAttribute('data-settings-url-template');
+      const url = template.replace('/0/settings/', '/' + sectionId + '/settings/');
+      htmx.ajax('GET', url, { target: '#sfbInspectorBody', swap: 'innerHTML' });
+    },
+    openPanelUrl(url, label) {
+      this.selectedSectionId = null;
+      this.selectedContainerId = null;
+      this.targetCellId = null;
+      this.inspectorTitle = label;
+      this.inspectorTab = 'design';
+      if (this.isCompactLayout()) {
+        this.setMobilePanel('inspector', { focus: false });
+      } else {
+        this.inspectorCollapsed = false;
+      }
+      htmx.ajax('GET', url, { target: '#sfbInspectorBody', swap: 'innerHTML' });
+    },
+    clearInspector() {
+      this.selectedSectionId = null;
+      this.selectedContainerId = null;
+      this.targetCellId = null;
+      this.inspectorTitle = 'تنظیمات';
+      this.inspectorDirty = false;
+      this.syncPreviewSelection();
+      const body = document.getElementById('sfbInspectorBody');
+      if (body) body.innerHTML = '<div class="sfb-empty-inspector"><strong>یک محتوا یا چیدمان را انتخاب کن</strong><p>روی محتوا برای تنظیمات محتوا، یا روی آیکن ▦ چیدمان برای تنظیم خانه‌ها کلیک کن.</p></div>';
+    },
+    reorderSections(sectionIds) {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      htmx.ajax('POST', iframe.getAttribute('data-reorder-url'), {
+        values: { section_ids: sectionIds, page: this.pageType },
+        target: '#storefrontSectionList', swap: 'outerHTML'
+      });
+    },
+    sectionCommand(sectionId, command) {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      const endpoints = {
+        up: ['data-move-url-template', 'move'], down: ['data-move-url-template', 'move'],
+        duplicate: ['data-duplicate-url-template', 'duplicate'], toggle: ['data-toggle-url-template', 'toggle'],
+        lock: ['data-lock-url-template', 'lock'], remove: ['data-remove-url-template', 'remove']
+      };
+      const mapped = endpoints[command];
+      if (!mapped) return;
+      const url = iframe.getAttribute(mapped[0]).replace('/0/' + mapped[1] + '/', '/' + sectionId + '/' + mapped[1] + '/');
+      // One mutation at a time for one logical section. The guard deliberately
+      // survives the HTTP response and is released only after the Preview iframe
+      // has loaded its fresh DOM. This closes the small window where a click or
+      // postMessage from the old iframe could otherwise submit the same PK again.
+      const commandKey = String(sectionId);
+      if (this.sectionCommandBusy[commandKey]) return;
+      this.sectionCommandBusy[commandKey] = command;
+
+      let commandReleaseTimer = null;
+      const releaseCommand = () => {
+        if (commandReleaseTimer !== null) {
+          window.clearTimeout(commandReleaseTimer);
+          commandReleaseTimer = null;
+        }
+        delete this.sectionCommandBusy[commandKey];
+      };
+      const releaseAfterPreviewReload = () => releaseCommand();
+      const releaseWithoutReload = () => {
+        iframe.removeEventListener('load', releaseAfterPreviewReload);
+        releaseCommand();
+      };
+
+      // Arm the reload barrier BEFORE the mutation request. The normal success
+      // path swaps #storefrontSectionList, whose afterSwap reloads this iframe.
+      iframe.addEventListener('load', releaseAfterPreviewReload, { once: true });
+      commandReleaseTimer = window.setTimeout(releaseWithoutReload, 8000);
+
+      const options = { target: '#storefrontSectionList', swap: 'outerHTML' };
+      if (command === 'up' || command === 'down') options.values = { direction: command };
+      try {
+        const request = htmx.ajax('POST', url, options);
+        Promise.resolve(request).then(() => {
+          if (this.selectedSectionId !== parseInt(sectionId, 10)) return;
+          if (command === 'remove') { this.clearInspector(); return; }
+          this.selectSection(sectionId, { scroll: false });
+        }).catch(() => {
+          releaseWithoutReload();
+        });
+      } catch (error) {
+        releaseWithoutReload();
+        throw error;
+      }
+    },
+    containerCommand(containerId, command) {
+      containerId = parseInt(containerId, 10) || null;
+      if (!containerId || this.containerCommandBusy[String(containerId)]) return;
+      const templates = {
+        up: ['containerMoveUrlTemplate', 'move'],
+        down: ['containerMoveUrlTemplate', 'move'],
+        remove: ['containerRemoveUrlTemplate', 'remove'],
+      };
+      const mapped = templates[command];
+      if (!mapped) return;
+      const attrValue = this.$root.dataset[mapped[0]];
+      if (!attrValue) return;
+      const url = attrValue.replace('/0/' + mapped[1] + '/', '/' + containerId + '/' + mapped[1] + '/');
+      const options = { target: '#storefrontContainerState', swap: 'outerHTML' };
+      if (command === 'up' || command === 'down') options.values = { direction: command };
+      this.containerCommandBusy[String(containerId)] = command;
+      try {
+        const request = htmx.ajax('POST', url, options);
+        Promise.resolve(request).finally(() => { delete this.containerCommandBusy[String(containerId)]; });
+      } catch (error) {
+        delete this.containerCommandBusy[String(containerId)];
+        throw error;
+      }
+      if (command === 'remove') this.clearInspector();
+    },
+    moveBlock(sectionId, targetCellId, atIndex = null, direction = '') {
+      sectionId = parseInt(sectionId, 10) || null;
+      targetCellId = parseInt(targetCellId, 10) || null;
+      if (!sectionId || !targetCellId) return;
+      const template = this.$root.dataset.blockMoveUrlTemplate;
+      const url = template.replace('/0/move/', '/' + sectionId + '/move/');
+      const values = { target_cell_id: targetCellId };
+      if (Number.isInteger(parseInt(atIndex, 10))) values.at_index = parseInt(atIndex, 10);
+      if (direction === 'up' || direction === 'down') values.direction = direction;
+      htmx.ajax('POST', url, { values, target: '#storefrontContainerState', swap: 'outerHTML' });
+    },
+    blockCommand(sectionId, command, detail = {}) {
+      sectionId = parseInt(sectionId, 10) || null;
+      if (!sectionId) return;
+      if (command === 'up' || command === 'down') {
+        const placement = this.placementForSection(sectionId);
+        if (placement.cellId) this.moveBlock(sectionId, placement.cellId, null, command);
+        return;
+      }
+      if (command === 'remove') {
+        if (!window.confirm('فقط همین بلاک حذف شود؟ ستون و سایر بلاک‌ها باقی می‌مانند.')) return;
+        const template = this.$root.dataset.blockRemoveUrlTemplate;
+        const url = template.replace('/0/remove/', '/' + sectionId + '/remove/');
+        htmx.ajax('POST', url, { target: '#storefrontContainerState', swap: 'outerHTML' });
+        if (this.selectedSectionId === sectionId) this.clearInspector();
+        return;
+      }
+      this.sectionCommand(sectionId, command);
+    },
+    cellCommand(cellId, command, sectionId = null) {
+      cellId = parseInt(cellId, 10) || null;
+      if (!cellId || command !== 'clear') return;
+      const template = this.$root.dataset.cellClearUrlTemplate;
+      const url = template.replace('/0/clear/', '/' + cellId + '/clear/');
+      htmx.ajax('POST', url, { target: '#storefrontContainerState', swap: 'outerHTML' });
+      if (sectionId && this.selectedSectionId === parseInt(sectionId, 10)) this.clearInspector();
+    },
+    queueInspectorAutosave(target, delay = 250) {
+      if (!target || !target.closest) return;
+      if (target.matches('[hx-get], [data-sfb-no-autosave]') || String(target.name || '').startsWith('q')) return;
+      const form = target.closest('form[data-sfb-autosave="true"]');
+      if (!form) return;
+      if (this.inspectorAutosaveTimer) window.clearTimeout(this.inspectorAutosaveTimer);
+      this.inspectorAutosaveTimer = window.setTimeout(() => this.autosaveInspectorForm(form), delay);
+    },
+    async autosaveInspectorForm(form) {
+      if (!form || !document.contains(form)) return;
+      if (this.inspectorSaving) { this.inspectorSaveQueued = true; return; }
+      this.inspectorSaving = true;
+      this.inspectorSaveQueued = false;
+      try {
+        const { ok } = await postFormAjax(form);
+        if (ok) {
+          this.inspectorDirty = false;
+          this.reloadPreview();
+          await this.refreshHistoryState();
+        } else {
+          this.inspectorDirty = true;
+        }
+      } catch (_error) {
+        this.inspectorDirty = true;
+      } finally {
+        this.inspectorSaving = false;
+        if (this.inspectorSaveQueued) {
+          this.inspectorSaveQueued = false;
+          this.$nextTick(() => this.autosaveInspectorForm(form));
+        }
+      }
+    },
+    // Single shared save operation behind both R3 modal buttons:
+    // - inner "ذخیره تنظیمات" submit calls this with closeOnSuccess=false
+    //   (persist, modal stays open);
+    // - footer "انجام شد" calls this with closeOnSuccess=true (persist,
+    //   wait for success, then close + refresh preview).
+    // Validation/network errors always keep the modal open and surface
+    // r3Error, regardless of which button triggered the save.
+    async saveActiveR3Settings({ closeOnSuccess = false } = {}) {
+      const modalBody = document.getElementById('sfbR3ModalBody');
+      const form = modalBody && modalBody.querySelector('form[data-sfb-autosave="true"]');
+      if (!form) {
+        // Modal kinds with no managed settings form (add/structure/colors/...):
+        // Done has nothing of its own to persist, so it just closes.
+        if (closeOnSuccess) { this.closeR3Modal(); this.reloadPreview(); }
+        return true;
+      }
+      if (this.r3SaveBusy) return false;
+      this.r3SaveBusy = true;
+      this.r3Error = '';
+      const submitButtons = [...form.querySelectorAll('button[type="submit"]')];
+      submitButtons.forEach((btn) => { btn.disabled = true; });
+      try {
+        const { ok, response } = await postFormAjax(form);
+        if (ok) {
+          this.reloadPreview();
+          await this.refreshHistoryState();
+          if (closeOnSuccess) this.closeR3Modal();
+          return true;
+        }
+        const html = await response.text();
+        if (html && modalBody) {
+          modalBody.innerHTML = html;
+          htmx.process(modalBody);
+        }
+        this.r3Error = 'ذخیره نشد؛ خطاهای فرم را بررسی کنید.';
+        return false;
+      } catch (_error) {
+        this.r3Error = 'ذخیره انجام نشد. دوباره تلاش کنید.';
+        return false;
+      } finally {
+        this.r3SaveBusy = false;
+        submitButtons.forEach((btn) => { if (document.contains(btn)) btn.disabled = false; });
+      }
+    },
+    reloadPreview() {
+      const iframe = document.getElementById('sfbPreviewFrame');
+      if (!iframe || !iframe.contentWindow) return;
+      iframe.contentWindow.location.reload();
+    },
+    csrfToken() {
+      const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      if (match) return decodeURIComponent(match[1]);
+      const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+      return input ? input.value : '';
+    },
+    applyHistoryState(data) {
+      this.canUndo = !!data.can_undo;
+      this.canRedo = !!data.can_redo;
+      this.undoLabel = data.undo_label || '';
+      this.redoLabel = data.redo_label || '';
+    },
+    async refreshHistoryState() {
+      try {
+        const response = await fetch(this.$root.dataset.historyStateUrl, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin'
+        });
+        if (response.ok) this.applyHistoryState(await response.json());
+      } catch (_error) { /* keep the last known button state */ }
+    },
+    async historyStep(direction) {
+      if (this.historyBusy) return;
+      if (direction === 'undo' && !this.canUndo) return;
+      if (direction === 'redo' && !this.canRedo) return;
+      this.historyBusy = true;
+      const endpoint = direction === 'undo' ? this.$root.dataset.undoUrl : this.$root.dataset.redoUrl;
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'X-CSRFToken': this.csrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await response.json();
+        this.applyHistoryState(data);
+        if (response.ok && data.ok) {
+          this.inspectorDirty = false;
+          this.clearInspector();
+          const listUrl = this.$root.dataset.sectionListUrl + '?page=' + encodeURIComponent(this.pageType);
+          const containerUrl = this.$root.dataset.containerStateUrl + '?page=' + encodeURIComponent(this.pageType);
+          htmx.ajax('GET', listUrl, { target: '#storefrontSectionList', swap: 'outerHTML' });
+          htmx.ajax('GET', containerUrl, { target: '#storefrontContainerState', swap: 'outerHTML' });
+        }
+      } finally {
+        this.historyBusy = false;
+      }
+    },
+    openAddModal(event) {
+      this.lastModalFocus = (event && event.currentTarget) || document.activeElement;
+      this.modalOpen = true;
+      this.$nextTick(() => {
+        const firstChoice = this.$refs.addModal && this.$refs.addModal.querySelector('.sfb-layout-choice-grid button');
+        if (firstChoice) firstChoice.focus({ preventScroll: true });
+        else if (this.$refs.addModal) this.$refs.addModal.focus({ preventScroll: true });
+      });
+    },
+    closeAddModal(restoreFocus = true) {
+      const returnTo = this.lastModalFocus;
+      this.modalOpen = false;
+      this.$nextTick(() => {
+        if (restoreFocus && returnTo && typeof returnTo.focus === 'function' && document.contains(returnTo)) returnTo.focus({ preventScroll: true });
+      });
+    },
+    trapModalFocus(event) {
+      if (!this.$refs.addModal) return;
+      const focusable = [...this.$refs.addModal.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => el.offsetParent !== null);
+      if (!focusable.length) { event.preventDefault(); this.$refs.addModal.focus(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    },
+    isEditableTarget(target) {
+      if (!target || !(target instanceof Element)) return false;
+      const tag = target.tagName;
+      return ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || target.isContentEditable || !!target.closest('[contenteditable="true"]');
+    },
+    handleGlobalKeydown(event) {
+      if (event.defaultPrevented || this.modalOpen || this.isEditableTarget(event.target)) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      const key = String(event.key || '').toLowerCase();
+      if (modifier && !event.altKey && key === 'z') {
+        event.preventDefault();
+        this.historyStep(event.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (modifier && !event.altKey && key === 'y') {
+        event.preventDefault();
+        this.historyStep('redo');
+        return;
+      }
+      if (event.altKey && !modifier && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        const direction = event.key === 'ArrowUp' ? 'up' : 'down';
+        if (this.selectedSectionId) {
+          event.preventDefault();
+          const placement = this.placementForSection(this.selectedSectionId);
+          if (placement.cellId) this.blockCommand(this.selectedSectionId, direction);
+          else this.sectionCommand(this.selectedSectionId, direction);
+        } else if (this.selectedContainerId) {
+          event.preventDefault();
+          this.containerCommand(this.selectedContainerId, direction);
+        }
+      }
+    },
+    handleEscape() {
+      if (this.r3ModalOpen) { this.closeR3Modal(); return; }
+      if (this.modalOpen) { this.closeAddModal(); return; }
+      if (this.isCompactLayout() && this.mobilePanel !== 'canvas') { this.setMobilePanel('canvas'); return; }
+      if (this.fullscreen) { this.fullscreen = false; return; }
+      if (this.selectedSectionId || this.selectedContainerId) this.clearInspector();
+    },
+    handleBeforeUnload(e) {
+      if (this.inspectorDirty) { e.preventDefault(); e.returnValue = ''; }
+    },
+  };
+}
+
+function productSectionForm(initialDataSource, initialProducts, maxItems = 60) {
+  var autoSource = initialDataSource && initialDataSource !== 'manual' ? initialDataSource : 'newest';
+  return {
+    dataSource: initialDataSource || 'newest',
+    lastAutomaticSource: autoSource,
+    selectionMode: initialDataSource === 'manual' ? 'manual' : 'automatic',
+    selectionQuery: '',
+    selected: Array.isArray(initialProducts) ? initialProducts : [],
+    maxItems: parseInt(maxItems, 10) || 60,
+    get selectionLimitReached() { return this.selected.length >= this.maxItems; },
+    setSelectionMode(mode) {
+      if (mode === 'manual') {
+        if (this.dataSource && this.dataSource !== 'manual') this.lastAutomaticSource = this.dataSource;
+        this.selectionMode = 'manual';
+        this.dataSource = 'manual';
+        return;
+      }
+      this.selectionMode = 'automatic';
+      if (this.dataSource === 'manual') this.dataSource = this.lastAutomaticSource || 'newest';
+    },
+    addProduct(id, name) {
+      id = parseInt(id, 10);
+      if (!id || this.selected.some((p) => p.id === id) || this.selectionLimitReached) return;
+      this.setSelectionMode('manual');
+      this.selected.push({ id, name });
+    },
+    addItem(id, name) { this.addProduct(id, name); },
+    removeProduct(id) { this.selected = this.selected.filter((p) => p.id !== parseInt(id, 10)); },
+    removeItem(id) { this.removeProduct(id); },
+    moveUp(index) {
+      if (index <= 0) return;
+      [this.selected[index - 1], this.selected[index]] = [this.selected[index], this.selected[index - 1]];
+    },
+    moveDown(index) {
+      if (index < 0 || index >= this.selected.length - 1) return;
+      [this.selected[index + 1], this.selected[index]] = [this.selected[index], this.selected[index + 1]];
+    },
+    isSelected(id) { return this.selected.some((item) => item.id === parseInt(id, 10)); },
+    matchesChoice(name) { return String(name || '').toLowerCase().includes(this.selectionQuery.toLowerCase()); },
+  };
+}
+
+function multiPickerForm(initialSelected, maxItems = 24) {
+  return {
+    selectionMode: Array.isArray(initialSelected) && initialSelected.length ? 'manual' : 'automatic',
+    selectionQuery: '',
+    selected: Array.isArray(initialSelected) ? initialSelected : [],
+    maxItems: parseInt(maxItems, 10) || 24,
+    get selectionLimitReached() { return this.selected.length >= this.maxItems; },
+    setSelectionMode(mode) { this.selectionMode = mode === 'manual' ? 'manual' : 'automatic'; },
+    addItem(id, name) {
+      id = parseInt(id, 10);
+      if (!id || this.selected.some((item) => item.id === id) || this.selectionLimitReached) return;
+      this.selectionMode = 'manual';
+      this.selected.push({ id, name });
+      this.selectionQuery = '';
+    },
+    removeItem(id) { this.selected = this.selected.filter((item) => item.id !== parseInt(id, 10)); },
+    moveUp(index) {
+      if (index <= 0) return;
+      [this.selected[index - 1], this.selected[index]] = [this.selected[index], this.selected[index - 1]];
+    },
+    moveDown(index) {
+      if (index < 0 || index >= this.selected.length - 1) return;
+      [this.selected[index + 1], this.selected[index]] = [this.selected[index], this.selected[index + 1]];
+    },
+    isSelected(id) { return this.selected.some((item) => item.id === parseInt(id, 10)); },
+    matchesChoice(name) {
+      var query = this.selectionQuery.trim().toLowerCase();
+      return !query || String(name || '').toLowerCase().includes(query);
+    },
+  };
+}
+
+function itemRepeaterForm(initialRows, emptyRow) {
+  return {
+    rows: initialRows && initialRows.length ? initialRows : [],
+    addRow() { this.rows.push({ ...emptyRow }); },
+    removeRow(index) { this.rows.splice(index, 1); },
+    moveUp(index) {
+      if (index === 0) return;
+      [this.rows[index - 1], this.rows[index]] = [this.rows[index], this.rows[index - 1]];
+    },
+    moveDown(index) {
+      if (index === this.rows.length - 1) return;
+      [this.rows[index + 1], this.rows[index]] = [this.rows[index], this.rows[index + 1]];
+    },
+  };
+}
+
+function destinationPicker(initialType, initialId, initialName) {
+  return {
+    type: initialType || 'none',
+    productId: initialType === 'product' ? initialId : null,
+    productName: initialType === 'product' ? initialName : '',
+  };
+}
+</script>
+{% endif %}
+{% endblock %}

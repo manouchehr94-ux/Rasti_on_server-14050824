@@ -1,0 +1,44 @@
+{% extends "portal/platform_admin/base.html" %}
+{% load persian %}
+{% block title %}گزارش ارسال پیامک | پنل مدیریت پلتفرم{% endblock %}
+{% block content %}
+<div class="pa-pagehead"><div><h1>گزارش ارسال پیامک</h1><p>تاریخچه‌ی تلاش‌هایِ ارسال — متنِ کاملِ پیامک برایِ حفاظت از کدهایِ یک‌بارمصرف نمایش داده نمی‌شود.</p></div></div>
+
+<form method="get" class="pa-card" role="search"><div class="pa-cardbody pa-filters">
+  <div class="pa-field pa-grow"><label for="flt-q">جستجو</label><input id="flt-q" type="search" name="q" value="{{ query }}"></div>
+  <div class="pa-field"><label for="flt-status">وضعیت</label><select id="flt-status" name="status">
+      <option value="">همه‌ی وضعیت‌ها</option>
+      {% for value, label in status_choices %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  <div class="pa-filter-actions"><button class="pa-btn pa-primary" type="submit">اعمالِ فیلتر</button><a class="pa-btn" href="{% url 'portal_platform_admin:sms-logs' %}">پاک‌کردن</a></div>
+</div></form>
+
+<div class="pa-card">
+  {% if page.object_list %}
+  <div class="pa-tablewrap">
+    <table>
+      <thead><tr><th>فروشگاه</th><th>گیرنده</th><th>رویداد</th><th>وضعیت</th><th>مرجعِ ارائه‌دهنده</th><th>تاریخ</th></tr></thead>
+      <tbody>
+        {% for log in page.object_list %}
+        <tr>
+          <td>{{ log.store.name|default:"—" }}</td>
+          <td class="pa-ltr">{{ log.recipient|slice:":4" }}***{{ log.recipient|slice:"-2:" }}</td>
+          <td>{{ log.get_event_key_display }}</td>
+          <td>
+            {% if log.status == "sent" %}<span class="pa-badge pa-ok">ارسال‌شده</span>
+            {% elif log.status == "failed" %}<span class="pa-badge pa-off">ناموفق</span>
+            {% else %}<span class="pa-badge pa-warn">{{ log.get_status_display }}</span>{% endif %}
+          </td>
+          <td class="pa-ltr">{{ log.provider_ref_id|default:"—" }}</td>
+          <td>{{ log.created_at|jalali_dt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "portal/platform_admin/_pagination.html" %}
+  {% else %}
+  <div class="pa-empty"><div class="pa-empty-icon"><svg class="pa-i"><use href="#i-list"/></svg></div><p>رخدادی یافت نشد.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "portal/base_platform.html" %}
+{% load static %}
+
+{% block header %}
+<header class="r-header" x-data="{ mobileOpen: false }">
+  <div class="rs-scroll-progress" aria-hidden="true"></div>
+  <div class="rs-container r-header-inner">
+    <a class="r-brand" href="{% url 'portal:home' %}" aria-label="راستی‌سی، صفحه اصلی">
+      <span class="r-brand-mark" aria-hidden="true"></span>
+      <span>راستی‌سی</span>
+    </a>
+
+    <nav class="r-nav" aria-label="ناوبری اصلی">
+      <a href="{% url 'portal:features' %}">راستی‌سی چیست؟</a>
+      <a href="{% url 'portal:design' %}">طراحی فروشگاه</a>
+      <a href="{% url 'portal:plans' %}">تعرفه‌ها</a>
+      <a href="{% url 'portal:about' %}">درباره ما</a>
+      <a href="{% url 'portal:contact' %}">تماس با ما</a>
+    </nav>
+
+    <div class="r-header-actions">
+      {% if request.user.is_authenticated %}
+        <a class="r-btn r-btn-secondary rs-btn-sm" href="{% url 'portal:app-home' %}">پنل من</a>
+      {% else %}
+        <a class="r-header-login" href="{% url 'portal:login' %}">ورود</a>
+        <a class="rs-btn rs-btn-primary rs-btn-sm" href="{% url 'portal:register' %}">ساخت فروشگاه</a>
+      {% endif %}
+      <button class="r-menu-toggle" type="button" @click="mobileOpen = !mobileOpen" :aria-expanded="mobileOpen.toString()" aria-controls="r-mobile-menu" aria-label="باز کردن منو">
+        <span></span>
+      </button>
+    </div>
+  </div>
+
+  <div id="r-mobile-menu" class="r-mobile-panel" x-show="mobileOpen" x-cloak @click.outside="mobileOpen = false">
+    <div class="rs-container">
+      <nav class="r-mobile-nav" aria-label="ناوبری موبایل">
+        <a @click="mobileOpen=false" href="{% url 'portal:home' %}">صفحه اصلی</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:features' %}">راستی‌سی چیست؟</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:design' %}">طراحی فروشگاه</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:plans' %}">تعرفه‌ها</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:about' %}">درباره ما</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:contact' %}">تماس با ما</a>
+        <a @click="mobileOpen=false" href="{% url 'portal:help' %}">پرسش‌های متداول</a>
+      </nav>
+      <div class="r-mobile-actions">
+        {% if request.user.is_authenticated %}
+          <a class="rs-btn rs-btn-primary" href="{% url 'portal:app-home' %}">ورود به پنل من</a>
+        {% else %}
+          <a class="rs-btn rs-btn-outline" href="{% url 'portal:login' %}">ورود</a>
+          <a class="rs-btn rs-btn-primary" href="{% url 'portal:register' %}">ساخت فروشگاه</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</header>
+{% endblock %}
+
+{% block footer %}
+<footer class="r-footer">
+  <div class="rs-container">
+    <div class="r-footer-grid">
+      <div class="r-footer-brand">
+        <a class="r-brand" href="{% url 'portal:home' %}">
+          <span class="r-brand-mark" aria-hidden="true"></span>
+          <span>راستی‌سی</span>
+        </a>
+        <p>از اولین تصویری که مشتری می‌بیند تا سفارشی که مدیریت می‌کنید؛ جایی برای ساختن فروشگاهی از جنس کسب‌وکار شما.</p>
+      </div>
+      <div>
+        <h4>شناخت راستی‌سی</h4>
+        <a href="{% url 'portal:features' %}">امکانات و مسیر کار</a>
+        <a href="{% url 'portal:design' %}">ظاهر و طراحی فروشگاه</a>
+        <a href="{% url 'portal:plans' %}">تعرفه‌ها و انتخاب سرویس</a>
+        <a href="{% url 'portal:register' %}">شروع ساخت فروشگاه</a>
+      </div>
+      <div>
+        <h4>کنار کسب‌وکار شما</h4>
+        <a href="{% url 'portal:about' %}">درباره راستی‌سی</a>
+        <a href="{% url 'portal:help' %}">پرسش‌های متداول</a>
+        <a href="{% url 'portal:contact' %}">تماس با ما</a>
+        <a href="{% url 'portal:login' %}">ورود به حساب</a>
+      </div>
+      <div>
+        <h4>شفافیت</h4>
+        <a href="{% url 'portal:terms' %}">شرایط استفاده</a>
+        <a href="{% url 'portal:privacy' %}">حریم خصوصی</a>
+        {% if PLATFORM_ENAMAD_BADGE_PROFILE_URL and PLATFORM_ENAMAD_BADGE_LOGO_URL %}
+          <a class="r-enamad-badge" referrerpolicy="origin" target="_blank" rel="noopener noreferrer" href="{{ PLATFORM_ENAMAD_BADGE_PROFILE_URL }}">
+            <img referrerpolicy="origin" src="{{ PLATFORM_ENAMAD_BADGE_LOGO_URL }}" alt="نماد اعتماد الکترونیکی راستی‌سی">
+          </a>
+        {% endif %}
+      </div>
+    </div>
+    <div class="r-footer-bottom">
+      <span>© {% now "Y" %} راستی‌سی — همه حقوق محفوظ است.</span>
+      <span dir="ltr">RASTISI</span>
+    </div>
+  </div>
+</footer>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'portal/css/public-site-v2.css' %}?v=20261106-1">
+<link rel="stylesheet" href="{% static 'core/password_toggle.css' %}?v=20261106-1">
+<script src="{% static 'core/password_toggle.js' %}?v=20261106-1" defer></script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'portal/js/public-site-v3.js' %}?v=20260930-1" defer></script>
+{% endblock %}

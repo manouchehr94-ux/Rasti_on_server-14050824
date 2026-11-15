@@ -1,0 +1,61 @@
+{% extends "portal/platform_admin/base.html" %}
+{% block title %}صنف‌ها و قالب‌ها | پنل مدیریت پلتفرم{% endblock %}
+{% block content %}
+<div class="pa-pagehead"><div><h1>صنف‌ها و قالب‌ها</h1><p>هر نسخه‌ی یک قالبِ صنف پس از ساخته‌شدن تغییرناپذیر است؛ نسخه‌ی تازه یک ردیفِ کاملاً جدید می‌سازد.</p></div></div>
+
+<form method="get" class="pa-card" role="search"><div class="pa-cardbody pa-filters">
+  <div class="pa-field pa-grow"><label for="flt-q">جستجو</label><input id="flt-q" type="search" name="q" value="{{ q }}"></div>
+  <div class="pa-field"><label for="flt-sector">رسته</label><select id="flt-sector" name="sector">
+        <option value="">همه‌ی رسته‌ها</option>
+        {% for code, label in sector_tabs %}
+        {% if code != "all" %}
+        <option value="{{ code }}" {% if selected_sector == code %}selected{% endif %}>{{ label }}</option>
+        {% endif %}
+        {% endfor %}
+      </select></div>
+  <div class="pa-field"><label for="flt-active">وضعیت</label><select id="flt-active" name="active">
+        <option value="">همه‌ی وضعیت‌ها</option>
+        <option value="active" {% if selected_active == "active" %}selected{% endif %}>فعال</option>
+        <option value="inactive" {% if selected_active == "inactive" %}selected{% endif %}>غیرفعال</option>
+      </select></div>
+  <div class="pa-field"><label for="flt-readiness">readiness</label><select id="flt-readiness" name="readiness">
+        <option value="">همه‌ی آمادگی‌ها</option>
+        {% for value, label in readiness_choices %}
+        <option value="{{ value }}" {% if selected_readiness == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select></div>
+  <div class="pa-filter-actions"><button class="pa-btn pa-primary" type="submit">اعمالِ فیلتر</button><a class="pa-btn" href="{% url 'portal_platform_admin:industries' %}">پاک‌کردن</a></div>
+</div></form>
+
+<div class="pa-card">
+  {% if templates %}
+  <div class="pa-tablewrap">
+    <table>
+      <thead><tr><th>نام</th><th>رسته</th><th>اسلاگ</th><th>نسخه</th><th>زبان</th><th>آمادگی</th><th>وضعیت</th><th>دسته‌بندی/ویژگی</th><th>نصب‌ها</th><th></th></tr></thead>
+      <tbody>
+        {% for template in templates %}
+        <tr>
+          <td>{{ template.icon }} {{ template.name }}</td>
+          <td>{{ template.get_sector_display }}</td>
+          <td class="pa-ltr">{{ template.slug }}</td>
+          <td>v{{ template.version }}</td>
+          <td>{{ template.locale }}</td>
+          <td>
+            {% if template.readiness == "production_ready" %}<span class="pa-badge pa-ok">آماده‌ی تولید</span>
+            {% elif template.readiness == "validation_failed" %}<span class="pa-badge pa-off">اعتبارسنجی ناموفق</span>
+            {% else %}<span class="pa-badge pa-warn">{{ template.get_readiness_display }}</span>{% endif %}
+          </td>
+          <td>{% if template.is_active %}<span class="pa-badge pa-ok">فعال</span>{% else %}<span class="pa-badge pa-off">غیرفعال</span>{% endif %}</td>
+          <td>{{ template.category_count }} / {{ template.attribute_count }}</td>
+          <td>{{ template.installation_count }}</td>
+          <td><a class="pa-btn pa-small pa-soft" href="{% url 'portal_platform_admin:industry-detail' template.pk %}">جزئیات</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="pa-empty"><div class="pa-empty-icon"><svg class="pa-i"><use href="#i-layers"/></svg></div><p>هیچ قالبِ صنفی با این فیلترها یافت نشد.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

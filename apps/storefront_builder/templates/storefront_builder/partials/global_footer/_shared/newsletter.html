@@ -1,0 +1,14 @@
+{% comment %}
+Canonical working newsletter form. Shares the same partial, CSRF, rate limiting,
+consent contract and store-scoped service as the standalone newsletter section.
+No duplicate subscription handler and no disabled pseudo form.
+{% endcomment %}
+<div class="gf-newsletter">
+  <div>
+    <h3>{{ FOOTER_SETTINGS.newsletter_title|default:"عضویت در خبرنامه" }}</h3>
+    <p>{{ FOOTER_SETTINGS.newsletter_description|default:"از جدیدترین محصولات و پیشنهادهای فروشگاه باخبر شوید" }}</p>
+  </div>
+  <div class="gf-newsletter-form">
+    {% include "content/partials/newsletter_form.html" with button_label="عضویت" %}
+  </div>
+</div>

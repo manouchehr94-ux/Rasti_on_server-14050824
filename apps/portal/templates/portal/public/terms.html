@@ -1,0 +1,45 @@
+{% extends "portal/public/base_public.html" %}
+{% block title %}قوانین و مقررات | راستی‌سی{% endblock %}
+{% block meta_description %}<meta name="description" content="پیش‌نویس قوانین و مقررات استفاده از پلتفرم راستی‌سی: حساب، فروشگاه، مسئولیت‌ها، اشتراک، استفاده مجاز و تعلیق.">{% endblock %}
+{% block robots_meta %}<meta name="robots" content="index, follow">{% endblock %}
+
+{% block content %}
+<div class="r-legal">
+  <header class="r-legal-head">
+    <div class="rs-eyebrow">سند قانونی · پیش‌نویس</div>
+    <h1 class="r-h1">قوانین و مقررات استفاده</h1>
+    <p class="r-legal-version" data-terms-version>نسخه‌ی قوانین: <bdi dir="ltr">{{ terms_version }}</bdi></p>
+    <p class="r-lead">چارچوب استفاده از خدمات راستی‌سی، نقش پلتفرم و مسئولیت‌های مالک فروشگاه.</p>
+  </header>
+
+  <div class="r-legal-layout">
+    <aside class="r-legal-aside">
+      <details class="r-legal-toc" data-legal-toc open>
+        <summary class="r-legal-toc-title">فهرست مطالب <span class="r-legal-toc-count">۱۸ بخش</span></summary>
+        <nav aria-label="فهرست مطالب">
+          {% include "portal/public/_terms_toc.html" %}
+        </nav>
+      </details>
+    </aside>
+  {% include "portal/public/_terms_body.html" %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  /* فهرست مطالب: روی دسکتاپ همیشه باز (ستون کناری)؛ روی تبلت/موبایل جمع‌شده تا متن زودتر دیده شود. بدون JS باز می‌ماند. */
+  (function () {
+    var toc = document.querySelector('[data-legal-toc]');
+    if (!toc || !window.matchMedia) return;
+    var narrow = window.matchMedia('(max-width: 960px)');
+    function sync() { toc.open = !narrow.matches; }
+    sync();
+    if (narrow.addEventListener) narrow.addEventListener('change', sync);
+    toc.addEventListener('click', function (event) {
+      if (event.target.closest('a') && narrow.matches) toc.open = false;
+    });
+  })();
+</script>
+{% endblock %}

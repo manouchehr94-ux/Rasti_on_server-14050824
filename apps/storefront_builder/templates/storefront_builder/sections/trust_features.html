@@ -1,0 +1,19 @@
+{% comment %}
+FOLLOWUP-10 — «ردیف اعتماد و ویژگی‌ها». عمومی: فقط آیتم‌هایی که وضعیتِ واقعیِ فروشگاه (درگاه/ارسال/تحویل حضوری فعال) یا تأییدِ صریحِ
+فروشنده پشتشان است؛ اگر هیچ‌کدام نبود، هیچ جعبهٔ خالی/وعدهٔ بی‌پشتوانه‌ای رندر نمی‌شود. Studio (is_builder_preview): همهٔ آیتم‌ها با برچسبِ
+علتِ پنهان‌بودن در صفحهٔ عمومی. هیچ داده‌ای حذف/بازنویسی نمی‌شود.
+{% endcomment %}
+{% if is_builder_preview %}{% with shown=trust_items %}
+<div class="features" data-trust-preview="1">
+  {% for item in shown %}
+  <div class="feat{% if not item.public_visible %} feat--hidden-public{% endif %}" data-sfb-section-surface="ink"{% if not item.public_visible %} style="opacity:.55;outline:1px dashed currentColor;outline-offset:-3px"{% endif %}><span class="ic">{% if item.icon %}{{ item.icon }}{% else %}✅{% endif %}</span><div><b>{{ item.title }}</b>{% if item.subtitle %}<small>{{ item.subtitle }}</small>{% endif %}{% if not item.public_visible %}<small data-trust-badge style="color:#b45309;font-weight:700">در فروشگاه عمومی نمایش داده نمی‌شود: {{ item.hidden_reason }}</small>{% endif %}</div></div>
+  {% endfor %}
+</div>
+{% endwith %}
+{% elif trust_public_items %}
+<div class="features">
+  {% for item in trust_public_items %}
+  <div class="feat" data-sfb-section-surface="ink"><span class="ic">{% if item.icon %}{{ item.icon }}{% else %}✅{% endif %}</span><div><b>{{ item.title }}</b>{% if item.subtitle %}<small>{{ item.subtitle }}</small>{% endif %}</div></div>
+  {% endfor %}
+</div>
+{% endif %}

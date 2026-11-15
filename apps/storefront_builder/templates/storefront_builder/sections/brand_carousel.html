@@ -1,0 +1,42 @@
+{% comment %}
+چکپوینتِ ۱۱: brand_ids خالی (auto) = دقیقاً همان رفتارِ قدیمی (همه‌ی
+برندهایِ فعال). عنوان و «مشاهده همه» اختیاری‌اند — «مشاهده همه» فقط
+وقتی نمایش داده می‌شود که مرچنت هم فعالش کرده و هم یک مقصدِ واقعی
+انتخاب کرده (بدونِ مقصد = هیچ لینکی، طبقِ الزامِ «هرگز دکمه‌ی بی‌اثر»).
+{% endcomment %}
+<section class="section{% if brand_carousel_settings.display_mode == 'beauty_tabs' %} brand-section--beauty-tabs{% endif %}">
+  {% if brand_carousel_settings.display_mode == 'beauty_tabs' %}
+  <div class="beauty-section-title beauty-brand-title">
+    <span aria-hidden="true"></span><h2>{{ brand_carousel_settings.title|default:"برندهای منتخب" }}</h2><span aria-hidden="true"></span>
+  </div>
+  {% else %}
+  <div class="sec-head">
+    <h2><span class="bar"></span>{{ brand_carousel_settings.title|default:"برندهای منتخب" }}</h2>
+    {% if view_all_url %}<a class="more" href="{{ view_all_url }}">مشاهده همه ›</a>{% endif %}
+  </div>
+  {% endif %}
+  {% comment %}
+  G2.3 (Defect A): the carousel/grid containers carry an inline layout
+  fallback so the intended HORIZONTAL presentation survives even if the
+  external home.css rule (``.brand-carousel{display:flex}`` /
+  ``.grid{display:grid}``) is momentarily unapplied — the observed
+  "brand cards collapse into a narrow vertical column" in the reloaded
+  Builder Preview iframe. The inline values intentionally match home.css
+  exactly (same display/gap/overflow), so they never fight the richer
+  stylesheet rules; they only guarantee the block-level ``.brand-tile``
+  anchors never stack vertically for lack of a flex/grid parent.
+  {% endcomment %}
+  {% comment %}Empty data is owned by the shared contract (section_empty_state_service); this body only renders with brands.{% endcomment %}
+  <div class="{% if brand_carousel_settings.display_mode == 'carousel' %}brand-carousel{% elif brand_carousel_settings.display_mode == 'beauty_tabs' %}brand-beauty-tabs{% else %}grid{% endif %}"
+       {% if brand_carousel_settings.display_mode == 'carousel' %}style="display:flex;gap:14px;overflow-x:auto"{% elif brand_carousel_settings.display_mode == 'beauty_tabs' %}style="display:flex;overflow-x:auto"{% else %}style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:14px"{% endif %}>
+    {% for brand in brands %}
+    <a{% if is_builder_preview %} data-admin-edit-kind="brand" data-admin-edit-id="{{ brand.pk }}" data-admin-edit-title="{{ brand.name|escape }}"{% endif %} href="{% url 'catalog:product-list' %}?brand={{ brand.slug }}" data-sfb-card-surface class="brand-tile{% if brand_carousel_settings.display_mode == 'beauty_tabs' %} brand-beauty-tab{% endif %}">
+      {% if brand.logo %}
+      <img src="{{ brand.logo.url }}" data-img-role="logo" alt="{{ brand.name }}" loading="lazy">
+      {% else %}
+      <span class="brand-tile-name">{{ brand.name }}</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</section>

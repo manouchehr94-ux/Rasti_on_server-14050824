@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+[[allowlists]]
+description = "Exact UI component identifier matches in families.py"
+condition = "AND"
+paths = ['''(^|/)apps/storefront_builder/storefront_appearance/families\.py$''']
+regexTarget = "match"
+regexes = [
+    '''^safe_default_component_key="header\.legacy_default\.v1"$''',
+    '''^safe_default_component_key="footer\.legacy_default\.v1"$''',
+    '''^safe_default_component_key="bottom_nav\.hidden\.v1"$''',
+]

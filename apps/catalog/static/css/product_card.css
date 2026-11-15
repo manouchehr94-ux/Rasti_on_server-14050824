@@ -1,0 +1,1009 @@
+/*
+  گرید و کارت محصول — کامپوننت مشترک بین صفحه‌ی اصلی، فهرست/جستجو و
+  هر صفحه‌ی دیگری که از catalog/partials/product_card.html استفاده کند.
+  کپی دقیق از docs/spec/shop-frontend.html.
+*/
+/* Phase 4 (Task 5, Group C2.5) — this whole block was a byte-for-byte
+   copy of home.css's ORIGINAL, pre-refinement `.sec-head` rule (per the
+   file header above), frozen at that point and never updated as
+   home.css's own later "Universal dense storefront modules"/"V3
+   universal dense-marketplace fidelity pass"/"V4.2.2 readability
+   calibration" passes refined these values — a shared base contract
+   this file owns but silently let go stale. `.sec-head` is loaded here
+   on EVERY page (Home included, where home.css's later, equal-
+   specificity rules already override every property changed below —
+   confirmed via real-browser ground truth, so Home's rendering is
+   unaffected) and used by the vast majority of section templates
+   across the whole builder, not any one family — so this is fixed once,
+   here, at the shared source, rather than shadowed per-family
+   elsewhere (which would leave this rule permanently wrong and create
+   a second, competing definition). `.sec-head .more`/`.sec-head .more
+   svg`/`.sec-head .btn` had NO base rule here at all before this fix —
+   not merely stale, entirely unstyled on every non-Home page. Values
+   below are home.css's own current merged-final result (last-pass-wins
+   across all three refinement passes), verified against a real-browser
+   ground-truth harness loading home.css alone.
+
+   EXCLUDED from this fix: `.sec-head h2`'s `font-size` stays on
+   `var(--sfb-heading-size, 19px)`, its original fallback, UNCHANGED.
+   This is the one property on this whole rule that is NOT a frozen
+   stale copy — `--sfb-heading-size` is a real, deliberate, already
+   merchant-configurable per-store heading-size token (set on every
+   page via `templates/base.html`'s `SHOP_HEADING_SIZE`, default 19,
+   and it is the ONLY CSS consumer of this variable anywhere in the
+   codebase; `apps/storefront_builder/tests/test_appearance.py`
+   exercises merchants configuring it, e.g. to 22px — though only by
+   asserting the `--sfb-heading-size:22px` custom property appears in
+   `catalog:home`'s HTML, not a rendered `font-size`, since home.css
+   itself never consumes the variable for `.sec-head h2` at all: its
+   own merged value, 16px, is a plain literal, so the merchant setting
+   is already inert on Home while remaining live here on non-Home).
+   Home and non-Home simply have two independently-designed, still-
+   both-current heading-size mechanisms for this one property, not a
+   staleness gap. Changing the
+   variable's default, or dropping the variable to hardcode a literal,
+   would touch a live, tested, unrelated feature well beyond this
+   bounded fix's scope — left alone. (No `@680px` override is added for
+   the same reason: one would exist only to force this same, explicitly
+   out-of-scope property back to a fixed value at small viewports.) */
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px;flex-wrap:wrap}
+.sec-head h2{font-size:var(--sfb-heading-size, 19px);font-weight:800;display:flex;align-items:center;gap:6px}
+.sec-head h2 .bar{width:3px;height:17px;border-radius:1px;background:#111}
+.sec-head .more{color:#333;font-weight:700;font-size:10.5px;display:flex;align-items:center;gap:5px}
+.sec-head .more svg{width:16px;height:16px}
+.sec-head .btn,.product-section .sec-head .btn{height:23px;min-height:23px;padding:0 9px;border-radius:999px;background:#fff;border:1px solid #e3e5e9;color:#c63b50;font-weight:700;box-shadow:none;font-size:10px}
+/* Group C2.5 follow-up (raised by this fix's own independent review):
+   `html[data-sfb-density="compact"] .sec-head .btn` had no compact-
+   density override at all here — unlike `font-size` on `.sec-head h2`
+   (a real, deliberately-excluded merchant variable, see above), this
+   `.btn` size/font-size pairing is a plain literal on both sides, with
+   no theming mechanism, so home.css's own compact-density merged value
+   (home.css:699-700) is mirrored verbatim. */
+html[data-sfb-density="compact"] .sec-head .btn,
+html[data-sfb-density="compact"] .product-section .sec-head .btn{font-size:9.4px;min-height:24px;height:24px}
+/* Group C2.5 follow-up — `.rsec[data-pattern]>.section>.sec-head*`
+   (the small white-capsule heading treatment for patterned-background
+   rails) had NO rule anywhere in this file before this fix, despite
+   `data-pattern` being emitted by the one shared
+   `responsive_section_wrapper.html` used on every page type, Home
+   included — a real, previously-undiscovered non-Home gap in the same
+   `.sec-head` family this fix already reconciles, found during this
+   fix's own review. Values are home.css's current merged-final result
+   (verified by tracing every `.rsec[data-pattern]>.section>.sec-head`
+   occurrence across the whole file, including the two later,
+   higher-specificity `html[data-sfb-density="compact"]`-scoped
+   passes, which win over the plain @680px override at compact density
+   regardless of source order). */
+.rsec[data-pattern]>.section>.sec-head{margin-bottom:7px;align-items:center}
+.rsec[data-pattern]>.section>.sec-head h2{width:max-content;max-width:75%;padding:4px 10px;border-radius:999px;background:#fff;color:#c63b50;font-size:11.4px;line-height:1.4;font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.rsec[data-pattern]>.section>.sec-head h2 .bar{display:none;background:#ff5a72}
+.rsec[data-pattern]>.section>.sec-head .btn{height:21px;min-height:21px;padding-inline:8px;font-size:9.4px;background:rgba(255,255,255,.96);color:#c63b50;border-color:#fff}
+@media(max-width:680px){
+  .rsec[data-pattern]>.section>.sec-head h2{font-size:11px}
+}
+html[data-sfb-density="compact"] .rsec[data-pattern]>.section>.sec-head h2{font-size:11.4px}
+.grid{display:grid;gap:16px}
+/* تراکم/فاصله‌گذاری (density) — کنترلِ مستقیمِ تاجر؛ همان الگویِ
+   overrideهایِ data-sfb-card-shadow/hover پایین‌تر در همین فایل. */
+html[data-sfb-density="compact"] .grid{gap:10px}
+html[data-sfb-density="relaxed"] .grid{gap:24px}
+html[data-sfb-density="compact"] .pcarousel{--pcarousel-gap:10px}
+html[data-sfb-density="relaxed"] .pcarousel{--pcarousel-gap:24px}
+/* تعدادِ ستونِ پیش‌فرض از Templateِ فعال می‌آید (بخش‌هایی که هنوز
+   per-section column-aware نیستند: جدیدترین‌ها، پرفروش‌ترین‌ها، ...) —
+   پیش‌فرض دقیقاً همان ۴ ستونِ قبلی. */
+.g4{grid-template-columns:repeat(var(--sfb-grid-density, 4),1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+
+.pcard{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;transition:.2s;display:flex;flex-direction:column;cursor:pointer}
+/* Semantic card click target: the product link is an empty overlay sibling, not
+   a parent of wishlist/quick-add buttons. This keeps the whole card clickable
+   while avoiding invalid nested interactive controls (<button> inside <a>). */
+.pcard{position:relative}
+.pcard-hitarea{position:absolute;inset:0;z-index:1;border-radius:inherit}
+.pcard-hitarea:focus-visible{outline:3px solid var(--focus-ink,#241c3a);outline-offset:-3px;box-shadow:inset 0 0 0 6px var(--focus-halo,#fff)}  /* two-tone: ink ring + halo, visible over any card image */
+.pcard .heart,.pcard .addbar{z-index:3}
+.pcard .compact-actions{position:relative;z-index:3}
+.pcard:hover{box-shadow:var(--shadow);transform:translateY(-3px);border-color:#ddd2f5}
+.pcard.no-border{border-color:transparent}
+.pcard.no-border:hover{border-color:transparent}
+.pcard .img{position:relative;aspect-ratio:1/1;display:grid;place-items:center;font-size:70px;overflow:hidden}
+/* Phase 8 P0-2 — نسبتِ تصویرِ کارتِ محصول، بستهٔ بسته (مربع/عمودی/افقی) — نه aspect-ratio دلخواه */
+.pcard.ratio-portrait .img{aspect-ratio:3/4}
+.pcard.ratio-landscape .img{aspect-ratio:4/3}
+.pcard .img .emo{transition:transform .3s}
+.pcard:hover .img .emo{transform:scale(1.08)}
+.pcard .img .cover-photo{transition:transform .3s}
+/* R4-11 — a product photo fills the card frame and is shown WHOLE (contain) unless the section overrides it (--img-fit);
+   the contract for every role lives at the end of storefront_builder.css */
+.pcard .img>img[data-img-role="product"]{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--img-fit,contain);object-position:var(--img-pos,center)}
+/* هاورِ تصویرِ محصول — کنترلِ مستقیمِ تاجر (data-sfb-image-hover)،
+   مستقل از data-sfb-card-hover (که رفتارِ کلِ کارت را کنترل می‌کند).
+   پیش‌فرض ("zoom") دقیقاً همان رفتارِ ایموجیِ جای‌گزین بالاست، حالا
+   برایِ تصویرِ واقعیِ محصول هم. */
+html[data-sfb-image-hover="zoom"] .pcard:hover .img .cover-photo{transform:scale(1.08)}
+html[data-sfb-image-hover="none"] .pcard:hover .img .cover-photo{transform:none}
+
+/* سایه/رفتارِ hoverِ کارت — از Templateِ فعال می‌آید. پیش‌فرض
+   (data-sfb-card-shadow="soft"، data-sfb-card-hover="lift") دقیقاً
+   همان دو قانونِ بالاست، بدون تغییر. */
+html[data-sfb-card-shadow="none"] .pcard:hover{box-shadow:none}
+html[data-sfb-card-shadow="strong"] .pcard{box-shadow:0 4px 14px rgba(20,10,40,.10)}
+html[data-sfb-card-shadow="strong"] .pcard:hover{box-shadow:0 16px 40px rgba(20,10,40,.22)}
+html[data-sfb-card-hover="none"] .pcard:hover{transform:none!important;box-shadow:none;border-color:var(--line)}
+
+/* سبکِ حرکت (motion) — کنترلِ مستقیمِ تاجر. «بدون حرکت» از قبل (base.css)
+   همه‌ی transition/animation را غیرفعال می‌کند؛ «پویا» برخلافِ «ملایم»
+   (پیش‌فرض) باید واقعاً محسوس‌تر باشد، نه فقط یک انتخابِ بی‌اثر —
+   جابه‌جاییِ بیشتر و ترنزیشنِ سریع‌تر روی هاورِ کارت. */
+html[data-sfb-motion="dynamic"] .pcard{transition: 0.12s cubic-bezier(0.34, 1.56, 0.64, 1)}
+html[data-sfb-motion="dynamic"] .pcard:hover{transform: translateY(-7px) scale(1.015)}
+html[data-sfb-card-hover="none"] .pcard:hover .img .emo{transform:none}
+html[data-sfb-card-hover="zoom"] .pcard:hover{transform:none}
+html[data-sfb-card-hover="zoom"] .pcard:hover .img .emo{transform:scale(1.16)}
+.pcard .heart{position:absolute;top:10px;left:10px;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.9);display:grid;place-items:center;color:var(--muted);transition:.15s;backdrop-filter:blur(2px)}
+.pcard .heart:hover{color:var(--pink-text,var(--pink));background:#fff}
+.pcard .heart.on{color:var(--pink-text,var(--pink))}
+.pcard .heart svg{width:17px;height:17px}
+.pcard .badges{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.pill{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:8px}
+.pill-disc{background:var(--pink);color:var(--on-pink,#fff)}
+.pill-new{background:var(--violet);color:var(--on-violet,#fff)}
+.pill-hot{background:var(--amber);color:#2b1a00}
+.pill-outofstock{background:var(--muted);color:var(--on-muted,#fff)}
+/* dim the picture only: opacity on the whole .img also faded the badges laid over it (white-on-translucent, ~1.7:1) */
+.pcard.out-of-stock .img :is(img,picture,video){opacity:.6}
+.pcard .addbar{position:absolute;left:0;right:0;bottom:0;transform:translateY(100%);transition:.25s;padding:10px}
+.pcard:hover .addbar{transform:none}
+.pcard.quickadd-hover-fade .addbar{transform:none;opacity:0;transition:opacity .25s}
+.pcard.quickadd-hover-fade:hover .addbar{opacity:1}
+.pcard.quickadd-always .addbar{transform:none;opacity:1}
+.pcard .addbar button{width:100%;background:linear-gradient(135deg,var(--violet),var(--gradient-end,var(--violet-3)));color:var(--on-gradient,#fff);height:38px;border-radius:10px;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:7px}
+.pcard .addbar button svg{width:16px;height:16px}
+.pcard .body{padding:13px 14px 15px;display:flex;flex-direction:column;gap:7px;flex:1}
+html[data-sfb-density="compact"] .pcard .body{padding:8px 10px 10px;gap:4px}
+html[data-sfb-density="relaxed"] .pcard .body{padding:18px 18px 20px;gap:10px}
+.pcard .brand{font-size:11px;color:var(--muted)}
+.pcard .name{font-size:var(--sfb-product-name-size, 13px);font-weight:600;line-height:1.6;height:42px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pcard .rate{display:flex;align-items:center;gap:5px;font-size:var(--sfb-muted-size, 11px);color:var(--muted)}
+.stars{color:var(--amber-text,var(--amber));letter-spacing:1px;font-size:12px}
+.pcard .price{margin-top:auto;display:flex;align-items:flex-end;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.pcard .price .now{font-size:var(--sfb-price-size, 15px);font-weight:900}
+.pcard .price .now small{font-size:10px;font-weight:600;color:var(--muted)}
+.pcard .price .old{font-size:var(--sfb-muted-size, 11px);color:var(--muted);text-decoration:line-through}
+
+@media(max-width:1000px){
+  .g4{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:680px){
+  .g4,.g3{grid-template-columns:repeat(2,1fr)}
+}
+
+/* حالت نمایش «کاروسل» بخش محصولات (فاز C) — همان .pcard، فقط در یک
+   ردیفِ اسکرول‌شونده‌ی افقی به‌جای گرید؛ بدون کتابخانه‌ی جاوااسکریپت. */
+.pcarousel{--pcarousel-gap:16px;display:flex;gap:var(--pcarousel-gap);overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.pcarousel .pcard{flex:0 0 220px;scroll-snap-align:start}
+@media(max-width:680px){
+  .pcarousel .pcard{flex-basis:150px}
+}
+
+/* تعدادِ ستونِ per-device بخشِ محصول (فازِ D) — مقادیرِ --cols-* روی
+   .rsec (پارتیالِ مشترکِ پیش‌نمایش/عمومی) ست می‌شوند و اینجا فقط
+   مصرف می‌شوند؛ .rsec-cols فقط داخلِ product_section.html استفاده
+   می‌شود، نه انواعِ دیگرِ column-aware (که چیدمانِ ثابتِ فعلی‌شان
+   دست‌نخورده می‌ماند). fallback (بعد از کاما) برایِ نمونه‌های خیلی
+   قدیمی که هرگز از فرمِ جدید عبور نکرده‌اند و متغیرِ CSS ندارند. */
+.grid.rsec-cols{grid-template-columns:repeat(var(--cols-desktop, 4), 1fr)}
+@media(max-width:1000px){
+  .grid.rsec-cols{grid-template-columns:repeat(var(--cols-tablet, 3), 1fr)}
+}
+@media(max-width:680px){
+  .grid.rsec-cols{grid-template-columns:repeat(var(--cols-mobile, 2), 1fr)}
+}
+
+.pcarousel.rsec-cols .pcard{flex-basis:calc((100% - (var(--cols-desktop, 4) - 1) * var(--pcarousel-gap, 16px)) / var(--cols-desktop, 4))}
+@media(max-width:1000px){
+  .pcarousel.rsec-cols .pcard{flex-basis:calc((100% - (var(--cols-tablet, 3) - 1) * var(--pcarousel-gap, 16px)) / var(--cols-tablet, 3))}
+}
+@media(max-width:680px){
+  .pcarousel.rsec-cols .pcard{flex-basis:calc((100% - (var(--cols-mobile, 2) - 1) * var(--pcarousel-gap, 16px)) / var(--cols-mobile, 2))}
+}
+
+/* ---- Product item-row presentation contract (settings: desktop_layout / overflow_mode / show_scrollbar /
+   carousel_navigation / gap — see section_registry.PRODUCT_SECTION_*). Every rule is selected by an attribute
+   that is written only when the merchant (or a recipe) opts in; the historical single scrolling row is the default. */
+.pcarousel[data-overflow="clip"]{overflow-x:hidden}
+.pcarousel[data-overflow="visible"]{overflow:visible;flex-wrap:wrap}
+.pcarousel[data-scrollbar="off"]{scrollbar-width:none;-ms-overflow-style:none}
+.pcarousel[data-scrollbar="off"]::-webkit-scrollbar{display:none}
+@media(min-width:1001px){
+  .pcarousel[data-desktop-layout="grid"]{display:grid;grid-template-columns:repeat(var(--cols-desktop, 4),minmax(0,1fr));overflow:visible;scroll-snap-type:none}
+  .pcarousel.rsec-cols[data-desktop-layout="grid"] .pcard{flex-basis:auto;min-width:0}
+  .grid[data-desktop-layout="carousel"]{display:flex;overflow-x:auto;scroll-snap-type:x mandatory}
+  .grid.rsec-cols[data-desktop-layout="carousel"] .pcard{flex:0 0 calc((100% - (var(--cols-desktop, 4) - 1) * var(--pcarousel-gap, 16px)) / var(--cols-desktop, 4));scroll-snap-align:start}
+}
+.pcarousel-shell{position:relative}
+.pcarousel-arrow{position:absolute;top:calc(50% - 18px);z-index:3;width:36px;height:36px;display:grid;place-items:center;padding:0;border-radius:50%;border:1px solid var(--brand-border,#d9dde3);background:var(--brand-surface,#fff);color:var(--brand-text,#222);font-size:22px;line-height:1;box-shadow:0 2px 8px color-mix(in srgb,var(--brand-text,#222) 16%,transparent);cursor:pointer}
+.pcarousel-arrow[hidden],.pcarousel-dots[hidden]{display:none}
+.pcarousel-prev{inset-inline-start:6px}
+.pcarousel-next{inset-inline-end:6px}
+html[dir="rtl"] .pcarousel-arrow{transform:scaleX(-1)}
+.pcarousel-dots{display:flex;justify-content:center;gap:6px;margin-top:10px}
+.pcarousel-dots button{width:8px;height:8px;padding:0;border:0;border-radius:99px;background:color-mix(in srgb,var(--brand-text,#222) 55%,var(--brand-surface,#fff));cursor:pointer}
+.pcarousel-dots button.active{width:18px;background:var(--brand-primary-text,var(--brand-primary,#17a94d))}
+
+/* ========================================================================
+   Dense universal commerce card
+   ------------------------------------------------------------------------
+   Generic closed presentation (card_style="compact").  It is deliberately
+   data-driven and reusable; no preset/store name appears in the renderer or
+   selectors.  Geometry follows the approved product-heavy marketplace
+   reference: contained product image, short title/price stack and a compact
+   quantity/cart affordance rather than a large hover CTA.
+   ======================================================================== */
+.pcard.style-compact{
+  border-radius:8px;
+  border:1px solid #e5e7eb;
+  box-shadow:0 2px 8px rgba(15,23,42,.04);
+  background:#fff;
+  overflow:hidden;
+  min-width:0;
+  transform:none;
+}
+.pcard.style-compact:hover{
+  transform:none;
+  border-color:#d7dbe2;
+  box-shadow:0 5px 16px rgba(15,23,42,.08);
+}
+.pcard.style-compact .img{
+  aspect-ratio:1.14/1;
+  background:#fff!important;
+  padding:10px 10px 2px;
+  font-size:0;
+}
+.pcard.style-compact .img .cover-photo,
+.pcard.style-compact .img .cover-photo-2{
+  inset:10px 10px 2px!important;
+  width:calc(100% - 20px)!important;
+  height:calc(100% - 12px)!important;
+  object-fit:var(--img-fit,contain)!important;
+}
+.pcard.style-compact .product-placeholder{
+  width:64%;
+  height:64%;
+  color:#c7ccd4;
+  display:grid;
+  place-items:center;
+}
+.pcard.style-compact .product-placeholder svg{width:58px;height:58px}
+.pcard.style-compact .heart{width:28px;height:28px;top:7px;left:7px;background:#fff;border:1px solid #edf0f3}
+.pcard.style-compact .heart svg{width:14px;height:14px}
+.pcard.style-compact .badges{top:7px;right:7px}
+.pcard.style-compact .pill{font-size:9px;line-height:1.4;padding:4px 7px;border-radius:999px}
+.pcard.style-compact .body{
+  padding:8px 10px 4px;
+  gap:4px;
+  min-height:94px;
+  text-align:right;
+}
+.pcard.style-compact .brand{font-size:9.5px;color:#6b6e75;min-height:14px}
+.pcard.style-compact .name{
+  font-size:11.5px;
+  line-height:1.75;
+  height:40px;
+  font-weight:500;
+  color:#2c3037;
+  -webkit-line-clamp:2;
+}
+.pcard.style-compact .rate{font-size:9px;gap:3px}
+.pcard.style-compact .stars{font-size:9px}
+.pcard.style-compact .price{
+  padding-top:4px;
+  border-top:0;
+  justify-content:flex-start;
+  min-height:28px;
+}
+.pcard.style-compact .price .now{font-size:12px;font-weight:600;color:#26292f}
+.pcard.style-compact .price .now small{font-size:8px}
+.pcard.style-compact .price .old{font-size:9px;margin-inline-start:3px;color:#6c6e74}
+.pcard.style-compact .compact-actions{
+  min-height:34px;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:5px;
+  padding:0 10px 9px;
+  direction:ltr;
+}
+.pcard.style-compact .compact-cart{
+  width:30px;
+  height:28px;
+  border:1px solid #83878e;
+  background:#fff;
+  color:#33373e;
+  display:grid;
+  place-items:center;
+  border-radius:2px;
+}
+.pcard.style-compact .compact-cart svg{width:16px;height:16px}
+
+.pcard.style-minimal{border-radius:4px;box-shadow:none}
+.pcard.style-minimal:hover{transform:none;box-shadow:none}
+/* Group C2.5 follow-up — home.css:1375-1377's own `.sec-head` companion
+   for this card style, previously unmirrored (found by this fix's own
+   review while re-checking the doc's claim that no other `.sec-head`
+   overlay existed outside home.css). */
+.product-section:has(.pcard.style-minimal) .sec-head{justify-content:center;text-align:center;margin-bottom:18px}
+.product-section:has(.pcard.style-minimal) .sec-head h2{font-size:16px;font-weight:850}
+.product-section:has(.pcard.style-minimal) .sec-head h2 .bar{display:none}
+
+/* ========================================================================
+   Fashion/campaign sale card (card_style="fashion_sale")
+   ------------------------------------------------------------------------
+   Generic, reusable apparel-catalog treatment: near-chromeless card (no
+   border/radius/shadow -- the ibolak reference butts images against each
+   other with only gutter spacing), a diagonal corner-flag discount ribbon
+   (not a rounded badge), and a compare-price-above/current-price-below
+   stack -- any future apparel-leaning Ready Template may adopt this card,
+   not just the one that introduces it.
+   ======================================================================== */
+.pcard.style-fashion_sale{border-radius:0;box-shadow:none;border-color:transparent;background:transparent}
+.pcard.style-fashion_sale:hover{box-shadow:none;border-color:transparent;transform:none}
+.pcard.style-fashion_sale .img{background:#f4f2f5!important;border-radius:4px}
+/* Reference ribbon sits at the image's physical top-left corner and the
+   wishlist heart at physical top-right -- the exact opposite of this
+   shared card's own RTL-default placement (``.pcard .heart{left:10px}``/
+   ``.pcard .badges{right:10px}``), so both are pinned with plain physical
+   ``left``/``right`` here (not logical ``inset-inline-*``, which would
+   just track text direction and not actually move anything). */
+.pcard.style-fashion_sale .badges{top:8px;left:8px;right:auto;align-items:flex-start}
+/* Part 2C precision pass — the reference's discount marker is one of its
+   strongest repeating visual signals: a floating hot-pink capsule inset
+   from the corner, not a flush L-shaped corner flag. Fully rounded,
+   larger/bolder text, a small shadow so it reads as clearly "on top of"
+   the photo rather than part of it. */
+/* Part 2D — pushed saturation/contrast further (a deeper, more saturated
+   pink + a stronger shadow) so the badge stays unmistakable when scanning
+   the page quickly, per merchant feedback that it was still visually
+   weaker than the reference's repeated markers. */
+.pcard.style-fashion_sale .pill-disc{
+  background:#ff0e6e;color:#fff;border-radius:999px;
+  min-width:36px;padding:5px 12px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12.5px;font-weight:800;line-height:1;
+  box-shadow:0 3px 8px rgba(255,14,110,.45);
+}
+.pcard.style-fashion_sale .heart{top:8px;right:8px;left:auto;width:26px;height:26px}
+/* Part 2D — trimmed further: less body padding, shorter name block,
+   tighter title-to-price gap -- the reference's repeated cards read as
+   noticeably shorter/denser than a first-pass compact card. */
+.pcard.style-fashion_sale .body{padding:5px 2px 1px;gap:2px}
+.pcard.style-fashion_sale .name{font-size:11.5px;font-weight:600;height:24px;line-height:1.25}
+.pcard.style-fashion_sale .price{border-top:0;padding-top:0;display:block}
+.pcard.style-fashion_sale .price .now{
+  display:flex;flex-direction:column-reverse;align-items:flex-start;gap:0;
+  font-size:13px;font-weight:800;color:var(--ink);
+}
+.pcard.style-fashion_sale .price .old{font-size:10.5px;color:var(--muted)}
+@media(max-width:680px){
+  .pcard.style-fashion_sale .pill-disc{min-width:28px;padding:4px 10px;font-size:11px}
+  .pcard.style-fashion_sale .name{font-size:11px;height:26px}
+}
+
+/* Part 2C precision pass — section headings inside a fashion_sale product
+   row read as much more integrated/compact than the shared `.sec-head`
+   rule's own default margin. (Originally written against that rule's
+   pre-Group-C2.5 stale 18px default — Group C2.5 corrected the shared
+   default to 9px, so this 8px override is now only a 1px reduction;
+   this card style has no home.css counterpart at all to re-derive a
+   value from, so the override is left as-is rather than guessed at.)
+   Scoped via :has() to the one card style unique to
+   fashion_promo_catalog so no other template's heading spacing
+   changes. */
+.product-section:has(.pcard.style-fashion_sale){margin:14px 0}
+.product-section:has(.pcard.style-fashion_sale) .sec-head{margin-bottom:8px}
+.product-section:has(.pcard.style-fashion_sale) .sec-head h2{font-size:16px}
+.product-section:has(.pcard.style-fashion_sale) .sec-head h2 .bar{height:16px}
+
+@media(max-width:680px){
+  .pcard.style-compact .img{aspect-ratio:1.05/1}
+  .pcard.style-compact .body{padding:7px 8px 3px;min-height:84px}
+  .pcard.style-compact .name{font-size:10.5px;height:36px}
+  .pcard.style-compact .compact-actions{padding:0 8px 8px}
+}
+
+/* V3 dense marketplace card polish. */
+html[data-sfb-density="compact"] .pcarousel{--pcarousel-gap:8px}
+.pcard.style-compact{border-radius:4px;box-shadow:0 1px 5px rgba(15,23,42,.04)}
+.pcard.style-compact .img{aspect-ratio:1/1.03;padding:6px 6px 0}
+.pcard.style-compact .img .cover-photo,.pcard.style-compact .img .cover-photo-2{inset:6px 6px 0!important;width:calc(100% - 12px)!important;height:calc(100% - 6px)!important}
+.pcard.style-compact .body{padding:6px 8px 2px;gap:2px;min-height:82px}
+.pcard.style-compact .name{font-size:10px;line-height:1.6;height:33px;font-weight:600}
+.pcard.style-compact .brand{font-size:8.5px;min-height:11px}
+.pcard.style-compact .price{padding-top:2px;min-height:23px}
+.pcard.style-compact .price .now{font-size:10.5px;font-weight:700}.pcard.style-compact .price .old{font-size:8px}
+.pcard.style-compact .compact-actions{min-height:31px;padding:0 8px 7px;gap:4px}
+.pcard.style-compact .compact-cart{width:29px;height:26px;background:var(--green);color:#fff;border-color:var(--green);border-radius:2px}
+.pcard.style-compact .compact-cart:hover{background:#0e6b30;border-color:#0e6b30}
+
+.pcard.style-compact .pill{font-size:8px;padding:3px 6px}
+.rsec[data-pattern] .pcard.style-compact{border-color:rgba(255,255,255,.82);box-shadow:none}
+
+/* ========================================================================
+   V4 Golden visual polish — compact commerce CTA
+   ------------------------------------------------------------------------
+   The compact card stays universal, but its quick-add affordance now matches
+   the dense-marketplace reference: a readable green pill plus a small quantity
+   control instead of an icon-only square.
+   ======================================================================== */
+.pcard.style-compact .compact-actions{gap:5px;direction:ltr;align-items:center}
+.pcard.style-compact .compact-cart{
+  width:auto;min-width:58px;height:25px;padding:0 8px;border-radius:999px;
+  display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  background:var(--green);color:#fff;border-color:var(--green);
+  font-size:8.2px;font-weight:800;white-space:nowrap;
+}
+.pcard.style-compact .compact-cart svg{width:11px;height:11px;flex:none}
+.pcard.style-compact .compact-cart-label{display:inline-block;line-height:1}
+
+@media(max-width:680px){
+  .pcard.style-compact .compact-cart{min-width:52px;padding-inline:7px;font-size:7.8px}
+
+}
+
+/* ========================================================================
+   V4.2 readability + real quick-add affordance
+   ======================================================================== */
+.pcard.style-compact .body{min-height:87px}
+.pcard.style-compact .name{font-size:11.1px;line-height:1.62;height:36px}
+.pcard.style-compact .brand{font-size:9.2px;min-height:12px}
+.pcard.style-compact .price .now{font-size:11.5px}
+.pcard.style-compact .price .old{font-size:8.8px}
+.pcard.style-compact .pill{font-size:8.8px;padding:3px 6px}
+.pcard.style-compact .compact-actions{min-height:34px;padding:0 8px 8px;justify-content:flex-start}
+.pcard.style-compact .compact-cart{min-width:64px;height:27px;padding-inline:9px;font-size:9.2px}
+.pcard.style-compact .compact-cart svg{width:12px;height:12px}
+
+@media(max-width:680px){
+  .pcard.style-compact .name{font-size:10.8px;height:35px}
+  .pcard.style-compact .compact-cart{min-width:60px;height:27px;font-size:8.8px}
+}
+
+/* ========================================================================
+   V4.2.2 compact-card readability calibration
+   ======================================================================== */
+.pcard.style-compact .body{min-height:94px}
+.pcard.style-compact .name{font-size:12.6px;line-height:1.62;height:41px;font-weight:650}
+.pcard.style-compact .brand{font-size:10.2px;min-height:14px}
+.pcard.style-compact .rate{font-size:10px}
+.pcard.style-compact .stars{font-size:10px}
+.pcard.style-compact .price{min-height:27px}
+.pcard.style-compact .price .now{font-size:13.1px}
+.pcard.style-compact .price .now small{font-size:9.8px}
+.pcard.style-compact .price .old{font-size:9.7px}
+.pcard.style-compact .pill{font-size:9.4px;padding:3px 7px}
+.pcard.style-compact .compact-actions{min-height:37px;padding-bottom:9px}
+.pcard.style-compact .compact-cart{min-width:70px;height:29px;padding-inline:10px;font-size:10.3px}
+.pcard.style-compact .compact-cart svg{width:13px;height:13px}
+
+@media(max-width:680px){
+  .pcard.style-compact .name{font-size:12px;height:39px}
+  .pcard.style-compact .brand{font-size:10px}
+  .pcard.style-compact .price .now{font-size:12.6px}
+  .pcard.style-compact .compact-cart{min-width:68px;height:30px;font-size:10px}
+}
+
+/* ========================================================================
+   Beauty retail card (card_style="beauty_retail")
+   ------------------------------------------------------------------------
+   Generic cosmetics/perfume commerce treatment: quiet white card, product
+   image first, compact magenta price hierarchy, small status pills, and an
+   always-visible bottom commerce action.  The template still reads all
+   business semantics from product_card_data; when one-click add is unsafe
+   (required variant selection), the action becomes "انتخاب گزینه‌ها" rather
+   than pretending the item can be added directly.
+   ======================================================================== */
+.pcard.style-beauty_retail{
+  background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 2px 8px rgba(32,22,34,.055);overflow:hidden;transform:none;
+}
+.pcard.style-beauty_retail:hover{
+  transform:translateY(-2px);box-shadow:0 7px 18px rgba(45,20,43,.09);
+  border-color:color-mix(in srgb,var(--violet) 22%,var(--line));
+}
+.pcard.style-beauty_retail .img{background:#fff!important;aspect-ratio:1.12/1}
+.pcard.style-beauty_retail.ratio-portrait .img{aspect-ratio:4/5}
+.pcard.style-beauty_retail .cover-photo,
+.pcard.style-beauty_retail .cover-photo-2{object-fit:var(--img-fit,contain)!important;padding:12px}
+.pcard.style-beauty_retail .heart{
+  top:8px;left:8px;width:28px;height:28px;background:rgba(255,255,255,.94);
+  border:1px solid rgba(120,90,115,.15);box-shadow:0 1px 4px rgba(50,20,45,.06)
+}
+.pcard.style-beauty_retail .badges{top:8px;right:8px;left:auto;gap:4px}
+.pcard.style-beauty_retail .pill{
+  border-radius:999px;padding:4px 8px;font-size:9.5px;font-weight:800;
+  box-shadow:none
+}
+/* the palette layer forces the badge fills (disc = accent, new = primary): pair each with ITS derived foreground */
+.pcard.style-beauty_retail .pill-disc{background:var(--pink);color:var(--brand-accent-fg,#fff)}
+.pcard.style-beauty_retail .pill-new{background:var(--violet);color:var(--brand-primary-fg,#fff)}
+.pcard.style-beauty_retail .body{padding:8px 10px 7px;gap:4px;min-height:108px}
+.pcard.style-beauty_retail .brand{font-size:9.5px;color:var(--muted);min-height:13px}
+.pcard.style-beauty_retail .name{
+  font-size:11.5px;line-height:1.65;font-weight:600;height:38px;color:var(--ink)
+}
+.pcard.style-beauty_retail .rate{font-size:9px;min-height:13px}
+.pcard.style-beauty_retail .stars{font-size:9px}
+.pcard.style-beauty_retail .price{border-top:0;padding-top:1px;min-height:31px}
+.pcard.style-beauty_retail .price .now{
+  color:var(--violet-text,var(--violet));font-size:12.5px;font-weight:850;
+  display:flex;align-items:baseline;gap:5px;flex-wrap:wrap
+}
+.pcard.style-beauty_retail .price .old{font-size:9.5px;color:var(--muted);font-weight:500}
+.pcard.style-beauty_retail .beauty-actions{position:relative;z-index:3;padding:0 10px 10px}
+.pcard.style-beauty_retail .beauty-cart{
+  width:100%;min-height:34px;border:0;border-radius:4px;padding:7px 10px;
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  background:var(--pink);color:var(--brand-accent-fg,#fff);
+  font-size:10.5px;font-weight:800;line-height:1.45;text-decoration:none;
+  transition:filter .15s ease,transform .15s ease
+}
+.pcard.style-beauty_retail .beauty-cart:hover{filter:brightness(.94);transform:translateY(-1px)}
+.pcard.style-beauty_retail .beauty-cart--select{background:var(--pink)}
+@media(max-width:680px){
+  .pcard.style-beauty_retail{border-radius:8px}
+  .pcard.style-beauty_retail .body{padding:7px 8px 6px;min-height:101px}
+  .pcard.style-beauty_retail .name{font-size:10.7px;height:36px}
+  .pcard.style-beauty_retail .price .now{font-size:11.5px}
+  .pcard.style-beauty_retail .beauty-actions{padding:0 8px 8px}
+  .pcard.style-beauty_retail .beauty-cart{min-height:32px;font-size:9.8px}
+}
+/* Group C2.5 follow-up — home.css:1102-1111,1116-1118's own `.sec-head`
+   companions for this card style (a palette-background variant and a
+   plain one), previously unmirrored (found by this fix's own review). */
+.rsec[data-bg-mode="palette"]:has(.pcard.style-beauty_retail) .sec-head h2{color:#fff}
+.rsec[data-bg-mode="palette"]:has(.pcard.style-beauty_retail) .sec-head .btn{background:#fff;border-color:#fff;color:var(--violet-text,var(--violet))}
+.product-section:has(.pcard.style-beauty_retail) .sec-head{margin-bottom:10px}
+.product-section:has(.pcard.style-beauty_retail) .sec-head h2{font-size:15px}
+.product-section:has(.pcard.style-beauty_retail) .sec-head h2 .bar{background:var(--violet);height:17px;width:3px}
+
+/* ========================================================================
+   Compact horizontal retail list card (card_style="retail_list")
+   ------------------------------------------------------------------------
+   Generic dense merchandising row for grouped/category spotlights. Business
+   semantics still come exclusively from product_card_data; this presentation
+   deliberately has no quick-add affordance and works with any Store data.
+   ======================================================================== */
+.pcard.style-retail_list{
+  display:grid;
+  grid-template-columns:78px minmax(0,1fr);
+  min-height:96px;
+  border:0;
+  border-bottom:1px solid #ece8ed;
+  border-radius:0;
+  box-shadow:none;
+  background:#fff;
+  overflow:hidden;
+  transform:none;
+}
+.pcard.style-retail_list:hover{transform:none;box-shadow:none;border-color:#e4dfe6}
+.pcard.style-retail_list:last-child{border-bottom:0}
+.pcard.style-retail_list .img{
+  grid-column:1;
+  grid-row:1;
+  aspect-ratio:auto;
+  min-height:94px;
+  background:#fff!important;
+  padding:8px;
+}
+.pcard.style-retail_list .img .cover-photo,
+.pcard.style-retail_list .img .cover-photo-2{
+  inset:8px!important;
+  width:calc(100% - 16px)!important;
+  height:calc(100% - 16px)!important;
+  object-fit:var(--img-fit,contain)!important;
+}
+.pcard.style-retail_list .body{
+  grid-column:2;
+  grid-row:1;
+  min-height:94px;
+  padding:10px 10px 9px 5px;
+  gap:4px;
+  justify-content:center;
+  text-align:right;
+}
+.pcard.style-retail_list .name{
+  height:auto;
+  min-height:34px;
+  font-size:11px;
+  line-height:1.55;
+  font-weight:600;
+  -webkit-line-clamp:2;
+}
+.pcard.style-retail_list .price{padding-top:0;border-top:0;min-height:22px}
+.pcard.style-retail_list .price .now{font-size:11.5px;font-weight:800;color:var(--violet-text,var(--violet))}
+.pcard.style-retail_list .price .old{font-size:9px}
+.pcard.style-retail_list .badges{top:5px;right:5px}
+.pcard.style-retail_list .pill{font-size:8px;padding:3px 5px}
+@media(max-width:680px){
+  .pcard.style-retail_list{grid-template-columns:68px minmax(0,1fr);min-height:86px}
+  .pcard.style-retail_list .img,.pcard.style-retail_list .body{min-height:84px}
+  .pcard.style-retail_list .name{font-size:10.5px}
+}
+
+/* Chocolate specialty-retail card — generic registered card style. */
+.pcard.style-chocolate_retail{border:1px solid #e3ddd6;border-radius:13px;background:#fff;box-shadow:0 4px 12px rgba(71,47,27,.12);overflow:hidden}
+.pcard.style-chocolate_retail:hover{box-shadow:0 8px 20px rgba(71,47,27,.17);transform:translateY(-2px)}
+.pcard.style-chocolate_retail .img{background:#fff!important;aspect-ratio:1/1;border-radius:13px 13px 22% 0;overflow:hidden}
+.pcard.style-chocolate_retail .cover-photo,.pcard.style-chocolate_retail .cover-photo-2{object-fit:var(--img-fit,contain)!important;padding:8px}
+.pcard.style-chocolate_retail .badges{top:8px;right:8px;left:auto}
+.pcard.style-chocolate_retail .pill-disc{background:#7B4518;color:#fff}
+.pcard.style-chocolate_retail .body{padding:10px 11px 7px;gap:4px;min-height:114px;text-align:right}
+.pcard.style-chocolate_retail .brand{font-size:9px;color:#756d66}
+.pcard.style-chocolate_retail .name{font-size:11.5px;line-height:1.65;height:38px;color:#2b2520}
+.pcard.style-chocolate_retail .rate{font-size:9px}
+.pcard.style-chocolate_retail .price{border-top:0;padding-top:2px;min-height:30px}
+.pcard.style-chocolate_retail .price .now{color:#2b2520;font-size:12.5px;font-weight:800}
+.pcard.style-chocolate_retail .price .old{font-size:9px;color:#756d66}
+.pcard.style-chocolate_retail .chocolate-actions{position:relative;z-index:3;padding:0 11px 11px}
+.pcard.style-chocolate_retail .chocolate-cart{width:100%;min-height:34px;display:flex;align-items:center;justify-content:center;border:0;border-radius:999px;background:#7B4518;color:#fff;font:inherit;font-size:10px;font-weight:800;cursor:pointer;text-decoration:none}
+.pcard.style-chocolate_retail .chocolate-cart:hover{background:#663811}
+.pcard.style-chocolate_retail .chocolate-cart--select{background:#9A622F}
+@media(max-width:680px){
+  .pcard.style-chocolate_retail{border-radius:10px}
+  .pcard.style-chocolate_retail .body{padding:8px 9px 6px;min-height:104px}
+  .pcard.style-chocolate_retail .name{font-size:10.5px;height:35px}
+  .pcard.style-chocolate_retail .price .now{font-size:11px}
+  .pcard.style-chocolate_retail .chocolate-actions{padding:0 9px 9px}
+  .pcard.style-chocolate_retail .chocolate-cart{min-height:32px;font-size:9.5px}
+}
+/* Group C2.5 follow-up — home.css:1308-1310's own `.sec-head` companion
+   for this card style, previously unmirrored (found by this fix's own
+   review). */
+.product-section:has(.pcard.style-chocolate_retail) .sec-head{margin-bottom:14px}
+.product-section:has(.pcard.style-chocolate_retail) .sec-head h2{font-size:16px;color:#33271d}
+.product-section:has(.pcard.style-chocolate_retail) .sec-head h2 .bar{background:#7B4518}
+
+/* Generic premium dark commerce card (card_style="luxury_dark"). */
+.pcard.style-luxury_dark{background:var(--theme-card-bg,#171717);border:1px solid color-mix(in srgb,var(--theme-primary,#d4af37) 22%,var(--theme-border,#3a3218));border-radius:var(--sfb-radius,18px);box-shadow:0 12px 30px rgba(0,0,0,.18);overflow:hidden;transform:none;color:var(--theme-text,#f8f1cf)}
+.pcard.style-luxury_dark:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--theme-primary,#d4af37) 54%,var(--theme-border,#3a3218));box-shadow:0 16px 36px rgba(0,0,0,.28)}
+.pcard.style-luxury_dark .img{background:linear-gradient(145deg,#1a1813,#0d0d0d)!important;overflow:hidden}.pcard.style-luxury_dark .img:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,transparent 62%,rgba(0,0,0,.16))}
+.pcard.style-luxury_dark .cover-photo,.pcard.style-luxury_dark .cover-photo-2{object-fit:var(--img-fit,contain)!important;padding:8px}
+.pcard.style-luxury_dark .body{padding:11px 12px 9px;gap:5px}.pcard.style-luxury_dark .brand{color:var(--theme-muted,#c6b86a);font-size:9.5px}.pcard.style-luxury_dark .name{color:var(--theme-text,#f8f1cf);font-size:12px;line-height:1.7;height:40px}.pcard.style-luxury_dark .price{border-color:color-mix(in srgb,var(--theme-border,#3a3218) 80%,transparent)}.pcard.style-luxury_dark .price .now{color:var(--theme-price-text,var(--theme-price,#ffd54a));font-weight:850}.pcard.style-luxury_dark .price .old{color:var(--theme-muted,#9d9060)}
+.pcard.style-luxury_dark .heart{background:rgba(10,10,10,.78);border-color:color-mix(in srgb,var(--theme-primary,#d4af37) 24%,transparent);color:var(--theme-text,#f8f1cf);backdrop-filter:blur(6px)}.pcard.style-luxury_dark .pill{border-radius:999px}.pcard.style-luxury_dark .pill-disc{background:var(--theme-accent,#f59e0b);color:#080603}
+.pcard.style-luxury_dark .addbar{position:absolute;left:10px;right:auto;bottom:10px;width:auto;padding:0;opacity:1;transform:none;background:transparent}.pcard.style-luxury_dark .addbar button{width:36px;height:36px;padding:0;border-radius:10px;background:linear-gradient(135deg,var(--theme-primary,#d4af37),var(--theme-accent,#f59e0b));color:#090703;font-size:0;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,.28)}.pcard.style-luxury_dark .addbar button svg{width:17px;height:17px}
+.product-section:has(.pcard.style-luxury_dark) .sec-head h2{color:var(--theme-text,#f8f1cf)}.product-section:has(.pcard.style-luxury_dark) .sec-head h2 .bar{background:var(--theme-primary,#d4af37)}.product-section:has(.pcard.style-luxury_dark) .sec-head .btn{border-color:var(--theme-border,#3a3218);color:var(--brand-primary-text,var(--theme-primary,#d4af37));background:var(--theme-card-bg,#171717)}
+@media(max-width:680px){.pcard.style-luxury_dark{border-radius:14px}.pcard.style-luxury_dark .body{padding:8px 9px 7px}.pcard.style-luxury_dark .name{font-size:10.5px;height:34px}.pcard.style-luxury_dark .addbar{left:7px;bottom:7px}.pcard.style-luxury_dark .addbar button{width:32px;height:32px}.pcard.style-luxury_dark .cover-photo,.pcard.style-luxury_dark .cover-photo-2{padding:5px}}
+
+/* A8 reusable card vocabulary. These selectors only shape presentation;
+   product truth continues to come from ProductCardData in the shared partial. */
+.pcard.style-marketplace_price,
+.pcard.style-price_first,
+.pcard.style-technical_spec{
+  border-radius:calc(var(--sfb-radius,12px) * .65);box-shadow:none;
+}
+.pcard.style-marketplace_price .img,
+.pcard.style-price_first .img,
+.pcard.style-technical_spec .img{background:var(--theme-card-bg,#fff)!important}
+.pcard.style-marketplace_price .price,
+.pcard.style-price_first .price{border-top:0;padding-top:2px}
+.pcard.style-marketplace_price .price .now,
+.pcard.style-price_first .price .now{font-size:clamp(14px,1.4vw,18px);color:var(--theme-price-text,var(--theme-price,var(--theme-primary,#6848ff)))}
+.pcard.style-price_first .body{display:grid;grid-template-areas:"price" "name" "brand" "rate"}
+.pcard.style-price_first .price{grid-area:price;margin:0}.pcard.style-price_first .name{grid-area:name}.pcard.style-price_first .brand{grid-area:brand}.pcard.style-price_first .rate{grid-area:rate}
+
+.pcard.style-editorial_minimal,
+.pcard.style-shelf_editorial{
+  border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible;
+}
+.pcard.style-editorial_minimal:hover,
+.pcard.style-shelf_editorial:hover{box-shadow:none;transform:none}
+.pcard.style-editorial_minimal .img{aspect-ratio:4/5}
+.pcard.style-editorial_minimal .body,.pcard.style-shelf_editorial .body{padding-inline:0}
+.pcard.style-editorial_minimal .price,.pcard.style-shelf_editorial .price{border-top:0}
+.pcard.style-shelf_editorial{border-bottom:3px solid var(--theme-primary,var(--violet))}
+.pcard.style-shelf_editorial .img{aspect-ratio:3/4;border-radius:var(--sfb-radius,12px) var(--sfb-radius,12px) 0 0}
+
+.pcard.style-retail_row{
+  display:grid;grid-template-columns:minmax(88px,30%) 1fr;border-radius:8px;min-height:118px;
+}
+.pcard.style-retail_row .img{grid-column:1;grid-row:1;aspect-ratio:auto;min-height:116px}
+.pcard.style-retail_row .body{grid-column:2;grid-row:1;padding:12px;min-width:0}
+.pcard.style-retail_row .name{height:auto}.pcard.style-retail_row .price{border-top:0}
+
+.pcard.style-soft_capsule{border-radius:calc(var(--sfb-radius,18px) * 1.65);padding:7px;background:var(--theme-card-bg,#fff)}
+.pcard.style-soft_capsule .img{border-radius:calc(var(--sfb-radius,18px) * 1.25)}
+.pcard.style-soft_capsule .body{padding-inline:9px}.pcard.style-soft_capsule .price{border-top:0}
+
+.pcard.style-beauty_glass{
+  background:color-mix(in srgb,var(--theme-card-bg,#fff) 76%,transparent);
+  border-color:color-mix(in srgb,var(--theme-primary,#6848ff) 22%,transparent);
+  box-shadow:0 16px 38px color-mix(in srgb,var(--theme-primary,#6848ff) 10%,transparent);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+}
+.pcard.style-beauty_glass .img{margin:8px;border-radius:calc(var(--sfb-radius,14px) * .8);aspect-ratio:1/1}
+.pcard.style-beauty_glass .price{border-color:color-mix(in srgb,var(--theme-primary,#6848ff) 18%,transparent)}
+
+.pcard.style-paper_frame{padding:9px 9px 0;border-radius:2px;background:var(--theme-card-bg,#fff);box-shadow:0 8px 0 color-mix(in srgb,var(--theme-text,#161822) 8%,transparent)}
+.pcard.style-paper_frame .img{aspect-ratio:4/5}.pcard.style-paper_frame .body{padding-inline:3px}.pcard.style-paper_frame .price{border:0}
+
+.pcard.style-portrait_round{border:0;background:transparent;box-shadow:none;text-align:center}
+.pcard.style-portrait_round:hover{box-shadow:none}.pcard.style-portrait_round .img{aspect-ratio:1;border-radius:50%;margin:10px}
+.pcard.style-portrait_round .body{align-items:center}.pcard.style-portrait_round .price{border:0;justify-content:center}
+
+.pcard.style-catalog_index{border-radius:0;border-inline:0;border-top:0;box-shadow:none}
+.pcard.style-catalog_index:hover{transform:none;box-shadow:none}.pcard.style-catalog_index .img{aspect-ratio:4/3}
+.pcard.style-catalog_index .name{font-weight:800}.pcard.style-catalog_index .body{border-inline-start:4px solid var(--theme-primary,var(--violet))}
+
+.pcard.style-shipping_label{border:2px dashed var(--theme-border,var(--line));border-radius:4px;box-shadow:none}
+.pcard.style-shipping_label .body{font-family:ui-monospace,"Courier New",monospace}
+.pcard.style-shipping_label .price{border-top-style:solid}
+
+.pcard.style-technical_spec .body{font-family:ui-monospace,"Courier New",monospace;gap:4px}
+.pcard.style-technical_spec .name{font-weight:800}.pcard.style-technical_spec .price{border-top-style:solid}
+.pcard.style-technical_spec .brand{text-transform:uppercase;letter-spacing:.06em}
+
+.pcard.style-tech_neon{
+  background:var(--theme-card-bg,#111827);color:var(--theme-text,#f8fafc);
+  border-color:var(--theme-primary,#22d3ee);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--theme-primary,#22d3ee) 22%,transparent),0 0 24px color-mix(in srgb,var(--theme-primary,#22d3ee) 16%,transparent);
+}
+.pcard.style-tech_neon .name{color:inherit}.pcard.style-tech_neon .price .now{color:var(--brand-primary-text,var(--theme-primary,#22d3ee))}
+.pcard.style-tech_neon .price{border-color:color-mix(in srgb,var(--theme-primary,#22d3ee) 34%,transparent)}
+
+.pcard.style-bold_outline{border:3px solid var(--theme-text,#161822);border-radius:0;box-shadow:6px 6px 0 var(--theme-primary,var(--violet));transform:none}
+.pcard.style-bold_outline:hover{transform:translate(-2px,-2px);box-shadow:8px 8px 0 var(--theme-primary,var(--violet))}
+.pcard.style-bold_outline .name{font-weight:900}.pcard.style-bold_outline .price{border-top:2px solid currentColor}
+
+.pcard.badge-treatment-sale .pill-disc{
+  border-radius:3px;padding:5px 9px;background:var(--theme-accent,var(--pink));
+  box-shadow:3px 3px 0 color-mix(in srgb,var(--theme-text,#161822) 82%,transparent);
+}
+
+@media(max-width:680px){
+  .pcard.style-retail_row{grid-template-columns:76px 1fr;min-height:96px}
+  .pcard.style-retail_row .img{min-height:94px}
+  .pcard.style-bold_outline{border-width:2px;box-shadow:4px 4px 0 var(--theme-primary,var(--violet))}
+  .pcard.style-soft_capsule{padding:5px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .pcard.style-bold_outline:hover{transform:none}
+}
+
+/* Public product quick view (MODAL). Trigger sits on the card; the dialog is a
+   fixed, centered overlay driven by the shared sfbOverlay primitive. RTL-safe:
+   uses logical inset properties and dir-agnostic centering. */
+.pcard-quickview{position:static}
+.pcard-qv-trigger{
+  position:absolute;inset-block-start:10px;inset-inline-start:10px;z-index:4;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 10px;border:0;border-radius:999px;cursor:pointer;
+  font:inherit;font-size:.78rem;line-height:1;
+  background:color-mix(in srgb,var(--theme-surface,#fff) 88%,transparent);
+  color:var(--theme-text,#161822);
+  box-shadow:0 2px 8px rgba(0,0,0,.14);
+  opacity:0;transform:translateY(-4px);
+  transition:opacity .18s ease,transform .18s ease;
+}
+.pcard:hover .pcard-qv-trigger,
+.pcard-qv-trigger:focus-visible{opacity:1;transform:none}
+.pcard-qv-trigger svg{width:16px;height:16px}
+.pcard-qv-trigger:focus-visible{outline:2px solid var(--focus-ink);outline-offset:2px;box-shadow:0 0 0 2px var(--focus-halo)}
+
+.pcard-qv-backdrop{
+  position:fixed;inset:0;z-index:1000;
+  background:rgba(15,17,26,.55);
+}
+.pcard-qv-dialog{
+  position:fixed;z-index:1001;
+  inset-block-start:50%;inset-inline-start:50%;
+  transform:translate(50%,-50%); /* RTL: inline-start origin, shift back on inline axis */
+  inset-inline-end:auto;
+  width:min(560px,92vw);max-height:88vh;overflow:auto;
+  display:grid;grid-template-columns:minmax(0,42%) 1fr;gap:18px;
+  padding:22px;border-radius:16px;
+  background:var(--theme-surface,#fff);color:var(--theme-text,#161822);
+  box-shadow:0 24px 60px rgba(0,0,0,.28);
+}
+html[dir="ltr"] .pcard-qv-dialog{transform:translate(-50%,-50%)}
+.pcard-qv-close{
+  position:absolute;inset-block-start:8px;inset-inline-end:12px;
+  border:0;background:var(--theme-surface,#fff);border-radius:8px;cursor:pointer;
+  font-size:1.6rem;line-height:1;color:var(--theme-text,#161822);
+}
+.pcard-qv-close:focus-visible{outline:2px solid var(--theme-primary,var(--violet));outline-offset:2px}
+.pcard-qv-media{border-radius:12px;overflow:hidden;background:#f4f4f6;display:grid;place-items:center;min-height:160px}
+.pcard-qv-media img{width:100%;height:100%;object-fit:var(--img-fit,cover)}
+.pcard-qv-media-placeholder{font-size:3rem}
+.pcard-qv-info{display:flex;flex-direction:column;gap:10px;min-width:0}
+.pcard-qv-brand{font-size:.82rem;color:var(--theme-muted,var(--muted))}
+.pcard-qv-name{margin:0;font-size:1.12rem;font-weight:800}
+.pcard-qv-price{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:800}
+.pcard-qv-price .old{color:var(--theme-muted,var(--muted));text-decoration:line-through;font-weight:500;font-size:.9em}
+.pcard-qv-actions{margin-block-start:auto;display:flex;flex-direction:column;gap:8px}
+.pcard-qv-add{
+  border:0;border-radius:10px;padding:12px 14px;cursor:pointer;font:inherit;font-weight:700;
+  background:var(--theme-primary,var(--violet));color:var(--on-violet,#fff);
+}
+.pcard-qv-detail{
+  text-align:center;text-decoration:none;padding:10px 14px;border-radius:10px;
+  border:1px solid color-mix(in srgb,var(--theme-text,#161822) 22%,transparent);
+  color:inherit;font-weight:600;
+}
+.pcard-qv-oos{font-weight:700;color:var(--theme-muted,var(--muted))}
+
+@media(max-width:680px){
+  .pcard-qv-trigger{opacity:1;transform:none}
+  .pcard-qv-dialog{grid-template-columns:1fr;width:94vw}
+}
+@media(prefers-reduced-motion:reduce){
+  .pcard-qv-trigger{transition:none}
+}
+
+/* ========================================================================
+   Reference-fidelity card styles (REF-TEMPLATES-51-53)
+   ------------------------------------------------------------------------
+   `center_stepper` — centred card on its OWN white tile with a cart action + quantity stepper.
+   `pastel_flat`    — flat card whose picture sits on a pastel tile; the text beneath sits on the
+                      PAGE/band, so it follows the page text tokens (never a fixed dark literal).
+   Both are selected only through the registered `card_style` setting.
+   ======================================================================== */
+.pcard.style-center_stepper{border-radius:8px;border:1px solid #e6e8ec;background:#fff;color:#2c3037;box-shadow:none;overflow:hidden;min-width:0;transform:none}
+.pcard.style-center_stepper:hover{transform:none;border-color:#d7dbe2;box-shadow:0 4px 14px rgba(15,23,42,.08)}
+.pcard.style-center_stepper .img{aspect-ratio:1/1;background:#fff!important;padding:8px 8px 0;font-size:0}
+.pcard.style-center_stepper.ratio-portrait .img{aspect-ratio:1/1.2}
+.pcard.style-center_stepper.ratio-landscape .img{aspect-ratio:4/3}
+.pcard.style-center_stepper .img .cover-photo,
+.pcard.style-center_stepper .img .cover-photo-2{inset:8px 8px 0!important;width:calc(100% - 16px)!important;height:calc(100% - 8px)!important;object-fit:var(--img-fit,contain)!important}
+.pcard.style-center_stepper .heart{width:26px;height:26px;top:7px;left:7px;background:#fff;border:1px solid #edf0f3}
+.pcard.style-center_stepper .badges{top:7px;right:7px}
+.pcard.style-center_stepper .pill{font-size:9px;line-height:1.4;padding:3px 7px;border-radius:999px}
+.pcard.style-center_stepper .body{padding:10px 12px 4px;gap:4px;text-align:center;min-height:0}
+.pcard.style-center_stepper .brand:empty{display:none}
+.pcard.style-center_stepper .name{font-size:11.5px;line-height:1.8;height:42px;font-weight:600;color:#2c3037;text-align:center;-webkit-line-clamp:2}
+.pcard.style-center_stepper .rate{justify-content:center;font-size:9px}
+.pcard.style-center_stepper .price{justify-content:center;border-top:0;padding-top:2px;min-height:42px}
+.pcard.style-center_stepper .price .now{font-size:11.5px;font-weight:700;color:var(--price-text,#2b2f36);text-align:center}
+.pcard.style-center_stepper .price .old{display:block;font-size:9px;color:#6b7078;margin:0}
+.pcard.style-center_stepper .stp-actions{position:relative;z-index:3;padding:6px 12px 14px;margin-top:auto}
+.pcard.style-center_stepper .stp-row{display:flex;align-items:center;gap:6px;direction:ltr}
+.pcard.style-center_stepper .stp-cart{flex:0 0 32px;width:32px;height:32px;border-radius:4px;display:grid;place-items:center;background:var(--brand-primary,#17a94d);color:var(--brand-primary-fg,#fff);border:0}
+.pcard.style-center_stepper .stp-cart svg{width:16px;height:16px}
+.pcard.style-center_stepper .stp-qty{flex:1;min-width:0;height:32px;display:grid;grid-template-columns:24px minmax(0,1fr) 24px;align-items:stretch;border:1px solid #d9dce1;border-radius:4px;background:#f4f5f7;overflow:hidden;color:#4d525a}
+.pcard.style-center_stepper .stp-qty button{display:grid;place-items:center;font-size:14px;line-height:1;color:inherit;background:none;border:0}
+.pcard.style-center_stepper .stp-qty input{width:100%;min-width:0;border:0;border-inline:1px solid #d9dce1;background:#fff;color:#2c3037;text-align:center;font-size:11px;padding:0;-moz-appearance:textfield;appearance:textfield}
+.pcard.style-center_stepper .stp-qty input::-webkit-outer-spin-button,
+.pcard.style-center_stepper .stp-qty input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.pcard.style-center_stepper .stp-select{display:flex;align-items:center;justify-content:center;height:32px;border-radius:4px;background:var(--brand-primary,#17a94d);color:var(--brand-primary-fg,#fff);font-size:10.5px;font-weight:700;text-decoration:none}
+.rsec[data-pattern] .pcard.style-center_stepper{border-color:rgba(255,255,255,.82)}
+@media(max-width:680px){.pcard.style-center_stepper .name{font-size:10.5px;height:56px}.pcard.style-center_stepper .stp-actions{padding:4px 8px 10px}}
+
+.pcard.style-pastel_flat{border:0;border-radius:0;background:transparent;box-shadow:none;transform:none;overflow:visible;min-width:0}
+.pcard.style-pastel_flat:hover{transform:none;box-shadow:none}
+.pcard.style-pastel_flat .img{aspect-ratio:1/1;border-radius:0;font-size:0;background:#f9d8ea!important}
+.pcard.style-pastel_flat .img .cover-photo,
+.pcard.style-pastel_flat .img .cover-photo-2{inset:7%!important;width:86%!important;height:86%!important;object-fit:var(--img-fit,contain)!important;mix-blend-mode:multiply}
+.pcard.style-pastel_flat .heart,.pcard.style-pastel_flat .addbar{display:none}
+.pcard.style-pastel_flat .badges{top:0;right:0;left:auto}
+.pcard.style-pastel_flat .pill{border-radius:0;font-size:9px;padding:3px 8px}
+/* badge backgrounds are forced by the palette layer (disc = accent, new = primary): pair each with ITS derived foreground */
+.pcard.style-pastel_flat .pill-disc{color:var(--brand-accent-fg,#fff)}
+.pcard.style-pastel_flat .pill-new{color:var(--brand-primary-fg,#fff)}
+.pcard.style-pastel_flat .body{padding:12px 4px 0;gap:6px;text-align:center;min-height:0}
+.pcard.style-pastel_flat .brand:empty{display:none}
+.pcard.style-pastel_flat .name{font-size:11.5px;line-height:1.9;height:auto;min-height:44px;font-weight:500;color:var(--sfb-section-fg,var(--brand-text,var(--ink)));text-align:center;-webkit-line-clamp:2}
+.pcard.style-pastel_flat .rate{justify-content:center}
+.pcard.style-pastel_flat .price{justify-content:center;border-top:0;padding:0;min-height:0}
+.pcard.style-pastel_flat .price .now{font-size:11.5px;font-weight:500;color:var(--sfb-section-fg,var(--brand-muted));text-align:center}
+.pcard.style-pastel_flat .price .old{display:inline;font-size:10px;margin-inline-start:6px;color:var(--sfb-section-fg,var(--brand-muted))}
+.grid>.pcard.style-pastel_flat:nth-child(8n+1) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+1) .img{background:#f9d8ea!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+2) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+2) .img{background:#e0d2f8!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+3) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+3) .img{background:#d7f3dc!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+4) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+4) .img{background:#fde6d2!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+5) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+5) .img{background:#d8f0fb!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+6) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+6) .img{background:#fdf6c9!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+7) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+7) .img{background:#f9d3dd!important}
+.grid>.pcard.style-pastel_flat:nth-child(8n+8) .img,.pcarousel>.pcard.style-pastel_flat:nth-child(8n+8) .img{background:#d6defa!important}
+@media(max-width:680px){.pcard.style-pastel_flat .name{font-size:10.5px;min-height:40px}}
+
+/* «استعلام قیمت»: به‌جای بهای عددی؛ رنگ از توکن‌های موجود، کنتراست AA، ناحیه‌ی لمسی حداقل ۴۴ پیکسل. */
+.pcard .price .now.price-inquiry{font-size:var(--sfb-price-size,14px);font-weight:800}
+.pcard .price-inquiry-link,.pcard .price-inquiry-label{display:inline-flex;align-items:center;min-height:32px;color:var(--violet-text,var(--ink));font-weight:800}
+.pcard .price-inquiry-link{text-decoration:underline;text-underline-offset:3px;position:relative;z-index:2}
+.pcard .price-inquiry-link:hover{text-decoration-thickness:2px}
+.pcard-qv-price .price-inquiry{font-weight:800;color:var(--violet-text,var(--ink))}
+
+/* ---- V5 six-site card styles (54-59). Presentation only; business data comes from product_card_data. ---- */
+.pcard-cta{padding:0 var(--pcard-pad,0) 4px}
+.pcard-cta-btn{display:inline-flex;align-items:center;justify-content:center;margin-top:10px;padding:7px 18px;border-radius:var(--sfb-button-radius,4px);background:var(--brand-accent,#6aaa56);color:var(--brand-accent-fg,#fff);font-size:12.5px;font-weight:600;line-height:1.4;text-decoration:none;cursor:pointer}
+.pcard-cta-btn:hover{filter:brightness(.94)}
+.pcard.style-lifestyle_cart{background:transparent;border:0;box-shadow:none;border-radius:0;--pcard-pad:0}
+.pcard.style-lifestyle_cart:hover{transform:none;box-shadow:none}
+.pcard.style-lifestyle_cart .img{background:var(--brand-surface-soft,#f4f2ee)!important;aspect-ratio:3/4;border-radius:var(--sfb-radius,4px);overflow:hidden}
+.pcard.style-lifestyle_cart .cover-photo,.pcard.style-lifestyle_cart .cover-photo-2{object-fit:var(--img-fit,cover)!important}
+.pcard.style-lifestyle_cart .body{padding:12px 0 0;text-align:start}
+.pcard.style-lifestyle_cart .name{font-size:13.5px;font-weight:500;color:var(--brand-text,#27221c);line-height:1.7}
+.pcard.style-lifestyle_cart .price .now{font-size:13px;font-weight:400;color:var(--theme-price,var(--brand-muted,#464136))}
+.pcard.style-outline_plain{background:var(--brand-surface,#fff);border:1px solid var(--line,#e3e0d8);border-radius:var(--sfb-radius,4px);box-shadow:none;overflow:hidden;padding:3px}
+.pcard.style-outline_plain:hover{transform:none;box-shadow:none}
+.pcard.style-outline_plain .img{background:var(--brand-surface-soft,#f4f2ee)!important;aspect-ratio:3/4;border-radius:2px;overflow:hidden}
+.pcard.style-outline_plain .cover-photo,.pcard.style-outline_plain .cover-photo-2{object-fit:var(--img-fit,cover)!important}
+.pcard.style-outline_plain .body{padding:10px 8px 8px;text-align:start}
+.pcard.style-outline_plain .name{font-size:13.5px;font-weight:700;color:var(--brand-text,#27221c)}
+.pcard.style-outline_plain .price{margin-top:2px}
+.pcard.style-outline_plain .price .now{font-size:12.5px;font-weight:400;color:var(--theme-price,var(--brand-muted,#464136))}
+
+/* ---- V5 six-site vocabulary: gallery_pink / campaign_round / cocoa_gift (colours come from the semantic tokens) ---- */
+.pcard.style-gallery_pink{background:var(--brand-surface,#fff);border:0;border-radius:18px;box-shadow:0 2px 14px color-mix(in srgb,var(--brand-primary,#db2777) 14%,transparent);overflow:hidden;--pcard-pad:12px}
+.pcard.style-gallery_pink:hover{transform:translateY(-2px);box-shadow:0 6px 22px color-mix(in srgb,var(--brand-primary,#db2777) 22%,transparent)}
+.pcard.style-gallery_pink .img{background:var(--brand-surface,#fff)!important;aspect-ratio:1/1;border-radius:0}
+.pcard.style-gallery_pink .cover-photo,.pcard.style-gallery_pink .cover-photo-2{object-fit:var(--img-fit,contain)!important}
+.pcard.style-gallery_pink .body{padding:10px 16px 16px;text-align:start;display:grid;gap:4px}
+.pcard.style-gallery_pink .brand{order:-1;font-size:10.5px;font-weight:700;color:var(--brand-primary-text,var(--brand-primary,#db2777))}
+.pcard.style-gallery_pink .name{font-size:13px;font-weight:600;color:var(--brand-text,#0f172a);line-height:1.8}
+.pcard.style-gallery_pink .price .now{display:flex;flex-direction:column-reverse;align-items:flex-start;gap:1px;font-size:14.5px;font-weight:800;color:var(--theme-price,var(--brand-text,#0f172a))}
+.pcard.style-gallery_pink .price .old{font-size:11px;font-weight:400;color:var(--brand-muted,#94a3b8);text-decoration:line-through}
+.pcard.style-gallery_pink .badges{top:12px;right:12px}
+.pcard.style-gallery_pink .pill-disc{background:var(--brand-primary,#db2777);color:var(--brand-primary-fg,#fff);border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800}
+.pcard.style-campaign_round{background:var(--brand-surface,#fff);border:1px solid var(--brand-border,#eee);border-radius:14px;box-shadow:0 1px 6px color-mix(in srgb,var(--brand-text,#222) 8%,transparent);overflow:hidden}
+.pcard.style-campaign_round:hover{transform:none;box-shadow:0 4px 14px color-mix(in srgb,var(--brand-text,#222) 14%,transparent)}
+.pcard.style-campaign_round .img{background:var(--brand-surface,#fff)!important;aspect-ratio:1/1;border-radius:0}
+.pcard.style-campaign_round .cover-photo,.pcard.style-campaign_round .cover-photo-2{object-fit:var(--img-fit,contain)!important}
+.pcard.style-campaign_round .body{padding:6px 12px 14px;text-align:center;display:grid;gap:5px;justify-items:center}
+.pcard.style-campaign_round .brand{display:none}
+.pcard.style-campaign_round .name{font-size:12.5px;font-weight:700;color:var(--brand-text,#222);line-height:1.8}
+.pcard.style-campaign_round .rate{justify-content:center}
+.pcard.style-campaign_round .price .now{font-size:13px;font-weight:800;color:var(--theme-price,var(--brand-text,#222));display:flex;gap:8px;align-items:baseline;justify-content:center;flex-wrap:wrap}
+.pcard.style-campaign_round .price .old{font-size:10.5px;font-weight:400;color:var(--brand-muted,#999);text-decoration:line-through}
+.pcard.style-campaign_round .badges{top:10px;left:10px;right:auto;align-items:flex-start}
+.pcard.style-campaign_round .pill-disc{display:grid;place-items:center;min-width:42px;height:42px;padding:0;border-radius:50%;background:var(--brand-accent,#ff6e1e);color:var(--brand-accent-fg,#fff);font-size:11.5px;font-weight:800}
+.pcard.style-cocoa_gift{background:var(--brand-surface,#fff);border:0;border-radius:18px;box-shadow:0 2px 10px color-mix(in srgb,var(--brand-text,#24170e) 8%,transparent);overflow:hidden;--pcard-pad:12px}
+.pcard.style-cocoa_gift:hover{transform:none;box-shadow:0 4px 16px color-mix(in srgb,var(--brand-text,#24170e) 14%,transparent)}
+.pcard.style-cocoa_gift .img{background:var(--brand-surface,#fff)!important;aspect-ratio:1/1;border-radius:0}
+.pcard.style-cocoa_gift .cover-photo,.pcard.style-cocoa_gift .cover-photo-2{object-fit:var(--img-fit,contain)!important}
+.pcard.style-cocoa_gift .body{padding:8px 14px 0;text-align:center;display:grid;gap:5px;justify-items:center}
+.pcard.style-cocoa_gift .brand{display:none}
+.pcard.style-cocoa_gift .name{font-size:13px;font-weight:700;color:var(--brand-text,#24170e);line-height:1.8}
+.pcard.style-cocoa_gift .price .now{font-size:15px;font-weight:800;color:var(--theme-price,var(--brand-primary,#704012));display:flex;gap:8px;align-items:baseline;justify-content:center;flex-wrap:wrap}
+.pcard.style-cocoa_gift .price .old{font-size:11px;font-weight:400;color:var(--brand-muted,#999);text-decoration:line-through}
+.pcard.style-cocoa_gift .badges{top:10px;right:10px}
+.pcard.style-cocoa_gift .pill-disc{background:var(--brand-accent,#f5224c);color:var(--brand-accent-fg,#fff);border-radius:999px;padding:3px 10px;font-weight:800}
+.pcard.style-cocoa_gift .pcard-cta{padding:0 14px 16px}
+.pcard.style-cocoa_gift .pcard-cta-btn{display:flex;width:100%;margin-top:6px;padding:10px 14px;border-radius:12px;background:var(--brand-primary,#704012);color:var(--brand-primary-fg,#fff);font-size:13px;font-weight:700}
+
+
+/* ========================================================================
+   Phones / touch — the ONE shared product card (every template, listing, category, search, collection, home rails)
+   Root causes fixed here (found by measuring a 360px listing: 98px-wide cards, 113px tall price block):
+   1. ``html[data-sfb-density=relaxed] .pcard .body`` kept 18px padding on phones — on a ~170px card that left ~130px for text, so titles and
+      «تومان» wrapped into 3–4 lines. The body padding is now phone-sized whatever the density.
+   2. the price + unit wrapped mid-amount. The amount and the unit stay together; the old price sits on its own line.
+   3. the «نمای سریع» pill was always visible on touch (hover-only on desktop) and covered the image; on touch it is an icon-only round button
+      under the wishlist heart with a ≥44px hit area (the accessible name is unchanged).
+   ======================================================================== */
+@media(max-width:680px){
+  html[data-sfb-density] .pcard .body,.pcard .body{padding:10px 10px 12px;gap:5px}
+  .pcard .brand{font-size:10.5px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pcard .name{font-size:min(var(--sfb-product-name-size,13px),13px);line-height:1.55;height:calc(2 * 1.55em)}
+  .pcard .rate{gap:3px;font-size:10.5px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
+  .pcard .price{padding-top:6px;gap:2px 6px;flex-wrap:wrap;align-items:flex-end}
+  .pcard .price .now{font-size:min(var(--sfb-price-size,15px),14px);line-height:1.5;white-space:nowrap;overflow-wrap:normal}
+  .pcard .price .old{display:block;font-size:10.5px;line-height:1.4;white-space:nowrap}
+  .pcard.ratio-portrait .img{aspect-ratio:4/5}
+  .pcard .pill{font-size:10.5px;padding:2px 7px}
+}
+/* Tablets / small laptops: 3–4 narrow columns with the relaxed 18px body padding left ~110px for the price (it wrapped mid-amount) */
+@media(max-width:1100px){
+  html[data-sfb-density] .pcard .body{padding-inline:12px}
+  .pcard .price .now{white-space:nowrap;overflow-wrap:normal}
+  .pcard .price{flex-wrap:wrap}
+}
+@media(max-width:680px),(hover:none){
+  .pcard-qv-trigger{inset-block-start:48px;inset-inline-start:auto;left:10px;right:auto;width:32px;height:32px;padding:0;justify-content:center;gap:0;opacity:1;transform:none}
+  .pcard-qv-trigger .pcard-qv-trigger-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .pcard-qv-trigger::after{content:"";position:absolute;inset:-6px}
+}
+@media(max-width:360px){
+  html[data-sfb-density] .pcard .body,.pcard .body{padding:8px 8px 10px}
+  .pcard .price .now{font-size:13.5px}
+}

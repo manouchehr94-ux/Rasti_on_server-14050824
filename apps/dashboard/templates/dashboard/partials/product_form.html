@@ -1,0 +1,449 @@
+{% load persian image_guide %}
+{{ existing_tags_list|json_script:"existing-tags-data" }}
+<div class="pe-prototype" x-data="{
+      tab: '{{ error_step|default:'basic' }}',
+      tabs: [['basic', 'اطلاعات پایه'], ['category', 'دسته‌بندی'], ['price', 'قیمت و تنوع'], ['media', 'تصاویر و فیلم'], ['seo', 'سئو و انتشار']],
+      get tabIndex() { return this.tabs.findIndex(([key]) => key === this.tab); },
+      goPrevTab() { const i = this.tabIndex; if (i > 0) this.tab = this.tabs[i - 1][0]; },
+      goNextTab() { const i = this.tabIndex; if (i < this.tabs.length - 1) this.tab = this.tabs[i + 1][0]; },
+      productType: '{{ form.product_type.value|default:'simple' }}',
+      tags: JSON.parse(document.getElementById('existing-tags-data').textContent),
+      tagInput: '',
+      addTag() {
+        const v = this.tagInput.trim();
+        if (v && !this.tags.includes(v)) { this.tags.push(v); }
+        this.tagInput = '';
+      },
+      removeTag(t) { this.tags = this.tags.filter(x => x !== t) },
+      priceVal: '{{ form.price.value|default:"" }}',
+      discountVal: '{{ form.discount_percent.value|default:"0" }}',
+    }"
+    x-init="$watch('tags', v => $refs.tagsHidden.value = v.join(','))">
+<form id="productSaveForm" method="post" action="{% if product %}{% url 'dashboard:product-edit' product.pk %}{% else %}{% url 'dashboard:product-add' %}{% endif %}"
+      @submit="$refs.currentTabField.value = tab">
+  {% csrf_token %}
+  <input type="hidden" name="current_tab" x-ref="currentTabField">
+
+  <div class="pe-topbar">
+    <div class="pe-title">
+      <h1>{% if product and not product.is_draft_placeholder %}ویرایش کالا{% else %}افزودن کالای جدید{% endif %}</h1>
+      <p>{% if product and not product.is_draft_placeholder %}{{ product.name }}{% else %}اطلاعاتِ کالای جدید را در پنج مرحله وارد کنید{% endif %}</p>
+    </div>
+    <div class="pe-top-actions">
+      {% if product and product.is_draft_placeholder %}
+      <button type="button" class="btn btn-ghost"
+              onclick="if (confirm('این پیش‌نویس (و هر ویژگی/تصویری که تا الان اضافه کرده‌اید) کاملاً حذف می‌شود. ادامه می‌دهید؟')) { document.getElementById('discardDraftForm').submit(); }">انصراف</button>
+      {% else %}
+      <a href="{% url 'dashboard:product-list' %}" class="btn btn-ghost">انصراف</a>
+      {% endif %}
+      <button type="submit" class="btn btn-primary">ذخیره کالا</button>
+    </div>
+  </div>
+
+  <div style="padding:0 20px">
+    {% if form.non_field_errors %}
+    <div class="pe-field-error" style="margin-top:10px">{% for err in form.non_field_errors %}<div>{{ err }}</div>{% endfor %}</div>
+    {% endif %}
+    {% include "dashboard/partials/product_no_category_banner.html" with has_leaf_categories=form.fields.category.queryset %}
+  </div>
+
+  <div class="pe-shell">
+    <div class="pe-sidebar">
+      <template x-for="([key, label], i) in tabs" :key="key">
+        <button type="button" class="pe-step" :class="{ active: tab === key, done: tabIndex > i }" @click="tab = key">
+          <span class="pe-num" x-text="i + 1"></span>
+          <span class="pe-step-label" x-text="label"></span>
+        </button>
+      </template>
+      <div class="pe-progress-mini"><i :style="'width:' + Math.round(((tabIndex + 1) / tabs.length) * 100) + '%'"></i></div>
+    </div>
+
+    <div class="pe-content">
+
+      <!-- تب ۱: اطلاعات پایه -->
+      <div x-show="tab === 'basic'" x-ref="tabBasic">
+        <div class="pe-pane-head">
+          <h2>اطلاعات پایه</h2>
+          <p>نام، کد کالا، برند، واحد شمارش و توضیحاتِ کالا.</p>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label>نام کالا<span class="required-star">*</span></label>
+            <input name="name" required value="{{ form.name.value|default_if_none:'' }}" placeholder="مثلاً: هدفون بی‌سیم مدل X20"
+                   x-ref="nameField">
+            {% for err in form.name.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+
+          <div class="field">
+            <label>کد کالا (SKU)<span class="required-star">*</span></label>
+            <div class="row">
+              <input name="sku" required value="{{ form.sku.value|default_if_none:'' }}" placeholder="DM-1001" dir="ltr"
+                     x-ref="skuField" style="flex:1">
+              <button type="button" class="btn btn-sm btn-soft" title="تولیدِ خودکارِ یک کدِ کالایِ یکتا — قابلِ‌ویرایش پس از تولید"
+                      @click="
+                        fetch('{% url 'dashboard:product-sku-generate' %}', {
+                          method: 'POST',
+                          headers: { 'X-CSRFToken': $el.closest('form').querySelector('[name=csrfmiddlewaretoken]').value },
+                        }).then(r => r.text()).then(code => {
+                          $refs.skuField.value = code;
+                        });
+                      ">تولید</button>
+            </div>
+            {% for err in form.sku.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+
+          {% include "dashboard/partials/product_brand_select.html" with brand_queryset=form.fields.brand.queryset selected_brand_id=form.brand.value %}
+          {% for err in form.brand.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+
+          <div class="field">
+            <label>واحد شمارش<span class="required-star">*</span></label>
+            <select name="unit">
+              {% for value, label in form.fields.unit.choices %}
+              <option value="{{ value }}" {% if form.unit.value|default:"piece" == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            {% for err in form.unit.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+
+          <div class="field">
+            <label>مدل یا کد فنی <span class="opt-pill">اختیاری</span></label>
+            <input name="model_code" value="{{ form.model_code.value|default_if_none:'' }}" dir="ltr" placeholder="مثلاً: X20-BLK">
+            {% for err in form.model_code.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+
+          <div class="field full">
+            <label>برچسب‌ها <span class="opt-pill">اختیاری</span></label>
+            <input type="hidden" name="tags" x-ref="tagsHidden" :value="tags.join(',')">
+            <div class="row">
+              <input x-model="tagInput" @keydown.enter.prevent="addTag()" list="tagSuggestions" placeholder="برچسب جدید را بنویسید و اینتر بزنید" style="flex:1">
+              <button type="button" class="btn btn-sm btn-soft" @click="addTag()">افزودن</button>
+            </div>
+            <datalist id="tagSuggestions">
+              {% for suggestion in tag_suggestions %}<option value="{{ suggestion.name }}">{% endfor %}
+            </datalist>
+            <div class="tags">
+              <template x-for="t in tags" :key="t">
+                <span class="tag">
+                  <span x-text="t"></span>
+                  <button type="button" @click="removeTag(t)">×</button>
+                </span>
+              </template>
+            </div>
+            {% for err in form.tags.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+
+          <div class="field full">
+            <label>توضیحاتِ کالا <span class="opt-pill">اختیاری</span></label>
+            <div class="pe-editor-host" id="descriptionEditor" x-data="richTextEditor()" x-init="mount()">
+              <textarea name="description" x-ref="source" style="min-height:160px">{{ form.description.value|default_if_none:'' }}</textarea>
+            </div>
+            {% for err in form.description.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- تب ۲: دسته‌بندی -->
+      <div x-show="tab === 'category'" x-ref="tabCategory">
+        <div class="pe-pane-head">
+          <h2>دسته‌بندی</h2>
+          <p>گروهِ اصلی، زیرگروه، گروهِ دوم (مجموعه‌ی فروش) و کشورِ سازنده.</p>
+        </div>
+        {% include "dashboard/partials/product_category_select.html" with selected_category_id=form.category.value %}
+        {% for err in form.category.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+
+        <div class="grid" style="margin-top:15px">
+          {% include "dashboard/partials/product_second_group_select.html" with selected_second_group_id=form.second_group.value %}
+          {% for err in form.second_group.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+
+          <div class="field">
+            <label>کشور سازنده <span class="opt-pill">اختیاری</span></label>
+            <input name="country_of_origin" value="{{ form.country_of_origin.value|default_if_none:'' }}" placeholder="مثلاً: ایران">
+            {% for err in form.country_of_origin.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- تب ۳: قیمت و تنوع -->
+      <div x-show="tab === 'price'" x-ref="tabPrice">
+        <div class="pe-pane-head">
+          <h2>قیمت و تنوع</h2>
+          <p>کالای ساده یک قیمت و یک موجودی دارد؛ کالای دارای تنوع برایِ هر ترکیب (مثلاً رنگ × سایز) قیمت و موجودیِ مستقل دارد.</p>
+        </div>
+
+        <div class="segment">
+          <button type="button" class="seg" :class="{ active: productType === 'simple' }"
+                  {% if product %}hx-post="{% url 'dashboard:product-set-type' product.pk %}" hx-vals='{"product_type": "simple"}' hx-target="#productOptionsBody" hx-swap="innerHTML"{% endif %}
+                  @click="productType = 'simple'">کالای ساده</button>
+          <button type="button" class="seg" :class="{ active: productType === 'variable' }"
+                  {% if product %}hx-post="{% url 'dashboard:product-set-type' product.pk %}" hx-vals='{"product_type": "variable"}' hx-target="#productOptionsBody" hx-swap="innerHTML"{% endif %}
+                  @click="productType = 'variable'; if (!priceVal) priceVal = '1'">کالای دارای تنوع</button>
+        </div>
+        <input type="hidden" name="product_type" :value="productType">
+        {% for err in form.product_type.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+
+        <div id="simpleBox" x-show="productType === 'simple'" style="margin-top:16px">
+          <div class="grid3">
+            <div class="field">
+              <label>قیمت (تومان)<span class="required-star">*</span></label>
+              <input name="price" x-model="priceVal" dir="ltr" inputmode="numeric" placeholder="تنظیم نشده">
+              {% for err in form.price.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field">
+              <label>تخفیف٪ <span class="opt-pill">اختیاری</span></label>
+              <input name="discount_percent" x-model="discountVal" dir="ltr" inputmode="numeric" placeholder="0">
+            </div>
+            <div class="field">
+              <label>موجودی<span class="required-star">*</span></label>
+              <input name="stock" value="{{ form.stock.value|default:'0' }}" dir="ltr" inputmode="numeric">
+              {% for err in form.stock.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="pe-price-unset" x-show="!priceVal" style="margin-top:10px" x-cloak>قیمت هنوز تنظیم نشده است.</div>
+        </div>
+
+        {% if product %}
+        <div x-show="productType === 'variable'" style="margin-top:16px">
+          <div class="info">مثال: طول با ۳ مقدار × جنس با ۲ مقدار = ۶ تنوع؛ هر تنوع قیمت، موجودی و کدِ مستقل دارد.</div>
+          <div id="productOptionsBody" style="margin-top:14px">
+            {% include "dashboard/partials/product_options_body.html" %}
+          </div>
+        </div>
+        {% endif %}
+
+        <details style="margin-top:20px">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px">تنظیماتِ تکمیلی (مالیات، بارکد، وزن، ارسال، ویژگی‌های توصیفی)</summary>
+          <div class="grid" style="margin-top:14px">
+            <div class="field">
+              <label>دسته‌ی مالیاتی</label>
+              <select name="tax_class">
+                <option value="">— پیش‌فرضِ فروشگاه —</option>
+                {% for choice in form.tax_class.field.queryset %}
+                <option value="{{ choice.pk }}" {% if form.tax_class.value|stringformat:"s" == choice.pk|stringformat:"s" %}selected{% endif %}>{{ choice.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>بارکد محصول</label>
+              <input name="barcode" value="{{ form.barcode.value|default_if_none:'' }}" dir="ltr">
+              {% for err in form.barcode.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field">
+              <label>وزن (گرم)</label>
+              <input name="weight_grams" value="{{ form.weight_grams.value|default_if_none:'' }}" dir="ltr" inputmode="numeric">
+              {% for err in form.weight_grams.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+                <input type="checkbox" name="requires_shipping" {% if form.requires_shipping.value %}checked{% endif %} style="width:auto">
+                نیاز به ارسال فیزیکی دارد
+              </label>
+            </div>
+            <div class="field full">
+              <label>ویژگی‌های اختصاصیِ این دسته‌بندی <span class="opt-pill">اختیاری</span></label>
+              {% include "dashboard/partials/product_attribute_fields.html" %}
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- تب ۴: تصاویر و فیلم -->
+      <div x-show="tab === 'media'" x-ref="tabMedia">
+        <div class="pe-pane-head">
+          <h2>تصاویر و فیلم</h2>
+          <p>تصویرِ کاور، گالریِ تصاویر و ویدیویِ معرفیِ کالا.</p>
+        </div>
+        {% if product %}
+        <div class="card-desc" style="margin-bottom:10px">🖐️ تصاویر را برای تغییرِ ترتیب بکشید و رها کنید.</div>
+        <div x-data="{ dragging: false }">
+          <label class="dropzone" :class="{ dragging: dragging }"
+                 @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false"
+                 @drop.prevent="
+                   dragging = false;
+                   $refs.editImagesInput.files = $event.dataTransfer.files;
+                   $refs.editImagesInput.dispatchEvent(new Event('change', { bubbles: true }));
+                 ">
+            <span style="font-size:26px">🖼️</span>
+            <span>تصاویر را بکشید و رها کنید</span>
+            <span class="dropzone-choose">انتخاب تصاویر</span>
+            <small style="color:var(--muted)">فرمت‌های مجاز: jpg، png، webp — حداکثر ۵ مگابایت — چندتصویری هم‌زمان مجاز است</small>
+            <input type="file" x-ref="editImagesInput" name="images" multiple accept=".jpg,.jpeg,.png,.webp" style="display:none"
+                   hx-post="{% url 'dashboard:product-image-upload' product.pk %}" hx-encoding="multipart/form-data"
+                   hx-trigger="imgguide-confirm" hx-target="#productImagesList" hx-swap="outerHTML">
+          </label>
+          {% image_guide "product_image" "images" "imgguide-confirm" %}
+        </div>
+        {% include "dashboard/partials/product_images_list.html" %}
+
+        <div class="card" style="margin-top:20px" x-data="{
+               url: '', embedUrl: '', recognized: false, serverError: '',
+               youtubePatterns: [/(?:youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([\w-]{11})/, /youtu\.be\/([\w-]{11})/, /youtube\.com\/embed\/([\w-]{11})/],
+               aparatPattern: /aparat\.com\/(?:v\/|video\/video\/embed\/videohash\/)([\w-]+)/,
+               instagramPattern: /instagram\.com\/(p|reel|tv)\/([\w-]+)/,
+               checkUrl() {
+                 this.serverError = '';
+                 this.embedUrl = ''; this.recognized = false;
+                 if (!this.url.trim()) return;
+                 for (const p of this.youtubePatterns) {
+                   const m = this.url.match(p);
+                   if (m) { this.embedUrl = 'https://www.youtube.com/embed/' + m[1]; this.recognized = true; return; }
+                 }
+                 const am = this.url.match(this.aparatPattern);
+                 if (am) { this.embedUrl = 'https://www.aparat.com/video/video/embed/videohash/' + am[1] + '/vt/frame'; this.recognized = true; return; }
+                 const im = this.url.match(this.instagramPattern);
+                 if (im) { this.recognized = true; return; }
+               },
+             }">
+          <div class="card-title">ویدیویِ معرفیِ کالا (یوتیوب / آپارات / اینستاگرام)</div>
+          <div class="row">
+            <div class="field" style="flex:1;min-width:220px">
+              <label>لینکِ ویدیو</label>
+              <input id="editVideoUrlInput" name="video_url" dir="ltr" placeholder="لینکِ یوتیوب، آپارات یا پست/Reelِ عمومیِ اینستاگرام"
+                     x-model="url" @input.debounce.300ms="checkUrl()">
+            </div>
+            <div class="field" style="width:150px">
+              <label>عنوان <span class="opt-pill">اختیاری</span></label>
+              <input id="editVideoTitleInput" name="video_title" x-ref="videoTitleInput" placeholder="معرفیِ کالا">
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" :disabled="!url.trim() || !recognized"
+                    hx-post="{% url 'dashboard:product-video-add' product.pk %}"
+                    hx-include="#editVideoUrlInput,#editVideoTitleInput" hx-params="video_url,video_title"
+                    hx-target="#productVideosList" hx-swap="outerHTML"
+                    @video-added="url = ''; embedUrl = ''; recognized = false; serverError = ''; $refs.videoTitleInput.value = ''"
+                    @video-error="serverError = $event.detail.message">افزودنِ ویدیو</button>
+          </div>
+          <div x-show="url.trim() && !recognized" x-cloak class="pe-field-error" style="margin-top:6px">این لینک شناخته‌شده نیست — فقط لینکِ یوتیوب، آپارات یا پست/Reelِ عمومیِ اینستاگرام پذیرفته می‌شود.</div>
+          <div x-show="serverError" x-cloak class="pe-field-error" style="margin-top:6px" x-text="serverError"></div>
+          <div x-show="embedUrl" x-cloak style="margin-top:10px;width:220px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000">
+            <iframe :src="embedUrl" style="width:100%;height:100%;border:0" allowfullscreen loading="lazy"></iframe>
+          </div>
+          <div x-show="recognized && !embedUrl" x-cloak class="pe-field-help" style="margin-top:6px">لینکِ اینستاگرام شناخته شد — پیش‌نمایشِ زنده در این‌جا پشتیبانی نمی‌شود؛ پس از افزودن، با کلیک روی نمادِ اینستاگرام در تبِ جدید باز می‌شود.</div>
+        </div>
+        {% include "dashboard/partials/product_videos_list.html" %}
+
+        {% else %}
+        {% comment %}
+        فقط مسیرِ نادرِ نمایشِ خطا پس از rollbackِ POSTِ یک‌مرحله‌ایِ قدیمی
+        (نگاه کنید به ProductMediaStageError در product_form) به این‌جا
+        می‌رسد — ناوبریِ واقعیِ merchant همیشه یک پیش‌نویسِ واقعی دارد،
+        پس همیشه شاخه‌ی بالا رندر می‌شود.
+        {% endcomment %}
+        <div class="card-desc" style="margin-bottom:10px">خطا در ثبتِ رسانه — لطفاً پس از رفعِ خطایِ بالا دوباره تلاش کنید.</div>
+        {% endif %}
+      </div>
+
+      <!-- تب ۵: سئو و انتشار -->
+      <div x-show="tab === 'seo'" x-ref="tabSeo">
+        <div class="pe-pane-head">
+          <h2>سئو و انتشار</h2>
+          <p>عنوانِ سئو، آدرسِ صفحه، وضعیتِ انتشار و توضیحاتِ متا.</p>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label>عنوان سئو <span class="opt-pill">اختیاری</span></label>
+            <input name="seo_title" value="{{ form.seo_title.value|default_if_none:'' }}" maxlength="70">
+            <div class="pe-field-help">خالی بگذارید تا از نامِ کالا استفاده شود. طولِ توصیه‌شده: تا ۷۰ نویسه.</div>
+            {% for err in form.seo_title.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="field">
+            <label>آدرسِ محصول (Slug) <span class="opt-pill">اختیاری</span></label>
+            <input name="slug" value="{{ form.slug.value|default_if_none:'' }}" dir="ltr" placeholder="{{ product.slug|default:'خودکار از رویِ نام' }}">
+            {% for err in form.slug.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="field">
+            <label>وضعیتِ انتشار<span class="required-star">*</span></label>
+            <select name="status">
+              <option value="draft" {% if form.status.value == "draft" %}selected{% endif %}>پیش‌نویس</option>
+              <option value="active" {% if form.status.value == "active" or not form.status.value %}selected{% endif %}>فعال</option>
+              <option value="inactive" {% if form.status.value == "inactive" %}selected{% endif %}>غیرفعال</option>
+            </select>
+            {% for err in form.status.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="field full">
+            <label>توضیحات متا <span class="opt-pill">اختیاری</span></label>
+            <textarea name="seo_description" rows="2" maxlength="160">{{ form.seo_description.value|default_if_none:'' }}</textarea>
+            <div class="pe-field-help">خلاصه‌ای کوتاه که زیرِ عنوان در نتایجِ جست‌وجو نمایش داده می‌شود؛ حداکثر ۱۶۰ نویسه.</div>
+            {% for err in form.seo_description.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
+
+        <div class="seo-preview" style="margin-top:15px">
+          <div class="seo-preview-title" x-text="document.querySelector('[name=seo_title]').value || document.querySelector('[name=name]').value || 'عنوانِ کالا'"></div>
+          <div class="seo-preview-url">example.com › products › {{ product.slug|default:"..." }}</div>
+          <div class="seo-preview-desc" x-text="document.querySelector('[name=seo_description]').value || 'توضیحاتِ کالا اینجا نمایش داده می‌شود.'"></div>
+        </div>
+
+        <details style="margin-top:20px">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px">تنظیماتِ تکمیلیِ نمایش و زمان‌بندی</summary>
+          <div class="grid" style="margin-top:14px">
+            <div class="field full">
+              <label>نحوه‌ی نمایش در فروشگاه</label>
+              <select name="visibility">
+                <option value="public" {% if form.visibility.value == "public" or not form.visibility.value %}selected{% endif %}>نمایشِ عمومی (در فهرست، جست‌وجو و سایت‌مپ)</option>
+                <option value="link" {% if form.visibility.value == "link" %}selected{% endif %}>فقط با لینکِ مستقیم</option>
+              </select>
+              {% for err in form.visibility.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field full">
+              <label>حالت قیمت‌گذاری <span class="opt-pill">اختیاری</span></label>
+              <select name="price_mode_override">
+                <option value="" {% if not form.price_mode_override.value %}selected{% endif %}>پیش‌فرض (ارث‌بری از گروه یا کالکشن)</option>
+                <option value="standard" {% if form.price_mode_override.value == "standard" %}selected{% endif %}>قیمت عادی (حتی اگر گروهش استعلامی است)</option>
+                <option value="inquiry" {% if form.price_mode_override.value == "inquiry" %}selected{% endif %}>استعلام قیمت — بهای عددی و دکمه‌ی خرید نمایش داده نمی‌شود</option>
+              </select>
+              <div class="pe-field-help">با «استعلام قیمت»، کالا در صفحه‌ها به‌جای قیمت «استعلام قیمت» نشان می‌دهد و مشتری به صفحه‌ی «درباره ما» می‌رود. قیمت و موجودیِ ثبت‌شده تغییر نمی‌کند.</div>
+            </div>
+            <div class="field">
+              <label>شروعِ اعتبارِ تخفیف <span class="opt-pill">اختیاری</span></label>
+              <input type="datetime-local" name="discount_starts_at" value="{{ form.discount_starts_at.value|default_if_none:'' }}">
+              {% for err in form.discount_starts_at.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field">
+              <label>پایانِ اعتبارِ تخفیف <span class="opt-pill">اختیاری</span></label>
+              <input type="datetime-local" name="discount_ends_at" value="{{ form.discount_ends_at.value|default_if_none:'' }}">
+              <div class="pe-field-help">پس از این زمان قیمتِ عادی اعمال می‌شود و تایمرِ «پیشنهاد شگفت‌انگیز» از همین زمان می‌شمارد. خالی = تخفیفِ بدونِ پایان.</div>
+              {% for err in form.discount_ends_at.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+            <div class="field">
+              <label>زمان‌بندیِ انتشار <span class="opt-pill">اختیاری</span></label>
+              <input type="datetime-local" name="publish_at" value="{{ product.publish_at|date:'Y-m-d\TH:i'|default_if_none:'' }}">
+              <div class="pe-field-help">خالی بگذارید تا بلافاصله منتشر شود.</div>
+              {% for err in form.publish_at.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
+            </div>
+          </div>
+        </details>
+
+        {% if product %}
+        <div class="card" style="margin-top:20px">
+          <div class="card-title">بررسیِ پیش از انتشار</div>
+          {% for item in checklist %}
+          <div class="row between" style="padding:9px 0;{% if not forloop.last %}border-bottom:1px solid var(--line){% endif %};font-size:12.5px">
+            <span>{{ item.label }}{% if not item.done and item.hint %} <small style="color:var(--muted)">— {{ item.hint }}</small>{% endif %}</span>
+            <b style="color:{% if item.done %}var(--success){% else %}var(--muted){% endif %}">{% if item.done %}✓{% else %}○{% endif %}</b>
+          </div>
+          {% endfor %}
+        </div>
+        <a href="{% url 'dashboard:product-preview' product.pk %}" target="_blank" class="btn btn-sm btn-soft" style="margin-top:12px">👁️ پیش‌نمایشِ کالا در فروشگاه</a>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+
+  <div class="pe-footer-actions">
+    <button type="button" class="btn btn-ghost" x-show="tabIndex > 0" @click="goPrevTab()">مرحله قبل</button>
+    <span x-show="tabIndex === 0"></span>
+    <div class="pe-footer-left">
+      <button type="submit" class="btn btn-soft" formnovalidate
+              @click="const s = $root.querySelector('[name=status]'); if (s) s.value = 'draft'"
+              title="کالا را همین حالا با وضعیتِ «پیش‌نویس» ذخیره می‌کند — فیلدهای الزامی (نام، کد کالا، دسته‌بندی) هنوز باید پر شده باشند">ذخیره‌ی پیش‌نویس</button>
+      <button type="button" class="btn btn-primary" x-show="tabIndex < tabs.length - 1" @click="goNextTab()">مرحله بعد</button>
+      <button type="submit" class="btn btn-primary" x-show="tabIndex === tabs.length - 1">ثبت کالا</button>
+    </div>
+  </div>
+</form>
+{% if product and product.is_draft_placeholder %}
+<form id="discardDraftForm" method="post" action="{% url 'dashboard:product-discard-draft' product.pk %}" style="display:none">
+  {% csrf_token %}
+</form>
+{% endif %}
+</div>

@@ -1,0 +1,23 @@
+{% load content_tags %}
+{% for banner in banners %}
+<section class="section"{% if is_builder_preview %} data-admin-edit-kind="media" data-admin-edit-id="{{ banner.pk }}" data-admin-edit-title="{{ banner.title|default:'بنر'|escape }}" data-admin-media-kind="banners"{% endif %}>
+  <div class="promo-dark">
+    <div>
+      {% if banner.title %}<h3>{{ banner.title }}</h3>{% endif %}
+      {% if banner.description %}<p>{{ banner.description }}</p>{% endif %}
+      {% if banner.show_button and banner.button_label %}
+      {% resolve_destination banner as bdest %}
+      {% if bdest.url %}
+      <a class="btn btn-light" href="{{ bdest.url }}" {% if bdest.open_new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ banner.button_label }}</a>
+      {% endif %}
+      {% endif %}
+    </div>
+    <div class="mini">
+      <picture>
+        {% if banner.mobile_image_url %}<source media="(max-width:680px)" srcset="{{ banner.mobile_image_url }}">{% endif %}
+        {% if banner.desktop_image_url %}<img src="{{ banner.desktop_image_url }}" data-img-role="banner" alt="{{ banner.title|default:'بنر' }}" loading="lazy">{% endif %}
+      </picture>
+    </div>
+  </div>
+</section>
+{% endfor %}

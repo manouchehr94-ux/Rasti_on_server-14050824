@@ -1,0 +1,63 @@
+{% extends "portal/public/base_public.html" %}
+{% load static persian %}
+{% block title %}{% if is_registration %}تأیید شماره موبایل{% elif is_reset %}تأیید برای تعیین رمز{% else %}کد ورود{% endif %} | راستی‌سی{% endblock %}
+{% block robots_meta %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block content %}
+<section class="r-auth-section">
+  <div class="rs-container">
+    <div class="r-auth-shell r-auth-shell--form-first">
+      <aside class="r-auth-story">
+        {% if is_registration %}
+        <div class="rs-eyebrow">تأیید شماره موبایل</div>
+        <h1>شماره‌تان را تأیید کنید،<br>بعد حسابتان را بسازید.</h1>
+        <p>بعد از وارد کردن کد، در مرحله‌ی بعد ایمیل و رمز عبور حساب را تعیین می‌کنید و سپس فروشگاه آزمایشی‌تان ساخته می‌شود.</p>
+        {% elif is_reset %}
+        <div class="rs-eyebrow">بازیابی یا تعیین رمز</div>
+        <h1>شماره‌تان را تأیید کنید،<br>بعد رمز جدید بگذارید.</h1>
+        <p>اگر حساب فعالی با این شماره وجود داشته باشد، کدی برایش پیامک شده است. بعد از وارد کردن کد، رمز عبور جدید را انتخاب می‌کنید؛ با این کد وارد حساب نمی‌شوید.</p>
+        {% else %}
+        <div class="rs-eyebrow">ورود با کد یک‌بارمصرف</div>
+        <h1>یک مرحله کوتاه<br>برای ورود امن.</h1>
+        <p>کدی که برای شماره موبایل شما ارسال شده را وارد کنید تا وارد حسابتان شوید.</p>
+        {% endif %}
+        <div class="r-auth-points">
+          <div class="r-auth-point">کد ۶ رقمی، فقط {{ otp_ttl_minutes|fa_number }} دقیقه معتبر است</div>
+          <div class="r-auth-point">اگر کد نرسید، می‌توانید دوباره درخواست دهید</div>
+          <div class="r-auth-point">هر کد فقط یک بار قابل استفاده است</div>
+        </div>
+      </aside>
+
+      <div class="r-auth-form">
+        <div class="r-auth-form-head">
+          <h2>{% if is_registration %}تأیید شماره موبایل{% elif is_reset %}تأیید برای تعیین رمز{% else %}کد ورود{% endif %}</h2>
+          <p>کد ۶ رقمی ارسال‌شده به <span class="r-phone-inline">{{ phone }}</span> را وارد کنید.
+            <a class="r-inline-link" href="{{ change_phone_url }}">تغییر شماره</a></p>
+        </div>
+
+        {% if flash %}<div class="p-alert {% if flash.kind == 'ok' %}p-alert-success{% else %}p-alert-error{% endif %}" role="{% if flash.kind == 'ok' %}status{% else %}alert{% endif %}">{{ flash.text }}</div>{% endif %}
+
+        <form method="post" novalidate data-auth-form data-loading-text="در حال بررسی کد…">
+          {% csrf_token %}
+          {{ form.phone }}
+          {% if form.non_field_errors %}<div class="p-alert p-alert-error" role="alert">{{ form.non_field_errors.0 }}</div>{% endif %}
+          <div class="p-field">
+            <label for="id_code">کد ۶ رقمی</label>
+            {{ form.code }}
+            {% if form.code.errors %}<div class="p-error" id="id_code_error">{{ form.code.errors.0 }}</div>{% endif %}
+            {% if timing.expires_in or not form.code.errors %}<div class="r-field-hint" id="id_code_hint" data-otp-expires="{{ timing.expires_in }}" aria-live="polite">{% if timing.expires_in %}کد تا {{ otp_ttl_minutes|fa_number }} دقیقه پس از ارسال معتبر است.{% else %}این کد منقضی شده است؛ کد جدید دریافت کنید.{% endif %}</div>{% endif %}
+          </div>
+          <button type="submit" class="rs-btn rs-btn-primary r-form-submit">{% if is_registration %}تأیید شماره و ادامه{% elif is_reset %}تأیید و ادامه{% else %}تأیید و ورود{% endif %}</button>
+        </form>
+
+        <form method="post" action="{{ resend_url }}" class="r-otp-resend" data-resend-form data-resend-in="{{ timing.resend_in }}">
+          {% csrf_token %}
+          <button type="submit" class="rs-link r-resend-btn" data-resend-button>ارسال دوباره کد</button>
+          <span class="r-otp-hint" id="id_resend_hint" role="status" data-resend-hint data-cooldown="{{ timing.cooldown_seconds }}">{% if timing.resend_in %}کد نرسید؟ ارسال دوباره‌ی کد پس از {{ timing.resend_in|fa_number }} ثانیه ممکن می‌شود (پس از هر ارسال {{ timing.cooldown_seconds|fa_number }} ثانیه صبر لازم است).{% else %}کد نرسید؟ پیامک را بررسی کنید و اگر لازم بود کد جدید بگیرید؛ کد قبلی باطل می‌شود.{% endif %}</span>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'portal/js/auth-forms.js' %}?v=20261009-1" defer></script>{% endblock %}

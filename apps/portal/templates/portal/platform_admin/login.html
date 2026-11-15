@@ -1,0 +1,25 @@
+{% extends "portal/platform_admin/base.html" %}
+{% block title %}ورود مدیر پلتفرم | راستیسی{% endblock %}
+{% block content %}
+<div class="pa-login">
+  <div class="pa-login-card">
+    <div class="pa-brand"><span class="pa-logo" aria-hidden="true">ر</span><div><b>راستیسی</b><small>ورودِ مدیرِ پلتفرم</small></div></div>
+    <p class="pa-help pa-mb-4">دسترسی فقط برایِ مدیرانِ مجازِ پلتفرمِ راستیسی است.</p>
+    <form method="post" class="pa-stack" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="pa-alert pa-alert-error" role="alert">{{ form.non_field_errors.0 }}</div>{% endif %}
+      <div class="pa-field{% if form.identifier.errors %} has-error{% endif %}">
+        <label for="id_identifier">شماره موبایل، نام کاربری یا ایمیل</label>
+        {{ form.identifier }}
+        {% if form.identifier.errors %}<div class="pa-error">{{ form.identifier.errors.0 }}</div>{% endif %}
+      </div>
+      <div class="pa-field">
+        <label for="id_password">رمز عبور</label>
+        {{ form.password }}
+      </div>
+      <label class="pa-check">{{ form.remember_me }} مرا به خاطر بسپار</label>
+      <button type="submit" class="pa-btn pa-primary">ورود</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% load altcha_captcha %}{% altcha_captcha captcha_action as captcha %}{% if captcha.enabled %}
+{% if captcha.unavailable %}
+<div class="alert alert-warn captcha-unavailable" role="alert">سرویس تأیید امنیتی موقتاً در دسترس نیست؛ چند دقیقهٔ دیگر دوباره تلاش کنید.</div>
+{% else %}
+<div class="p-field p-captcha rasti-altcha" data-altcha-action="{{ captcha_action }}" dir="rtl">
+  <span class="rasti-altcha-label" id="captcha-label-{{ captcha_action }}">تأیید امنیتی</span>
+  <altcha-widget id="captcha-{{ captcha_action }}" type="checkbox" display="standard" auto="off" language="fa" dir="rtl"
+    name="altcha" workers="1" challenge="{{ captcha.challenge_url }}" aria-labelledby="captcha-label-{{ captcha_action }}"
+    configuration='{"minDuration":0,"humanInteractionSignature":false,"hideFooter":true,"credentials":"same-origin","timeout":15000}'></altcha-widget>
+  <span class="rasti-altcha-status" aria-live="polite" role="status"></span>
+  <noscript><p role="alert">برای تأیید امنیتی، جاوااسکریپت مرورگر را فعال کنید. این تأیید به سرویس خارجی متصل نمی‌شود.</p></noscript>
+</div>
+{% endif %}{% endif %}

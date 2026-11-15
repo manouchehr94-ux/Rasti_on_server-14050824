@@ -1,0 +1,67 @@
+<details class="sfb-design-field" x-show="inspectorTab === 'design'" x-cloak style="margin-top:6px">
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted)">ظاهر کارت محصول</summary>
+  <div style="margin-top:10px">
+    <div class="form-group">
+      <label>سبک کارت</label>
+      <select name="card_style" class="form-select">
+        <option value="standard" {% if section.settings.card.card_style != "compact" and section.settings.card.card_style != "minimal" and section.settings.card.card_style != "fashion_sale" and section.settings.card.card_style != "beauty_retail" and section.settings.card.card_style != "chocolate_retail" and section.settings.card.card_style != "retail_list" and section.settings.card.card_style != "luxury_dark" %}selected{% endif %}>استاندارد</option>
+        <option value="compact" {% if section.settings.card.card_style == "compact" %}selected{% endif %}>فشرده فروشگاهی</option>
+        <option value="minimal" {% if section.settings.card.card_style == "minimal" %}selected{% endif %}>مینیمال</option>
+        <option value="fashion_sale" {% if section.settings.card.card_style == "fashion_sale" %}selected{% endif %}>فروش کمپینی پوشاک</option>
+        <option value="beauty_retail" {% if section.settings.card.card_style == "beauty_retail" %}selected{% endif %}>فروشگاهی زیبایی</option>
+        <option value="chocolate_retail" {% if section.settings.card.card_style == "chocolate_retail" %}selected{% endif %}>فروشگاهی شکلاتی</option>
+        <option value="retail_list" {% if section.settings.card.card_style == "retail_list" %}selected{% endif %}>فهرستی فشرده</option>
+        <option value="luxury_dark" {% if section.settings.card.card_style == "luxury_dark" %}selected{% endif %}>لوکس تیره</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>نسبت تصویر</label>
+      <select name="card_image_ratio" class="form-select">
+        <option value="square" {% if section.settings.card.image_ratio != "portrait" and section.settings.card.image_ratio != "landscape" %}selected{% endif %}>مربعی</option>
+        <option value="portrait" {% if section.settings.card.image_ratio == "portrait" %}selected{% endif %}>عمودی (بلند)</option>
+        <option value="landscape" {% if section.settings.card.image_ratio == "landscape" %}selected{% endif %}>افقی (پهن)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>نمایش روی کارت:</label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_brand" {% if section.settings.card.show_brand is not False %}checked{% endif %}>
+          نام برند
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_price" {% if section.settings.card.show_price is not False %}checked{% endif %}>
+          قیمت
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_badge" {% if section.settings.card.show_badge is not False %}checked{% endif %}>
+          نشان تخفیف/جدید/پرفروش
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_wishlist" {% if section.settings.card.show_wishlist is not False %}checked{% endif %}>
+          آیکون علاقه‌مندی
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_rating" {% if section.settings.card.show_rating is not False %}checked{% endif %}>
+          امتیاز و تعداد نظر
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_show_quick_add" {% if section.settings.card.show_quick_add is not False %}checked{% endif %}>
+          دکمه افزودن سریع به سبد
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="card_border" {% if section.settings.card.card_border is not False %}checked{% endif %}>
+          حاشیه دور کارت
+        </label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>نحوه نمایان‌شدن دکمه افزودن سریع</label>
+      <select name="card_quick_add_reveal" class="form-select">
+        <option value="hover_slide" {% if section.settings.card.quick_add_reveal != "hover_fade" and section.settings.card.quick_add_reveal != "always" %}selected{% endif %}>هنگام هاور — سُر بخورد بالا</option>
+        <option value="hover_fade" {% if section.settings.card.quick_add_reveal == "hover_fade" %}selected{% endif %}>هنگام هاور — محو شود</option>
+        <option value="always" {% if section.settings.card.quick_add_reveal == "always" %}selected{% endif %}>همیشه نمایان</option>
+      </select>
+    </div>
+  </div>
+</details>

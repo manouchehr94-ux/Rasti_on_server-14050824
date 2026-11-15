@@ -1,0 +1,54 @@
+{% load persian %}
+{% if products %}
+{% comment %}The countdown is an inline Alpine component (no <script> in this fragment): a settings edit swaps just this section
+instead of reloading the Preview document; Alpine's destroy() clears the timer when the fragment is replaced.{% endcomment %}
+<section class="section amazing-offers-section" id="sec-amazing">
+  <div class="special-wrap" data-sfb-section-surface="ink" x-data="{ active: 0 }">
+    <aside class="special-list" aria-label="محصولات پیشنهاد ویژه">
+      <div class="special-list-title">
+        <span>{{ settings.title|default:"پیشنهاد شگفت‌انگیز" }}</span>
+        {% if deadline %}
+        <span class="special-count" data-deadline="{{ deadline }}" x-init="start()" x-data="{ h: '۰۰', m: '۰۰', s: '۰۰', _t: null,
+            start() { const fa = '۰۱۲۳۴۵۶۷۸۹'; const toFa = (n) => String(n).padStart(2, '0').replace(/\d/g, (d) => fa[d]); const end = new Date('{{ deadline }}').getTime();
+                      const tick = () => { const diff = Math.max(0, Math.floor((end - Date.now()) / 1000)); this.h = toFa(Math.floor(diff / 3600)); this.m = toFa(Math.floor((diff % 3600) / 60)); this.s = toFa(diff % 60); if (diff === 0) clearInterval(this._t); };
+                      tick(); this._t = setInterval(tick, 1000); },
+            destroy() { clearInterval(this._t); } }">
+          <b x-text="h"></b>:<b x-text="m"></b>:<b x-text="s"></b>
+        </span>
+        {% endif %}
+      </div>
+      {% for p in products %}
+      <button type="button" @click="active={{ forloop.counter0 }}" :class="{ 'active': active === {{ forloop.counter0 }} }">
+        <span class="special-list-name">{{ p.name }}</span>
+        <span class="special-list-price">{{ p.final_price|toman }}</span>
+      </button>
+      {% endfor %}
+    </aside>
+
+    <div class="special-panels">
+      {% for p in products %}
+      <article class="special-main" x-show="active === {{ forloop.counter0 }}" x-cloak>
+        <div class="special-copy">
+          <span class="special-kicker">انتخاب ویژه امروز</span>
+          {% if p.discount_percent > 0 %}<span class="special-discount">٪{{ p.discount_percent|fa_number }}</span>{% endif %}
+          <h3>{{ p.name }}</h3>
+          {% if p.brand %}<p class="special-brand">{{ p.brand.name }}</p>{% endif %}
+          <div class="special-price">
+            <strong>{{ p.final_price|toman }}</strong>
+            {% if p.discount_percent > 0 %}<del>{{ p.price|toman }}</del>{% endif %}
+          </div>
+          <a class="special-buy" href="{% url 'catalog:product-detail' p.slug %}">مشاهده و خرید محصول</a>
+        </div>
+        <a class="special-image" href="{% url 'catalog:product-detail' p.slug %}" aria-label="{{ p.name }}">
+          {% if p.cover_image %}
+          <img src="{{ p.cover_image.image.url|default:p.cover_image.thumbnail.url }}" data-img-role="product" alt="{{ p.name }}" loading="lazy">
+          {% else %}
+          <span class="product-placeholder"><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M18 23h28l-2 30H20l-2-30z"/><path d="M25 25v-5a7 7 0 0114 0v5"/><path d="M15 31h34"/></svg></span>
+          {% endif %}
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}

@@ -1,0 +1,857 @@
+{% load storefront_builder_extras %}
+<div class="sfb-drawer-body"
+     data-inspector-section-id="{{ section.pk }}"
+     data-inspector-locked="{% if section.is_locked %}1{% else %}0{% endif %}"
+     data-inspector-row-key="{{ section.row_key }}"
+     x-data="{ deleteConfirmOpen: false }"
+     :class="{ 'is-advanced-tab': inspectorTab === 'advanced' }">
+  <div class="sfb-inspector-section-actions" role="toolbar" aria-label="عملیات محتوا">
+    {% if placement_cell %}
+    <button type="button" @click="blockCommand({{ section.pk }}, 'up')" {% if section.is_locked or placement_cell.container.is_locked %}disabled{% endif %} title="انتقال بلاک به بالا در همین ستون">↑</button>
+    <button type="button" @click="blockCommand({{ section.pk }}, 'down')" {% if section.is_locked or placement_cell.container.is_locked %}disabled{% endif %} title="انتقال بلاک به پایین در همین ستون">↓</button>
+    {% else %}
+    <button type="button" @click="sectionCommand({{ section.pk }}, 'up')" {% if section.is_locked %}disabled{% endif %} title="انتقال به بالا">↑</button>
+    <button type="button" @click="sectionCommand({{ section.pk }}, 'down')" {% if section.is_locked %}disabled{% endif %} title="انتقال به پایین">↓</button>
+    {% endif %}
+    <button type="button" @click="sectionCommand({{ section.pk }}, 'duplicate')" {% if not definition.duplicable %}disabled{% endif %} title="کپی محتوا">⧉</button>
+    <button type="button" @click="sectionCommand({{ section.pk }}, 'toggle')" title="نمایش/مخفی">{% if section.is_active %}👁{% else %}⊘{% endif %}</button>
+    <button type="button" @click="sectionCommand({{ section.pk }}, 'lock')" title="{% if section.is_locked %}بازکردن قفل{% else %}قفل‌کردن{% endif %}">{% if section.is_locked %}🔓{% else %}🔒{% endif %}</button>
+    {% if placement_cell %}
+    <button type="button" class="danger" @click="blockCommand({{ section.pk }}, 'remove')" {% if section.is_locked or placement_cell.container.is_locked or not definition.removable %}disabled{% endif %} title="حذف فقط همین بلاک">×</button>
+    {% else %}
+    <button type="button" class="danger" @click="if (confirm('این بخش برای همیشه حذف شود؟')) sectionCommand({{ section.pk }}, 'remove')" {% if section.is_locked or not definition.removable %}disabled{% endif %} title="حذف">×</button>
+    {% endif %}
+  </div>
+  {% if section.template_slot_key %}
+  {# Acceptance Batch 2 (post-U11) — only a section that actually came from #}
+  {# a Ready Template baseline can be reset to it; a fully merchant-created #}
+  {# section never shows this control at all. #}
+  <form method="post" action="{% url 'dashboard:storefront-builder-section-reset' section.pk %}"
+        onsubmit="return confirm('این بخش به حالتِ اولیه‌یِ قالب بازنشانی می‌شود — تغییراتِ شما رویِ این بخش از بین می‌رود. ادامه می‌دهید؟')">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-ghost btn-sm sfb-reset-to-template-btn" {% if section.is_locked %}disabled{% endif %}>⟲ بازنشانی این بخش به قالب</button>
+  </form>
+  {% endif %}
+  <p class="sfb-drawer-subtitle">{{ definition.label_fa }} — این پنل فقط همین بلاک را تنظیم می‌کند{% if placement_cell %} · شکل و اندازه ستون از «تنظیم چیدمان» کنترل می‌شود{% endif %}{% if section.is_locked %} · این محتوا قفل است{% endif %}</p>
+  <div class="sfb-v22-context-shortcuts">
+    <div class="sfb-v22-context-shortcuts-head"><strong>میانبرهای همین بخش</strong><small>به ابزار واقعی همان داده برو</small></div>
+    <div class="sfb-v22-context-shortcuts-list">
+      {% if section.section_key == "product_section" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:product-list' %}', 'مدیریت کالاها')">کالاها</button>
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:collection-list' %}', 'کالکشن‌ها')">کالکشن‌ها</button>
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:category-list' %}', 'دسته‌بندی‌ها')">دسته‌بندی‌ها</button>
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:brand-list' %}', 'برندها')">برندها</button>
+      {% elif section.section_key == "category_grid" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:category-list' %}', 'دسته‌بندی‌های فروشگاه')">مدیریت دسته‌بندی‌ها</button>
+      {% elif section.section_key == "brand_carousel" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:brand-list' %}', 'برندهای فروشگاه')">مدیریت برندها</button>
+      {% elif section.section_key == "collection_tiles" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:collection-list' %}', 'کالکشن‌های فروشگاه')">مدیریت کالکشن‌ها</button>
+      {% elif section.section_key == "hero_banner" or section.section_key == "image_slider" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:storefront-builder-section-media-list' section.pk 'hero-slides' %}', 'اسلایدهای همین بخش')">تصاویر و اسلایدها</button>
+      {% elif section.section_key == "single_banner" or section.section_key == "multi_banner" %}
+      <button type="button" @click="openDeepWorkspace('{% url 'dashboard:storefront-builder-section-media-list' section.pk 'banners' %}', 'بنرهای همین بخش')">تصاویر و بنرها</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if placement_cell %}
+  <div class="sfb-v3-cell-context-actions">
+    <button type="button" @click="selectContainer({{ placement_cell.container_id }})">▦ تنظیم چیدمان</button>
+    <button type="button" class="danger" @click="if (confirm('همه کامپوننت‌های این ستون حذف شوند؟ خود ستون و چیدمان باقی می‌ماند.')) cellCommand({{ placement_cell.pk }}, 'clear', {{ section.pk }})" {% if placement_cell.container.is_locked %}disabled{% endif %}>خالی کردن ستون</button>
+  </div>
+  {% endif %}
+
+  {% if field_errors.general %}<div class="field-error" style="margin-bottom:10px">{{ field_errors.general }}</div>{% endif %}
+  {% if section.section_key == "product_section" %}
+  {{ initial_manual_products|json_script:"ps-initial-products" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="productSectionForm('{{ section.settings.data_source|default:"newest" }}', JSON.parse(document.getElementById('ps-initial-products').textContent), 60)">
+    {% csrf_token %}
+    {# R2 source-contract compatibility: the shared inline manual picker still uses storefront-builder-section-product-search; the historical "کالاهای دستی (انتخاب تکی)" control is represented by the shared manual-selection mode below. #}
+    {% include "dashboard/storefront_builder/partials/universal_selection_picker.html" %}
+    <div class="form-group" x-show="selectionMode === 'automatic'" x-cloak>
+      <label for="id_ps_source">منبع خودکار کالاها</label>
+      <select name="data_source" id="id_ps_source" class="form-select" x-model="dataSource" :disabled="selectionMode !== 'automatic'">
+        <option value="newest">جدیدترین محصولات</option>
+        <option value="discounted">محصولات تخفیف‌دار</option>
+        <option value="best_sellers">پرفروش‌ترین‌ها</option>
+        <option value="most_viewed">پربازدیدترین‌ها</option>
+        <option value="collection">کالکشن</option>
+        <option value="category">دسته‌بندی</option>
+        <option value="brand">برند</option>
+      </select>
+    </div>
+
+    <div class="form-group" x-show="dataSource === 'collection'" x-cloak>
+      <label for="id_ps_collection">انتخاب کالکشن</label>
+      <select name="source_id" id="id_ps_collection" class="form-select" :disabled="dataSource !== 'collection'">
+        <option value="">— انتخاب کنید —</option>
+        {% for collection in collections %}
+        <option value="{{ collection.pk }}" {% if section.settings.data_source == "collection" and section.settings.source_id == collection.pk %}selected{% endif %}>
+          {{ collection.name }}{% if not collection.is_active %} (غیرفعال){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      {% if not collections %}<p style="color:var(--muted);font-size:12px;margin:6px 0 0">هنوز هیچ کالکشنی نساخته‌اید.</p>{% endif %}
+    </div>
+
+    <div class="form-group" x-show="dataSource === 'category'" x-cloak>
+      <label for="id_ps_category">انتخاب دسته‌بندی</label>
+      <select name="source_id" id="id_ps_category" class="form-select" :disabled="dataSource !== 'category'">
+        <option value="">— انتخاب کنید —</option>
+        {% for category in categories %}
+        <option value="{{ category.pk }}" {% if section.settings.data_source == "category" and section.settings.source_id == category.pk %}selected{% endif %}>
+          {{ category.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group" x-show="dataSource === 'brand'" x-cloak>
+      <label for="id_ps_brand">انتخاب برند</label>
+      <select name="source_id" id="id_ps_brand" class="form-select" :disabled="dataSource !== 'brand'">
+        <option value="">— انتخاب کنید —</option>
+        {% for brand in brands %}
+        <option value="{{ brand.pk }}" {% if section.settings.data_source == "brand" and section.settings.source_id == brand.pk %}selected{% endif %}>
+          {{ brand.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+
+
+    <div class="form-group">
+      <label for="id_ps_title">عنوان بخش</label>
+      <input type="text" name="title" id="id_ps_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      {# Post-demo hardening pass (Issue 7) — this per-field RESET FIELD #}
+      {# control used to exist only here (Acceptance Batch 2's "illustrative" #}
+      {# instance); it is now wired consistently on the "title" field of #}
+      {# every section type below that has one — the one setting shared #}
+      {# broadly enough across types to give a single, consistent control. #}
+      {# A plain POST (not htmx) — this view returns a normal editor #}
+      {# redirect, not a partial. #}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label for="id_ps_display">نوع نمایش</label>
+      <select name="display_mode" id="id_ps_display" class="form-select">
+        <option value="carousel" {% if section.settings.display_mode != "grid" and section.settings.display_mode != "campaign_band" %}selected{% endif %}>کاروسل (اسلایدی)</option>
+        <option value="grid" {% if section.settings.display_mode == "grid" %}selected{% endif %}>گرید (شبکه‌ای)</option>
+        <option value="campaign_band" {% if section.settings.display_mode == "campaign_band" %}selected{% endif %}>نوار کمپینی کنار محصولات</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="id_ps_limit">تعداد کالا</label>
+      <input type="number" name="item_limit" id="id_ps_limit" class="form-input" min="2" max="24"
+             value="{{ section.settings.item_limit|default:8 }}">
+    </div>
+
+    <details style="margin-top:6px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--muted)">تنظیمات بیشتر</summary>
+      <div class="form-group" style="margin-top:10px">
+        <label for="id_ps_subtitle">زیرعنوان (اختیاری)</label>
+        <input type="text" name="subtitle" id="id_ps_subtitle" class="form-input" maxlength="150" value="{{ section.settings.subtitle|default:'' }}">
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="show_view_all" {% if section.settings.show_view_all|default:True %}checked{% endif %}>
+          نمایش دکمه «مشاهده همه»
+        </label>
+      </div>
+      <div class="form-group">
+        <label for="id_ps_header_position">جای عنوان بخش</label>
+        <select name="header_position" id="id_ps_header_position" class="form-select">
+          <option value="above" {% if section.settings.header_position != "inside" %}selected{% endif %}>بالای بخش</option>
+          <option value="inside" {% if section.settings.header_position == "inside" %}selected{% endif %}>داخل قاب کاروسل</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="carousel_autoplay" {% if section.settings.carousel_autoplay %}checked{% endif %}>
+          پخش خودکار کاروسل
+        </label>
+      </div>
+      <div class="form-group">
+        <label for="id_ps_carousel_interval">فاصله پخش خودکار (میلی‌ثانیه)</label>
+        <input type="number" name="carousel_interval_ms" id="id_ps_carousel_interval" class="form-input" min="2000" max="10000" step="500" value="{{ section.settings.carousel_interval_ms|default:3500 }}">
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+          <input type="checkbox" name="carousel_show_arrows" {% if section.settings.carousel_show_arrows is not False %}checked{% endif %}>
+          نمایش فلش‌های کاروسل
+        </label>
+      </div>
+    </details>
+
+    {% include "dashboard/storefront_builder/partials/section_destination_fields.html" %}
+    <p style="color:var(--muted);font-size:12px;margin:2px 0 0">اگر لینک تعیین کنید، دکمه «مشاهده همه» به‌جای آدرس خودکار به این مقصد می‌رود.</p>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_card_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "image_text" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_title">عنوان</label>
+      <input type="text" name="title" id="id_title" class="form-input" maxlength="200" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_image_url">آدرس تصویر (اختیاری)</label>
+      <input type="url" name="image_url" id="id_image_url" class="form-input" dir="ltr" value="{{ section.settings.image_url|default:'' }}">
+    </div>
+    <div class="form-group">
+      <label>موقعیت تصویر</label>
+      <select name="image_position" class="form-select">
+        <option value="right" {% if section.settings.image_position != "left" %}selected{% endif %}>راست</option>
+        <option value="left" {% if section.settings.image_position == "left" %}selected{% endif %}>چپ</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="id_body_html">متن</label>
+      <p class="sfb-field-help">متن نهایی را بنویس؛ عنوان، پررنگ، فهرست و لینک در همین ویرایشگر در دسترس است.</p>
+      <div class="sfb-rich-editor" x-data="storefrontRichTextEditor()" x-init="mount()">
+        <textarea class="inp sfb-rich-text-source" name="body_html" id="id_body_html" x-ref="source" aria-hidden="true" tabindex="-1">{{ section.settings.body_html|default:"" }}</textarea>
+      </div>
+    </div>
+
+    <details class="sfb-advanced-disclosure">
+      <summary>تنظیمات بیشتر</summary>
+      <div class="sfb-advanced-disclosure-body">
+        {% include "dashboard/storefront_builder/partials/section_destination_fields.html" %}
+        {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+        {% include "dashboard/storefront_builder/partials/section_layout_fields.html" %}
+        {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+      </div>
+    </details>
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "rich_text" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_body_html">متن</label>
+      <p class="sfb-field-help">فقط محتوایی را که مشتری باید ببیند بنویس؛ کد HTML نمایش داده نمی‌شود.</p>
+      <div class="sfb-rich-editor" x-data="storefrontRichTextEditor()" x-init="mount()">
+        <textarea class="inp sfb-rich-text-source" name="body_html" id="id_body_html" x-ref="source" aria-hidden="true" tabindex="-1">{{ section.settings.body_html|default:"" }}</textarea>
+      </div>
+    </div>
+
+    <details class="sfb-advanced-disclosure">
+      <summary>تنظیمات بیشتر</summary>
+      <div class="sfb-advanced-disclosure-body">
+        {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+      </div>
+    </details>
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "hero_banner" or section.section_key == "image_slider" %}
+  <a href="{% url 'dashboard:storefront-builder-section-media-list' pk=section.pk kind='hero-slides' %}" class="btn btn-primary" style="width:100%;margin-bottom:14px;text-align:center;display:block">مدیریت اسلایدها ({{ section.hero_slides.count }})</a>
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    {% comment %}
+    عمداً «is not False» به‌جایِ فیلترِ «|default:True» — همان دلیلِ
+    مستندشده در ``models.py::effective_header_config``: |default مقدارِ
+    صریحِ False را هم falsy می‌گیرد و آن را با True override می‌کند.
+    {% endcomment %}
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="autoplay" {% if section.settings.autoplay is not False %}checked{% endif %}>
+        پخش خودکار
+      </label>
+    </div>
+    <div class="form-group">
+      <label for="id_interval_ms">فاصله‌ی پخش خودکار (میلی‌ثانیه)</label>
+      <input type="number" name="interval_ms" id="id_interval_ms" class="form-input" min="2000" max="10000" step="500" value="{{ section.settings.interval_ms|default:4500 }}">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="show_arrows" {% if section.settings.show_arrows is not False %}checked{% endif %}>
+        نمایش فلش‌های جابه‌جایی
+      </label>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="show_dots" {% if section.settings.show_dots is not False %}checked{% endif %}>
+        نمایش نقطه‌های صفحه
+      </label>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="loop" {% if section.settings.loop is not False %}checked{% endif %}>
+        چرخش پیوسته (بعد از آخرین اسلاید به اول برگردد)
+      </label>
+    </div>
+    <div class="form-group">
+      <label for="id_hero_text_position">جای متن روی تصویر</label>
+      <select name="text_position" id="id_hero_text_position" class="form-select">
+        <option value="start" {% if section.settings.text_position == "start" %}selected{% endif %}>سمت راست</option>
+        <option value="center" {% if section.settings.text_position == "center" %}selected{% endif %}>وسط</option>
+        <option value="end" {% if section.settings.text_position != "start" and section.settings.text_position != "center" %}selected{% endif %}>سمت چپ</option>
+      </select>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0 0">فقط جای عنوان، توضیح و دکمه را تغییر می‌دهد؛ خود تصویر دست‌نخورده می‌ماند.</p>
+    </div>
+
+    {% if section.section_key == "hero_banner" %}
+    {# U9 — section component variant swap: exposes U4's registered hero_banner variants ("overlay"/"split") to the merchant. image_slider has no registered variants, so this control is deliberately hero_banner-only. #}
+    <div class="form-group">
+      <label for="id_hero_style">سبک نمایش</label>
+      <select name="hero_style" id="id_hero_style" class="form-select">
+        <option value="overlay" {% if section.settings.hero_style != "split" and section.settings.hero_style != "beauty_editorial" and section.settings.hero_style != "chocolate_carousel" and section.settings.hero_style != "atelier_triptych" and section.settings.hero_style != "luxury_showcase" %}selected{% endif %}>روی تصویر (پیش‌فرض)</option>
+        <option value="split" {% if section.settings.hero_style == "split" %}selected{% endif %}>متن و تصویر جدا</option>
+        <option value="beauty_editorial" {% if section.settings.hero_style == "beauty_editorial" %}selected{% endif %}>کمپین روشن فروشگاهی</option>
+        <option value="chocolate_carousel" {% if section.settings.hero_style == "chocolate_carousel" %}selected{% endif %}>کاروسل فروشگاهی شکلاتی</option>
+        <option value="atelier_triptych" {% if section.settings.hero_style == "atelier_triptych" %}selected{% endif %}>سه‌قاب قوسی آتلیه</option>
+        <option value="luxury_showcase" {% if section.settings.hero_style == "luxury_showcase" %}selected{% endif %}>ویترین لوکس تیره</option>
+      </select>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0 0">«متن و تصویر جدا» فقط اولین اسلاید را نشان می‌دهد؛ اسلایدهای دیگر همچنان از اینجا قابل مدیریت‌اند.</p>
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('سبکِ نمایشِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="hero_style">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی سبک نمایش به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_layout_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "category_grid" %}
+  {{ initial_selected_categories|json_script:"cg-initial-selected" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="multiPickerForm(JSON.parse(document.getElementById('cg-initial-selected').textContent), 12)">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_cg_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_cg_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_cg_display">نوع نمایش</label>
+      <select name="display_mode" id="id_cg_display" class="form-select">
+        <option value="grid" {% if section.settings.display_mode == "grid" or not section.settings.display_mode %}selected{% endif %}>گرید (شبکه‌ای)</option>
+        <option value="carousel" {% if section.settings.display_mode == "carousel" %}selected{% endif %}>کاروسل (اسلایدی)</option>
+        <option value="circular" {% if section.settings.display_mode == "circular" %}selected{% endif %}>دایره‌ای</option>
+        <option value="image_strip" {% if section.settings.display_mode == "image_strip" %}selected{% endif %}>ردیف تصویری</option>
+        <option value="fashion_flat" {% if section.settings.display_mode == "fashion_flat" %}selected{% endif %}>نوار مسطح کمپینی</option>
+        <option value="fashion_mosaic" {% if section.settings.display_mode == "fashion_mosaic" %}selected{% endif %}>موزاییک دسته‌بندی</option>
+        <option value="beauty_icons" {% if section.settings.display_mode == "beauty_icons" %}selected{% endif %}>آیکن‌های فروشگاه زیبایی</option>
+        <option value="chocolate_story" {% if section.settings.display_mode == "chocolate_story" %}selected{% endif %}>هایلایت‌های دایره‌ای شکلاتی</option>
+        <option value="chocolate_badges" {% if section.settings.display_mode == "chocolate_badges" %}selected{% endif %}>میانبرهای تصویری شکلاتی</option>
+        <option value="atelier_mosaic" {% if section.settings.display_mode == "atelier_mosaic" %}selected{% endif %}>موزاییک تصویری آتلیه</option>
+        <option value="luxury_shortcuts" {% if section.settings.display_mode == "luxury_shortcuts" %}selected{% endif %}>میانبرهای لوکس تصویری</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="id_cg_limit">تعداد دسته‌بندی</label>
+      <input type="number" name="item_limit" id="id_cg_limit" class="form-input" min="2" max="12" value="{{ section.settings.item_limit|default:12 }}">
+    </div>
+    {% include "dashboard/storefront_builder/partials/universal_selection_picker.html" %}
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "brand_carousel" %}
+  {{ initial_selected_brands|json_script:"bc-initial-selected" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="multiPickerForm(JSON.parse(document.getElementById('bc-initial-selected').textContent), 24)">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_bc_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_bc_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}" placeholder="برندهای منتخب">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_bc_display">نوع نمایش</label>
+      <select name="display_mode" id="id_bc_display" class="form-select">
+        <option value="grid" {% if section.settings.display_mode == "grid" or not section.settings.display_mode %}selected{% endif %}>گرید (شبکه‌ای)</option>
+        <option value="carousel" {% if section.settings.display_mode == "carousel" %}selected{% endif %}>کاروسل (اسلایدی)</option>
+        <option value="beauty_tabs" {% if section.settings.display_mode == "beauty_tabs" %}selected{% endif %}>ردیف برندهای فروشگاهی</option>
+      </select>
+    </div>
+    {# Phase 3 (V02) — the "مشاهده همه" toggle is only offered for variants #}
+    {# that actually render the anchor (grid/carousel), never beauty_tabs. #}
+    {# When hidden, a hidden marker input tells the server the checkbox was #}
+    {# not part of this form so a DORMANT stored value is preserved rather  #}
+    {# than silently reset to False (destination authoring stays intact).   #}
+    {% if section.settings.display_mode == "beauty_tabs" %}
+    <input type="hidden" name="show_view_all_field_present" value="0">
+    {% else %}
+    <input type="hidden" name="show_view_all_field_present" value="1">
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="show_view_all" {% if section.settings.show_view_all %}checked{% endif %}>
+        نمایش لینک «مشاهده همه» (نیازمندِ انتخابِ مقصد در پایین)
+      </label>
+    </div>
+    {% endif %}
+    {% include "dashboard/storefront_builder/partials/universal_selection_picker.html" %}
+
+    {% include "dashboard/storefront_builder/partials/section_destination_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "collection_tiles" %}
+  {{ initial_selected_collections|json_script:"ct-initial-selected" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="multiPickerForm(JSON.parse(document.getElementById('ct-initial-selected').textContent), 12)">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_ct_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_ct_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    {% include "dashboard/storefront_builder/partials/universal_selection_picker.html" %}
+
+    {# U9 — section component variant swap: exposes U4's registered collection_tiles variants ("grid"/"carousel"). #}
+    <div class="form-group">
+      <label for="id_ct_style">نمایش</label>
+      <select name="tile_style" id="id_ct_style" class="form-select">
+        <option value="grid" {% if section.settings.tile_style != "carousel" %}selected{% endif %}>گرید (شبکه‌ای)</option>
+        <option value="carousel" {% if section.settings.tile_style == "carousel" %}selected{% endif %}>کاروسل (اسلایدی)</option>
+      </select>
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('نمایشِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="tile_style">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی نمایش به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "quick_links" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_ql_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_ql_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_ql_menu">منو</label>
+      <select name="menu_id" id="id_ql_menu" class="form-select">
+        <option value="">— انتخاب کنید —</option>
+        {% for menu in all_menus %}
+        <option value="{{ menu.pk }}" {% if section.settings.menu_id == menu.pk %}selected{% endif %}>{{ menu.title }} ({{ menu.get_location_display }})</option>
+        {% endfor %}
+      </select>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0 0">لینک‌های همان منو به‌شکلِ کارت‌هایِ بصری نمایش داده می‌شوند.</p>
+      {% if not all_menus %}<p style="color:var(--muted);font-size:12px;margin:6px 0 0">هنوز هیچ منویی نساخته‌اید — از «منوها» در پنل مدیریت یک منو بسازید.</p>{% endif %}
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "faq" %}
+  {{ section.settings.items|json_script:"faq-initial-items" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="itemRepeaterForm(JSON.parse(document.getElementById('faq-initial-items').textContent), {question:'', answer:''})">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_faq_title">عنوان بخش</label>
+      <input type="text" name="title" id="id_faq_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'سوالات متداول' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <template x-for="(row, index) in rows" :key="index">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div class="form-group">
+          <label>سوال</label>
+          <input type="text" name="question" class="form-input" x-model="row.question" maxlength="200">
+        </div>
+        <div class="form-group">
+          <label>پاسخ</label>
+          <textarea name="answer" class="inp" x-model="row.answer" maxlength="1000" style="min-height:70px"></textarea>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-sm" @click="moveUp(index)" :disabled="index === 0">▲</button>
+          <button type="button" class="btn btn-sm" @click="moveDown(index)" :disabled="index === rows.length - 1">▼</button>
+          <button type="button" class="btn btn-sm btn-danger" @click="removeRow(index)">حذف این سوال</button>
+        </div>
+      </div>
+    </template>
+    <button type="button" class="btn btn-sm" @click="addRow()">+ افزودن سوال</button>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "testimonials" %}
+  {{ section.settings.items|json_script:"testimonials-initial-items" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="itemRepeaterForm(JSON.parse(document.getElementById('testimonials-initial-items').textContent), {name:'', quote:'', role:''})">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_tm_title">عنوان بخش</label>
+      <input type="text" name="title" id="id_tm_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'نظرات مشتریان' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <template x-for="(row, index) in rows" :key="index">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div class="form-group">
+          <label>نام مشتری</label>
+          <input type="text" name="t_name" class="form-input" x-model="row.name" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>نظر</label>
+          <textarea name="t_quote" class="inp" x-model="row.quote" maxlength="400" style="min-height:60px"></textarea>
+        </div>
+        <div class="form-group">
+          <label>سمت/شهر (اختیاری)</label>
+          <input type="text" name="t_role" class="form-input" x-model="row.role" maxlength="80">
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-sm" @click="moveUp(index)" :disabled="index === 0">▲</button>
+          <button type="button" class="btn btn-sm" @click="moveDown(index)" :disabled="index === rows.length - 1">▼</button>
+          <button type="button" class="btn btn-sm btn-danger" @click="removeRow(index)">حذف این نظر</button>
+        </div>
+      </div>
+    </template>
+    <button type="button" class="btn btn-sm" @click="addRow()">+ افزودن نظر</button>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "video_section" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_vs_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_vs_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_vs_url">لینک ویدیو (یوتیوب، آپارات یا پست/Reel اینستاگرام)</label>
+      <input type="url" name="video_url" id="id_vs_url" class="form-input" dir="ltr" value="{{ section.settings.video_url|default:'' }}" placeholder="https://...">
+    </div>
+    <div class="form-group">
+      <label for="id_vs_caption">زیرنویس (اختیاری)</label>
+      <input type="text" name="caption" id="id_vs_caption" class="form-input" maxlength="200" value="{{ section.settings.caption|default:'' }}">
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "newsletter" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">ایمیلِ ثبت‌شده در بخشِ «مشترکینِ خبرنامه»یِ پنلِ مدیریت ذخیره می‌شود — ارسالِ خبرنامه هنوز خودکار نیست.</p>
+    <div class="form-group">
+      <label for="id_nl_title">عنوان</label>
+      <input type="text" name="title" id="id_nl_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'عضویت در خبرنامه' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_nl_subtitle">زیرعنوان (اختیاری)</label>
+      <input type="text" name="subtitle" id="id_nl_subtitle" class="form-input" maxlength="150" value="{{ section.settings.subtitle|default:'' }}">
+    </div>
+    <div class="form-group">
+      <label for="id_nl_button">متنِ دکمه</label>
+      <input type="text" name="button_label" id="id_nl_button" class="form-input" maxlength="30" value="{{ section.settings.button_label|default:'عضویت' }}">
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "trust_features" %}
+  {{ section.settings.items|json_script:"tf-initial-items" }}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false"
+        x-data="itemRepeaterForm(JSON.parse(document.getElementById('tf-initial-items').textContent), {icon:'', title:'', subtitle:''})">
+    {% csrf_token %}
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">فهرست خالی یعنی ۴ آیتمِ پیش‌فرضِ همیشگی بدون تغییر نمایش داده می‌شود.</p>
+    <template x-for="(row, index) in rows" :key="index">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div class="form-group">
+          <label>آیکون (اموجی، اختیاری)</label>
+          <input type="text" name="tf_icon" class="form-input" x-model="row.icon" maxlength="8">
+        </div>
+        <div class="form-group">
+          <label>عنوان (الزامی)</label>
+          <input type="text" name="tf_title" class="form-input" x-model="row.title" maxlength="40">
+        </div>
+        <div class="form-group">
+          <label>زیرعنوان (اختیاری)</label>
+          <input type="text" name="tf_subtitle" class="form-input" x-model="row.subtitle" maxlength="40">
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-sm" @click="moveUp(index)" :disabled="index === 0">▲</button>
+          <button type="button" class="btn btn-sm" @click="moveDown(index)" :disabled="index === rows.length - 1">▼</button>
+          <button type="button" class="btn btn-sm btn-danger" @click="removeRow(index)">حذف این آیتم</button>
+        </div>
+      </div>
+    </template>
+    <button type="button" class="btn btn-sm" @click="addRow()">+ افزودن آیتم</button>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "amazing_offers" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_ao_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_ao_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_ao_item_limit">تعداد پیشنهادها (۱ تا ۴)</label>
+      <input type="number" name="item_limit" id="id_ao_item_limit" class="form-input" min="1" max="4" value="{{ section.settings.item_limit|default:1 }}">
+    </div>
+    <div class="form-group">
+      <label for="id_ao_deadline">مدتِ زمان‌شمار (ساعت، ۱ تا ۱۶۸)</label>
+      <input type="number" name="deadline_hours" id="id_ao_deadline" class="form-input" min="1" max="168" value="{{ section.settings.deadline_hours|default:8 }}">
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "blog_posts" %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_bp_title">عنوان بخش (اختیاری)</label>
+      <input type="text" name="title" id="id_bp_title" class="form-input" maxlength="60" value="{{ section.settings.title|default:'' }}">
+      {% if section.template_slot_key %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-section-field-reset' section.pk %}" style="margin-top:6px"
+            onsubmit="return confirm('عنوانِ این بخش به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+        {% csrf_token %}<input type="hidden" name="field" value="title">
+        <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی عنوان به قالب</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="form-group">
+      <label for="id_bp_item_limit">تعداد مطالب (۳ تا ۶)</label>
+      <input type="number" name="item_limit" id="id_bp_item_limit" class="form-input" min="3" max="6" value="{{ section.settings.item_limit|default:5 }}">
+    </div>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% elif section.section_key == "single_banner" or section.section_key == "multi_banner" %}
+  <a href="{% url 'dashboard:storefront-builder-section-media-list' pk=section.pk kind='banners' %}" class="btn btn-primary" style="width:100%;margin-bottom:14px;text-align:center;display:block">مدیریت بنرها ({{ section.banners.count }})</a>
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">تصویر/عنوان/لینکِ هر بنر از دکمه‌ی بالا مدیریت می‌شود.</p>
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_layout_fields.html" %}
+    {% include "dashboard/storefront_builder/partials/section_motion_fields.html" %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+
+  {% else %}
+  <form class="sfb-v3-section-form" data-sfb-autosave="true" method="post" action="{% url 'dashboard:storefront-builder-section-settings' section.pk %}" hx-boost="false">
+    {% csrf_token %}
+    {% if supports_card %}
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">این بخش عنوان/محتوای اختصاصی ندارد — نمایش در دستگاه‌ها و ظاهر کارت‌های محصول قابل تنظیم است.</p>
+    {% else %}
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">این بخش تنظیمات محتوایی ندارد — فقط نمایش در دستگاه‌ها قابل تنظیم است.</p>
+    {% endif %}
+
+    {% include "dashboard/storefront_builder/partials/section_responsive_fields.html" %}
+    {% if supports_card %}
+    {% include "dashboard/storefront_builder/partials/section_card_fields.html" %}
+    {% endif %}
+
+    <div class="sfb-form-actions" style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+      <button type="button" class="btn" @click="$dispatch('close-settings-drawer')">انصراف</button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if definition.duplicable or definition.removable %}
+  <div class="sfb-drawer-danger-zone">
+    <div class="sfb-panel-title">اقدامات دیگر</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      {% if definition.duplicable %}
+      <button type="button" class="btn"
+              hx-post="{% url 'dashboard:storefront-builder-section-duplicate' section.pk %}"
+              hx-target="#storefrontSectionList" hx-swap="outerHTML"
+              @click="$dispatch('close-settings-drawer')">کپی این بخش</button>
+      {% endif %}
+      {% if definition.removable %}
+      <button type="button" class="btn btn-danger"
+              @click="deleteConfirmOpen = true">{% if placement_cell %}خالی کردن این خانه{% else %}حذف این بخش{% endif %}</button>
+      {% endif %}
+    </div>
+    {% if definition.removable %}
+    <div class="sfb-inline-confirm" x-show="deleteConfirmOpen" x-cloak>
+      <p>{% if placement_cell %}محتوای این خانه حذف شود؟ خود خانه و چیدمان باقی می‌ماند.{% else %}این بخش برای همیشه حذف شود؟{% endif %}</p>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-sm" @click="deleteConfirmOpen = false">انصراف</button>
+        {% if placement_cell %}
+        <button type="button" class="btn btn-sm btn-danger"
+                @click="cellCommand({{ placement_cell.pk }}, 'clear', {{ section.pk }}); deleteConfirmOpen = false">بله، محتوا حذف شود</button>
+        {% else %}
+        <button type="button" class="btn btn-sm btn-danger"
+                hx-post="{% url 'dashboard:storefront-builder-section-remove' section.pk %}"
+                hx-target="#storefrontSectionList" hx-swap="outerHTML"
+                @click="$dispatch('close-settings-drawer')">بله، حذف شود</button>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

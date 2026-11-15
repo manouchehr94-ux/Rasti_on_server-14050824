@@ -1,0 +1,589 @@
+from django.urls import path
+
+from apps.storefront_builder import media_views as storefront_builder_media_views
+from apps.storefront_builder import r4_views as storefront_builder_r4_views
+from apps.storefront_builder import vision_views as storefront_builder_vision_views
+from apps.storefront_builder import views as storefront_builder_views
+
+from apps.notifications.inbox_views import VIEWS_DASH, url_patterns as _inbox_patterns
+from . import card_transfer_views, cod_views, platform_checkout_views, engagement_views, journal_views, notification_admin_views, payment_reconciliation_views, views, views_domain
+
+app_name = "dashboard"
+
+
+def notification_inbox_urls():
+    return _inbox_patterns(VIEWS_DASH)
+
+
+# RastiSi Vision Studio — a second presentation of the SAME R4 session (route name ``vision-studio``; deliberately NOT prefixed with
+# ``storefront-builder-`` so the sidebar's active-state rules of the older tabs never claim it).
+# r4_editor.js resolves its write/read endpoints RELATIVE to the page it runs on (``new URL('mutate/', location.href)``), so the
+# Vision page needs the same relative endpoints under its own prefix. They are aliases of the ONE set of R4 views - the permission
+# decorators, Store resolution and Draft logic live on those views - never a second implementation. ``VISION_STUDIO_R4_ALIASES`` is the
+# single table the parity test (test_vision_studio.py) checks against r4_editor.js.
+VISION_STUDIO_TEMPLATE = "dashboard/vision/studio.html"
+VISION_STUDIO_R4_ALIASES = (
+    ("mutate/", storefront_builder_r4_views.storefront_r4_mutation, "vision-studio-mutate"),
+    ("sections/<int:pk>/inspector/", storefront_builder_r4_views.storefront_r4_section_inspector, "vision-studio-section-inspector"),
+    ("resources/picker/", storefront_builder_r4_views.storefront_r4_resource_picker, "vision-studio-resource-picker"),
+    ("history/", storefront_builder_r4_views.storefront_r4_history_command, "vision-studio-history"),
+    ("publish/", storefront_builder_r4_views.storefront_r4_publish, "vision-studio-publish"),
+    ("discard/", storefront_builder_r4_views.storefront_r4_discard, "vision-studio-discard"),
+    ("reset-page/", storefront_builder_r4_views.storefront_r4_reset_page, "vision-studio-reset-page"),
+    ("reset-storefront/", storefront_builder_r4_views.storefront_r4_reset_storefront, "vision-studio-reset-storefront"),
+    ("switch-template/", storefront_builder_r4_views.storefront_r4_switch_template, "vision-studio-switch-template"),
+)
+VISION_STUDIO_ROUTES = [
+    path(
+        "vision-studio/",
+        storefront_builder_r4_views.storefront_r4_editor,
+        {"template_name": VISION_STUDIO_TEMPLATE},
+        name="vision-studio",
+    ),
+    *[path("vision-studio/" + rel, view, name=name) for rel, view, name in VISION_STUDIO_R4_ALIASES],
+    # read-only «how would this header / footer model look» preview (Vision only; writes nothing)
+    path("vision-studio/region-preview/", storefront_builder_vision_views.region_variant_preview, name="vision-studio-region-preview"),
+]
+
+urlpatterns = [
+    path("login/", views.admin_login, name="login"),
+    path("handoff/<str:token>/", views.consume_admin_handoff, name="handoff"),
+    path("exit-support-mode/", views.exit_support_mode, name="exit-support-mode"),
+    path("", views.dashboard_home, name="dashboard"),
+    path("sales-chart/", views.sales_chart_partial, name="sales-chart"),
+
+    path("products/", views.product_list, name="product-list"),
+    path("products/table/", views.product_table, name="product-table"),
+    path("products/bulk-action/", views.product_bulk_action, name="product-bulk-action"),
+    path("products/new/", views.product_create_entry, name="product-add"),
+    path("products/<int:pk>/edit/", views.product_form, name="product-edit"),
+    path("products/<int:pk>/discard-draft/", views.product_discard_draft, name="product-discard-draft"),
+    path("products/<int:pk>/type/", views.product_set_type, name="product-set-type"),
+    path("products/<int:pk>/delete/", views.product_delete, name="product-delete"),
+    path("products/<int:pk>/preview/", views.product_preview, name="product-preview"),
+    path("products/attribute-fields/", views.product_attribute_fields, name="product-attribute-fields"),
+    path("products/<int:pk>/attribute-fields/", views.product_attribute_fields, name="product-attribute-fields-edit"),
+    path("products/<int:pk>/attribute-fields/cleanup/", views.product_attribute_cleanup_orphans, name="product-attribute-cleanup"),
+
+    path("products/sku/generate/", views.product_sku_generate, name="product-sku-generate"),
+    path("products/quick-add/brand/", views.product_quick_add_brand, name="product-quick-add-brand"),
+    path("products/quick-add/collection/", views.product_quick_add_collection, name="product-quick-add-collection"),
+    path("products/quick-add/category/", views.product_quick_add_category, name="product-quick-add-category"),
+    path("products/<int:pk>/quick-add/category/", views.product_quick_add_category, name="product-quick-add-category-edit"),
+    path("products/quick-add/attribute/", views.product_quick_add_attribute, name="product-quick-add-attribute"),
+    path("products/<int:pk>/quick-add/attribute/", views.product_quick_add_attribute, name="product-quick-add-attribute-edit"),
+
+    path("products/<int:pk>/images/", views.product_images, name="product-images"),
+    path("products/<int:pk>/images/upload/", views.product_image_upload, name="product-image-upload"),
+    path("products/<int:pk>/images/<int:image_id>/delete/", views.product_image_delete, name="product-image-delete"),
+    path("products/<int:pk>/images/<int:image_id>/cover/", views.product_image_set_cover, name="product-image-set-cover"),
+    path("products/<int:pk>/images/<int:image_id>/move/", views.product_image_move, name="product-image-move"),
+    path("products/<int:pk>/images/reorder/", views.product_image_reorder, name="product-image-reorder"),
+    path("products/<int:pk>/images/<int:image_id>/alt/", views.product_image_alt_update, name="product-image-alt"),
+    path("products/<int:pk>/images/<int:image_id>/caption/", views.product_image_caption_update, name="product-image-caption"),
+    path("products/<int:pk>/images/<int:image_id>/360/", views.product_image_360_toggle, name="product-image-360-toggle"),
+    path("products/<int:pk>/images/<int:image_id>/variant/", views.product_image_variant_update, name="product-image-variant"),
+    path("products/<int:pk>/images/<int:image_id>/option-value/", views.product_image_option_value_update, name="product-image-option-value"),
+
+    path("products/<int:pk>/videos/add/", views.product_video_add, name="product-video-add"),
+    path("products/<int:pk>/videos/<int:video_id>/delete/", views.product_video_delete, name="product-video-delete"),
+
+    path("products/<int:pk>/variants/", views.product_variants, name="product-variants"),
+    path("products/<int:pk>/variants/bulk-add/", views.product_variant_bulk_add, name="product-variant-bulk-add"),
+    path("products/<int:pk>/variants/<int:variant_id>/edit/", views.product_variant_edit, name="product-variant-edit"),
+    path("products/<int:pk>/variants/<int:variant_id>/toggle/", views.product_variant_toggle, name="product-variant-toggle"),
+    path("products/<int:pk>/variants/<int:variant_id>/delete/", views.product_variant_delete, name="product-variant-delete"),
+    path("products/<int:pk>/variants/<int:variant_id>/duplicate/", views.product_variant_duplicate, name="product-variant-duplicate"),
+    path("products/<int:pk>/variants/<int:variant_id>/move/", views.product_variant_move, name="product-variant-move"),
+
+    path("attributes/", views.attribute_list, name="attribute-list"),
+    path("attributes/table/", views.attribute_table, name="attribute-table"),
+    path("attributes/add/", views.attribute_add, name="attribute-add"),
+    path("attributes/<int:pk>/edit/", views.attribute_edit, name="attribute-edit"),
+    path("attributes/<int:pk>/archive/", views.attribute_archive, name="attribute-archive"),
+    path("attributes/<int:pk>/activate/", views.attribute_activate, name="attribute-activate"),
+    path("attributes/<int:pk>/delete/", views.attribute_delete, name="attribute-delete"),
+    path("attributes/<int:pk>/values/", views.attribute_values, name="attribute-values"),
+    path("attributes/<int:pk>/values/add/", views.attribute_value_add, name="attribute-value-add"),
+    path("attributes/<int:pk>/values/<int:value_id>/archive/", views.attribute_value_archive, name="attribute-value-archive"),
+    path("attributes/<int:pk>/values/<int:value_id>/delete/", views.attribute_value_delete, name="attribute-value-delete"),
+    path("attributes/<int:pk>/values/reorder/", views.attribute_value_reorder, name="attribute-value-reorder"),
+
+    path("products/<int:pk>/options/", views.product_options, name="product-options"),
+    path("products/<int:pk>/options/add/", views.product_option_add, name="product-option-add"),
+    path("products/<int:pk>/options/library/<int:attribute_id>/add/", views.product_option_add_from_library, name="product-option-add-from-library"),
+    path("products/<int:pk>/options/recommended/<int:recommendation_id>/apply/", views.product_apply_recommended_option, name="product-apply-recommended-option"),
+    path("products/<int:pk>/options/reorder/", views.product_options_reorder, name="product-options-reorder"),
+    path("products/<int:pk>/options/<int:option_id>/move/", views.product_option_move, name="product-option-move"),
+    path("products/<int:pk>/options/<int:option_id>/deactivate/", views.product_option_deactivate, name="product-option-deactivate"),
+    path("products/<int:pk>/options/<int:option_id>/activate/", views.product_option_activate, name="product-option-activate"),
+    path("products/<int:pk>/options/<int:option_id>/values/add/", views.product_option_value_add, name="product-option-value-add"),
+    path("products/<int:pk>/options/values/<int:value_id>/remove/", views.product_option_value_remove, name="product-option-value-remove"),
+    path("products/<int:pk>/options/generate/", views.product_variants_generate, name="product-variants-generate"),
+    path("products/<int:pk>/options/manual-add/", views.product_variant_manual_add, name="product-variant-manual-add"),
+    path("products/<int:pk>/options/variants/<int:variant_id>/default/", views.product_variant_set_default, name="product-variant-set-default"),
+    path("products/<int:pk>/options/variants/<int:variant_id>/price/", views.product_variant_set_price, name="product-variant-set-price"),
+    path("products/<int:pk>/options/variants/<int:variant_id>/sales-limit/", views.product_variant_set_sales_limit, name="product-variant-set-sales-limit"),
+    path("products/<int:pk>/options/variants/bulk-sales-limit/", views.product_variants_bulk_sales_limit, name="product-variants-bulk-sales-limit"),
+    path("products/<int:pk>/options/variants/bulk-stock/", views.product_variants_bulk_stock, name="product-variants-bulk-stock"),
+    path("products/<int:pk>/options/bulk-update/", views.product_variants_bulk_update, name="product-variants-bulk-update"),
+    path("products/<int:pk>/options/bulk-delete/", views.product_variants_bulk_delete, name="product-variants-bulk-delete"),
+    path("products/<int:pk>/options/bulk-activate/", views.product_variants_bulk_activate, name="product-variants-bulk-activate"),
+    path("products/<int:pk>/options/variants/<int:variant_id>/duplicate/", views.product_variant_matrix_duplicate, name="product-variant-matrix-duplicate"),
+
+    path("categories/", views.category_list, name="category-list"),
+    path("categories/add-main/", views.category_add_main, name="category-add-main"),
+    path("categories/add-sub/", views.category_add_sub, name="category-add-sub"),
+    path("categories/add-subsub/", views.category_add_subsub, name="category-add-subsub"),
+    path("categories/reorder/", views.category_reorder, name="category-reorder"),
+    path("categories/<int:pk>/edit/", views.category_edit, name="category-edit"),
+    path("categories/<int:pk>/delete/", views.category_delete, name="category-delete"),
+    path("categories/<int:pk>/schema/", views.category_schema, name="category-schema"),
+    path("categories/<int:pk>/schema/add/", views.category_schema_add, name="category-schema-add"),
+    path("categories/<int:pk>/schema/<int:entry_id>/toggle-required/", views.category_schema_toggle_required, name="category-schema-toggle-required"),
+    path("categories/<int:pk>/schema/<int:entry_id>/toggle-override/", views.category_schema_toggle_override, name="category-schema-toggle-override"),
+    path("categories/<int:pk>/schema/<int:entry_id>/toggle-visibility/", views.category_schema_toggle_visibility, name="category-schema-toggle-visibility"),
+    path("categories/<int:pk>/schema/<int:entry_id>/remove/", views.category_schema_remove, name="category-schema-remove"),
+    path("categories/<int:pk>/schema/<int:entry_id>/move/", views.category_schema_move, name="category-schema-move"),
+
+    path("brands/", views.brand_list, name="brand-list"),
+    path("brands/table/", views.brand_table, name="brand-table"),
+    path("brands/add/", views.brand_add, name="brand-add"),
+    path("brands/<int:pk>/edit/", views.brand_edit, name="brand-edit"),
+    path("brands/<int:pk>/archive/", views.brand_archive, name="brand-archive"),
+    path("brands/<int:pk>/activate/", views.brand_activate, name="brand-activate"),
+    path("brands/<int:pk>/delete/", views.brand_delete, name="brand-delete"),
+    path("brands/reorder/", views.brand_reorder, name="brand-reorder"),
+    path("brands/bulk-action/", views.brand_bulk_action, name="brand-bulk-action"),
+
+    path("collections/", views.collection_list, name="collection-list"),
+    path("collections/table/", views.collection_table, name="collection-table"),
+    path("collections/new/", views.collection_add, name="collection-add"),
+    path("collections/<int:pk>/edit/", views.collection_edit, name="collection-edit"),
+    path("collections/<int:pk>/delete/", views.collection_delete, name="collection-delete"),
+    path("collections/<int:pk>/toggle/", views.collection_toggle, name="collection-toggle"),
+    path("collections/<int:pk>/products/", views.collection_products, name="collection-products"),
+    path("collections/<int:pk>/campaign/", views.collection_campaign, name="collection-campaign"),
+    path("collections/<int:pk>/products/search/", views.collection_products_search, name="collection-products-search"),
+    path("collections/<int:pk>/products/add/", views.collection_products_add, name="collection-products-add"),
+    path("collections/<int:pk>/products/<int:item_id>/remove/", views.collection_product_remove, name="collection-product-remove"),
+    path("collections/<int:pk>/products/reorder/", views.collection_products_reorder, name="collection-products-reorder"),
+    path("collections/<int:pk>/products/<int:item_id>/move/", views.collection_product_move, name="collection-product-move"),
+
+    path("orders/", views.order_list, name="order-list"),
+    path("orders/table/", views.order_table, name="order-table"),
+    path("orders/card-transfers/", card_transfer_views.card_transfer_list, name="card-transfer-list"),
+    path("orders/card-transfers/<int:pk>/<str:action>/", card_transfer_views.card_transfer_decide, name="card-transfer-decide"),
+    path("orders/<str:code>/", views.order_detail, name="order-detail"),
+
+    path("invoices/", views.invoice_list, name="invoice-list"),
+    path("invoices/table/", views.invoice_table, name="invoice-table"),
+    path("invoices/<str:code>/", views.invoice_detail, name="invoice-detail"),
+
+    path("payments/", views.payment_list, name="payment-list"),
+    path("payments/table/", views.payment_table, name="payment-table"),
+
+    path("customers/", views.customer_list, name="customer-list"),
+    path("customers/table/", views.customer_table, name="customer-table"),
+    path("customers/bulk-action/", views.customer_bulk_action, name="customer-bulk-action"),
+    path("customers/<int:pk>/", views.customer_detail, name="customer-detail"),
+    path("customers/<int:pk>/refresh-stats/", views.customer_refresh_stats, name="customer-refresh-stats"),
+    path("customers/<int:pk>/status/", views.customer_status_update, name="customer-status-update"),
+    path("customers/<int:pk>/notes/add/", views.customer_note_add, name="customer-note-add"),
+    path("customers/<int:pk>/notes/<int:note_id>/delete/", views.customer_note_delete, name="customer-note-delete"),
+    path("customers/<int:pk>/tags/toggle/", views.customer_tag_toggle, name="customer-tag-toggle"),
+
+    # --- برچسب‌های مشتری (Customer Tags) ---
+    path("customer-tags/", views.customer_tag_list, name="customer-tag-list"),
+    path("customer-tags/add/", views.customer_tag_add, name="customer-tag-add"),
+    path("customer-tags/<int:pk>/archive/", views.customer_tag_archive, name="customer-tag-archive"),
+
+    # --- سگمنت‌های مشتری (Customer Segments) ---
+    path("segments/", views.segment_list, name="segment-list"),
+    path("segments/add/", views.segment_form, name="segment-add"),
+    path("segments/<int:pk>/edit/", views.segment_form, name="segment-edit"),
+    path("segments/<int:pk>/", views.segment_detail, name="segment-detail"),
+    path("segments/<int:pk>/refresh/", views.segment_refresh, name="segment-refresh"),
+    path("segments/<int:pk>/toggle/", views.segment_toggle_active, name="segment-toggle"),
+    path("segments/<int:pk>/members/add/", views.segment_member_add, name="segment-member-add"),
+    path("segments/<int:pk>/members/<int:customer_id>/remove/", views.segment_member_remove, name="segment-member-remove"),
+
+    path("reports/", views.report_list, name="report-list"),
+    path("reports/body/", views.report_partial, name="report-body"),
+
+    path("settings/", views.settings_home, name="settings"),
+    path("settings/shop-info/", views.settings_shop_info, name="settings-shop-info"),
+    path("settings/industry/<int:template_id>/install/", views.settings_industry_install, name="settings-industry-install"),
+    path("settings/industry/<int:template_id>/preview/", views.settings_industry_preview, name="settings-industry-preview"),
+    path("settings/industry/update/", views.settings_industry_update_plan, name="settings-industry-update-plan"),
+    path("settings/industry/update/apply/", views.settings_industry_update_apply, name="settings-industry-update-apply"),
+    path("settings/industry/update/history/", views.settings_industry_update_history, name="settings-industry-update-history"),
+    path("settings/finance/", views.settings_finance, name="settings-finance"),
+    path("settings/gift-wrap/", views.settings_gift_wrap, name="settings-gift-wrap"),
+    path("settings/order-expiry/", views.settings_order_expiry, name="settings-order-expiry"),
+    path("settings/gift-wrap/products/", engagement_views.gift_wrap_products, name="gift-wrap-products"),
+    # ---- کمپین‌ها و مناسبت‌ها
+    path("campaigns/", engagement_views.campaign_list, name="campaign-list"),
+    path("campaigns/add/", engagement_views.campaign_form, name="campaign-add"),
+    path("campaigns/sms-preview/", engagement_views.campaign_sms_preview, name="campaign-sms-preview"),
+    path("campaigns/<int:pk>/", engagement_views.campaign_detail, name="campaign-detail"),
+    path("campaigns/<int:pk>/edit/", engagement_views.campaign_form, name="campaign-edit"),
+    path("campaigns/<int:pk>/activate/", engagement_views.campaign_activate, name="campaign-activate"),
+    path("campaigns/<int:pk>/pause/", engagement_views.campaign_pause, name="campaign-pause"),
+    path("campaigns/<int:pk>/run/", engagement_views.campaign_run, name="campaign-run"),
+    path("campaigns/<int:pk>/preview/", engagement_views.campaign_preview, name="campaign-preview"),
+    path("campaigns/<int:pk>/delete/", engagement_views.campaign_delete, name="campaign-delete"),
+    # ---- پیام‌رسانی (Settings → Messaging): canonical landing + the five subsections
+    path("settings/messaging/", views.settings_messaging, name="settings-messaging"),
+    # ---- اعلان‌ها
+    *notification_inbox_urls(),     # صندوقِ اعلانِ مدیران (پیشوند inbox/ — با notifications/<event_key>/ برخورد نمی‌کند)
+    path("notifications/", engagement_views.notification_templates, name="notification-templates"),
+    path("notifications/history/", engagement_views.notification_history, name="notification-history"),
+    path("payments/reconciliation/", payment_reconciliation_views.payment_reconciliation_list, name="payment-reconciliations"),
+    path("payments/reconciliation/<int:pk>/resolve/", payment_reconciliation_views.payment_reconciliation_resolve, name="payment-reconciliation-resolve"),
+    path("notifications/history/<int:pk>/retry/", engagement_views.notification_retry, name="notification-retry"),
+    path("notifications/sender/", notification_admin_views.notification_sender, name="notification-sender"),
+    path("notifications/sender/retry/", notification_admin_views.notification_sender_retry, name="notification-sender-retry"),
+    path("notifications/channels/", notification_admin_views.notification_channels, name="notification-channels"),
+    path("notifications/<str:event_key>/", engagement_views.notification_template_edit, name="notification-template-edit"),
+    path("notifications/<str:event_key>/preview/", engagement_views.notification_template_preview, name="notification-template-preview"),
+    path("notifications/<str:event_key>/test/", engagement_views.notification_template_test, name="notification-template-test"),
+    path("settings/gift-wrap/products/<int:pk>/", engagement_views.gift_wrap_product_update, name="gift-wrap-product-update"),
+    path("settings/appearance/", views.settings_appearance, name="settings-appearance"),
+    path("settings/identity-assets/", views.settings_identity_assets, name="settings-identity-assets"),
+    path("settings/gateways/<int:pk>/toggle/", views.settings_gateway_toggle, name="settings-gateway-toggle"),
+    path("settings/shipping/<int:pk>/toggle/", views.settings_shipping_toggle, name="settings-shipping-toggle"),
+
+    # --- Real gateway configuration (PR1) ---
+    path("settings/gateway-config/<str:gateway_code>/save/", views.settings_gateway_config_save, name="settings-gateway-config-save"),
+    path("settings/gateway-config/<str:gateway_code>/toggle/", views.settings_gateway_config_toggle, name="settings-gateway-config-toggle"),
+
+    path("settings/sms/connection/", views.settings_sms_connection, name="settings-sms-connection"),
+    path("settings/sms/package/purchase/", views.settings_sms_package_purchase, name="settings-sms-package-purchase"),
+    path("settings/sms/package/purchase/<int:pk>/pay/", views.settings_sms_purchase_pay, name="settings-sms-purchase-pay"),
+    path(
+        "settings/sms/smsrasti/regenerate-token/",
+        views.settings_smsrasti_regenerate_token, name="settings-smsrasti-regenerate-token",
+    ),
+    path("settings/sms/templates/<int:pk>/edit/", views.sms_template_form, name="sms-template-edit"),
+    path("settings/sms/templates/<int:pk>/toggle/", views.sms_template_toggle, name="sms-template-toggle"),
+    path("settings/sms/test-send/", views.sms_test_send, name="sms-test-send"),
+    path("settings/sms/logs/", views.sms_log_list, name="sms-log-list"),
+    path("settings/sms/logs/table/", views.sms_log_table, name="sms-log-table"),
+    path("settings/sms/logs/<int:pk>/retry/", views.sms_log_retry, name="sms-log-retry"),
+    path("settings/sms/outbox/", views.sms_outbox_list, name="sms-outbox-list"),
+    path("settings/sms/outbox/<int:pk>/retry/", views.sms_outbox_retry, name="sms-outbox-retry"),
+
+    path("settings/domain/add/", views_domain.settings_domain_add, name="settings-domain-add"),
+    path("settings/domain/<int:domain_id>/begin/", views_domain.settings_domain_begin, name="settings-domain-begin"),
+    path("settings/domain/<int:domain_id>/check/", views_domain.settings_domain_check, name="settings-domain-check"),
+    path("settings/domain/<int:domain_id>/readiness/", views_domain.settings_domain_readiness, name="settings-domain-readiness"),
+    path("settings/domain/<int:domain_id>/refresh/", views_domain.settings_domain_refresh, name="settings-domain-refresh"),
+    path("settings/integrations/<str:provider_code>/connect/", views.settings_integration_connect, name="settings-integration-connect"),
+    path("settings/integrations/<str:provider_code>/disconnect/", views.settings_integration_disconnect, name="settings-integration-disconnect"),
+    path("settings/integrations/<str:provider_code>/toggle/", views.settings_integration_toggle, name="settings-integration-toggle"),
+    path("settings/integrations/<str:provider_code>/test/", views.settings_integration_test, name="settings-integration-test"),
+
+    # --- صفحات محتوایی ---
+    path("journal/", journal_views.journal_list, name="journal-list"),
+    path("journal/new/", journal_views.journal_create, name="journal-create"),
+    path("journal/<int:pk>/edit/", journal_views.journal_edit, name="journal-edit"),
+    path("journal/<int:pk>/publish/", journal_views.journal_publish_toggle, name="journal-publish"),
+    path("pages/", views.page_list, name="page-list"),
+    path("pages/add/", views.page_form, name="page-add"),
+    path("pages/create-about/", views.page_create_about, name="page-create-about"),
+    path("pages/<int:pk>/edit/", views.page_form, name="page-edit"),
+    path("pages/<int:pk>/delete/", views.page_delete, name="page-delete"),
+    path("pages/<int:pk>/publish/", views.page_publish, name="page-publish"),
+
+    # --- صفحه اصلی ---
+    # --- سازنده بصری صفحه فروشگاه ---
+    path("storefront-builder/", storefront_builder_views.storefront_editor, name="storefront-builder-editor"),
+    path(
+        "storefront-builder/r4/",
+        storefront_builder_r4_views.storefront_r4_editor,
+        name="storefront-builder-r4-editor",
+    ),
+    path(
+        "storefront-builder/r4/announcement-image/",
+        storefront_builder_r4_views.storefront_r4_announcement_image,
+        name="storefront-builder-r4-announcement-image",
+    ),
+    path(
+        "storefront-builder/r4/announcement/inspector/",
+        storefront_builder_r4_views.storefront_r4_announcement_inspector,
+        name="storefront-builder-r4-announcement-inspector",
+    ),
+    path(
+        "storefront-builder/r4/layout-tree/",
+        storefront_builder_r4_views.storefront_r4_layout_tree,
+        name="storefront-builder-r4-layout-tree",
+    ),
+    path(
+        "storefront-builder/r4/mutate/",
+        storefront_builder_r4_views.storefront_r4_mutation,
+        name="storefront-builder-r4-mutation",
+    ),
+    path(
+        "storefront-builder/r4/design-lab/",
+        storefront_builder_r4_views.storefront_r4_design_lab,
+        name="storefront-builder-r4-design-lab",
+    ),
+    path(
+        "storefront-builder/r4/sections/<int:pk>/inspector/",
+        storefront_builder_r4_views.storefront_r4_section_inspector,
+        name="storefront-builder-r4-section-inspector",
+    ),
+    path(
+        "storefront-builder/r4/resources/picker/",
+        storefront_builder_r4_views.storefront_r4_resource_picker,
+        name="storefront-builder-r4-resource-picker",
+    ),
+    path(
+        "storefront-builder/r4/media/upload/",
+        storefront_builder_r4_views.storefront_r4_media_upload,
+        name="storefront-builder-r4-media-upload",
+    ),
+    path(
+        "storefront-builder/r4/history/",
+        storefront_builder_r4_views.storefront_r4_history_command,
+        name="storefront-builder-r4-history",
+    ),
+    path(
+        "storefront-builder/r4/publish/",
+        storefront_builder_r4_views.storefront_r4_publish,
+        name="storefront-builder-r4-publish",
+    ),
+    path(
+        "storefront-builder/r4/discard/",
+        storefront_builder_r4_views.storefront_r4_discard,
+        name="storefront-builder-r4-discard",
+    ),
+    path(
+        "storefront-builder/r4/reset-page/",
+        storefront_builder_r4_views.storefront_r4_reset_page,
+        name="storefront-builder-r4-reset-page",
+    ),
+    path(
+        "storefront-builder/r4/reset-storefront/",
+        storefront_builder_r4_views.storefront_r4_reset_storefront,
+        name="storefront-builder-r4-reset-storefront",
+    ),
+    path(
+        "storefront-builder/r4/switch-template/",
+        storefront_builder_r4_views.storefront_r4_switch_template,
+        name="storefront-builder-r4-switch-template",
+    ),
+    path(
+        "storefront-builder/r4/restore/<int:pk>/",
+        storefront_builder_r4_views.storefront_r4_restore,
+        name="storefront-builder-r4-restore",
+    ),
+    path(
+        "storefront-builder/r4/apply-industry-layout/",
+        storefront_builder_r4_views.storefront_r4_apply_industry_layout,
+        name="storefront-builder-r4-apply-industry-layout",
+    ),
+    *VISION_STUDIO_ROUTES,
+    path("storefront-builder/templates/", storefront_builder_views.storefront_template_gallery, name="storefront-builder-templates"),
+    path(
+        "storefront-builder/templates/<slug:key>/preview/",
+        storefront_builder_views.storefront_template_live_preview,
+        name="storefront-builder-template-live-preview",
+    ),
+    path("storefront-builder/preview/", storefront_builder_views.storefront_preview, name="storefront-builder-preview"),
+    path("storefront-builder/draft-preview/", storefront_builder_views.storefront_draft_preview, name="storefront-builder-draft-preview"),
+    path("storefront-builder/sections/<int:pk>/product-search/", storefront_builder_views.storefront_section_product_search, name="storefront-builder-section-product-search"),
+    path("storefront-builder/history/", storefront_builder_views.storefront_history, name="storefront-builder-history"),
+    path("storefront-builder/apply-preset/", storefront_builder_views.storefront_apply_layout_preset, name="storefront-builder-apply-preset"),
+    # Acceptance Batch 2 (post-U11) — granular reset-to-Ready-Template-baseline.
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/", storefront_builder_media_views.storefront_section_media_list, name="storefront-builder-section-media-list"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/add/", storefront_builder_media_views.storefront_section_media_form, name="storefront-builder-section-media-add"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/<int:item_pk>/edit/", storefront_builder_media_views.storefront_section_media_form, name="storefront-builder-section-media-edit"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/<int:item_pk>/delete/", storefront_builder_media_views.storefront_section_media_delete, name="storefront-builder-section-media-delete"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/adopt-defaults/", storefront_builder_media_views.storefront_section_media_adopt_defaults, name="storefront-builder-section-media-adopt-defaults"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/<int:item_pk>/toggle/", storefront_builder_media_views.storefront_section_media_toggle, name="storefront-builder-section-media-toggle"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/<int:item_pk>/move/", storefront_builder_media_views.storefront_section_media_move, name="storefront-builder-section-media-move"),
+    path("storefront-builder/sections/<int:pk>/media/<str:kind>/reorder/", storefront_builder_media_views.storefront_section_media_reorder, name="storefront-builder-section-media-reorder"),
+
+    path("homepage/hero/", views.hero_list, name="hero-list"),
+    path("homepage/hero/add/", views.hero_form, name="hero-add"),
+    path("homepage/hero/<int:pk>/edit/", views.hero_form, name="hero-edit"),
+    path("homepage/hero/<int:pk>/delete/", views.hero_delete, name="hero-delete"),
+    path("homepage/hero/<int:pk>/toggle/", views.hero_toggle, name="hero-toggle"),
+    path("homepage/banners/", views.banner_list, name="banner-list"),
+    path("homepage/banners/add/", views.banner_form, name="banner-add"),
+    path("homepage/banners/<int:pk>/edit/", views.banner_form, name="banner-edit"),
+    path("homepage/banners/<int:pk>/delete/", views.banner_delete, name="banner-delete"),
+    path("homepage/banners/<int:pk>/toggle/", views.banner_toggle, name="banner-toggle"),
+
+    # --- شبکه‌های اجتماعی ---
+    path("social-links/", views.social_link_list, name="social-link-list"),
+    path("social-links/add/", views.social_link_form, name="social-link-add"),
+    path("social-links/<int:pk>/edit/", views.social_link_form, name="social-link-edit"),
+    path("social-links/<int:pk>/delete/", views.social_link_delete, name="social-link-delete"),
+    path("social-links/<int:pk>/toggle/", views.social_link_toggle, name="social-link-toggle"),
+
+    # --- مدیریت منوها ---
+    path("menus/", views.menu_list, name="menu-list"),
+    path("menus/add/", views.menu_form, name="menu-add"),
+    path("menus/<int:pk>/edit/", views.menu_form, name="menu-edit"),
+    path("menus/<int:pk>/delete/", views.menu_delete, name="menu-delete"),
+    path("menus/<int:pk>/toggle/", views.menu_toggle, name="menu-toggle"),
+    path("menus/<int:menu_id>/items/", views.menu_item_list, name="menu-item-list"),
+    path("menus/<int:menu_id>/items/add/", views.menu_item_form, name="menu-item-add"),
+    path("menu-items/<int:pk>/edit/", views.menu_item_form, name="menu-item-edit"),
+    path("menu-items/<int:pk>/delete/", views.menu_item_delete, name="menu-item-delete"),
+    path("menu-items/<int:pk>/toggle/", views.menu_item_toggle, name="menu-item-toggle"),
+
+    # --- تنظیمات فوتر ---
+    path("footer/settings/", views.footer_settings_page, name="footer-settings"),
+    path("footer/trust-badges/", views.footer_trust_badge_list, name="footer-trust-badge-list"),
+    path("footer/trust-badges/add/", views.footer_trust_badge_form, name="footer-trust-badge-add"),
+    path("footer/trust-badges/<int:pk>/edit/", views.footer_trust_badge_form, name="footer-trust-badge-edit"),
+    path("footer/trust-badges/<int:pk>/delete/", views.footer_trust_badge_delete, name="footer-trust-badge-delete"),
+    path("footer/trust-badges/<int:pk>/toggle/", views.footer_trust_badge_toggle, name="footer-trust-badge-toggle"),
+    path("footer/payment-logos/", views.footer_payment_logo_list, name="footer-payment-logo-list"),
+    path("footer/payment-logos/add/", views.footer_payment_logo_form, name="footer-payment-logo-add"),
+    path("footer/payment-logos/<int:pk>/edit/", views.footer_payment_logo_form, name="footer-payment-logo-edit"),
+    path("footer/payment-logos/<int:pk>/delete/", views.footer_payment_logo_delete, name="footer-payment-logo-delete"),
+    path("footer/payment-logos/<int:pk>/toggle/", views.footer_payment_logo_toggle, name="footer-payment-logo-toggle"),
+
+    # --- اعضای تیم (Staff / Membership) ---
+    path("staff/", views.staff_list, name="staff-list"),
+    path("staff/add/", views.staff_add, name="staff-add"),
+    path("staff/<int:pk>/role/", views.staff_change_role, name="staff-change-role"),
+    path("staff/<int:pk>/revoke/", views.staff_revoke, name="staff-revoke"),
+    path("staff/<int:pk>/reactivate/", views.staff_reactivate, name="staff-reactivate"),
+    path("staff/<int:pk>/transfer-ownership/", views.staff_transfer_ownership, name="staff-transfer-ownership"),
+
+    # --- دفتر موجودی (Inventory Ledger) ---
+    path("inventory/", views.inventory_list, name="inventory-list"),
+    path("inventory/table/", views.inventory_table, name="inventory-table"),
+
+    # --- کدهای تخفیف (Coupons) ---
+    path("coupons/", views.coupon_list, name="coupon-list"),
+    path("coupons/add/", views.coupon_form, name="coupon-add"),
+    path("coupons/<int:pk>/edit/", views.coupon_form, name="coupon-edit"),
+    path("coupons/<int:pk>/toggle/", views.coupon_toggle, name="coupon-toggle"),
+    path("coupons/<int:pk>/delete/", views.coupon_delete, name="coupon-delete"),
+
+    # --- گزارش رخدادها (Audit Log) ---
+    path("audit-log/", views.audit_log_list, name="audit-log-list"),
+    path("audit-log/table/", views.audit_log_table, name="audit-log-table"),
+
+    # --- صادرات (Export) ---
+    path("exports/", views.export_list, name="export-list"),
+    path("exports/create/", views.export_create, name="export-create"),
+    path("exports/<int:pk>/download/", views.export_download, name="export-download"),
+
+    # --- واردات (Import) ---
+    path("imports/", views.import_list, name="import-list"),
+    path("imports/upload/", views.import_upload, name="import-upload"),
+    path("imports/template/<str:import_type>/", views.import_template, name="import-template"),
+    path("imports/<int:pk>/", views.import_detail, name="import-detail"),
+    path("imports/<int:pk>/execute/", views.import_execute, name="import-execute"),
+    path("imports/<int:pk>/proposals/approve-all/", views.import_proposals_approve_all, name="import-proposals-approve-all"),
+    path("imports/<int:pk>/proposals/<int:proposal_pk>/<str:action>/", views.import_proposal_decide, name="import-proposal-decide"),
+    path("imports/<int:pk>/cancel/", views.import_cancel, name="import-cancel"),
+    path("imports/<int:pk>/download/source/", views.import_download_source, name="import-download-source"),
+    path("imports/<int:pk>/download/errors/", views.import_download_errors, name="import-download-errors"),
+
+    # --- استرداد (Refunds) ---
+    path("orders/<str:code>/refund/", views.order_refund_form, name="order-refund"),
+    path("orders/<str:code>/cod-payment/", cod_views.order_confirm_cod_payment, name="order-cod-payment"),
+
+    # --- مرجوعی‌ها (Returns) ---
+    path("returns/", views.return_list, name="return-list"),
+    path("orders/<str:code>/returns/new/", views.return_create, name="return-create"),
+    path("returns/<int:pk>/", views.return_detail, name="return-detail"),
+    path("returns/<int:pk>/review/", views.return_review, name="return-review"),
+    path("returns/<int:pk>/approve/", views.return_approve, name="return-approve"),
+    path("returns/<int:pk>/reject/", views.return_reject, name="return-reject"),
+    path("returns/<int:pk>/receive/", views.return_receive, name="return-receive"),
+    path("returns/<int:pk>/inspect/", views.return_inspect, name="return-inspect"),
+    path("returns/<int:pk>/complete/", views.return_complete, name="return-complete"),
+
+    # --- انبارها (Warehouses) ---
+    path("warehouses/", views.warehouse_list, name="warehouse-list"),
+    path("warehouses/add/", views.warehouse_form, name="warehouse-add"),
+    path("warehouses/<int:pk>/edit/", views.warehouse_form, name="warehouse-edit"),
+    path("warehouses/<int:pk>/", views.warehouse_detail, name="warehouse-detail"),
+    path("warehouses/<int:pk>/set-default/", views.warehouse_set_default, name="warehouse-set-default"),
+    path("warehouses/<int:pk>/archive/", views.warehouse_archive, name="warehouse-archive"),
+
+    # --- رزروهای موجودی (Reservations) ---
+    path("reservations/", views.reservation_list, name="reservation-list"),
+    path("reservations/<int:pk>/release/", views.reservation_release, name="reservation-release"),
+
+    # --- انتقالِ انبار (Warehouse Transfers) ---
+    path("transfers/", views.transfer_list, name="transfer-list"),
+    path("transfers/add/", views.transfer_form, name="transfer-add"),
+    path("transfers/<int:pk>/", views.transfer_detail, name="transfer-detail"),
+    path("transfers/<int:pk>/request/", views.transfer_request, name="transfer-request"),
+    path("transfers/<int:pk>/ship/", views.transfer_ship, name="transfer-ship"),
+    path("transfers/<int:pk>/receive/", views.transfer_receive, name="transfer-receive"),
+    path("transfers/<int:pk>/cancel/", views.transfer_cancel, name="transfer-cancel"),
+
+    # --- راه‌اندازیِ سادهٔ ارسال (Onboarding) ---
+    path("shipping/setup/", views.shipping_setup, name="shipping-setup"),
+    path("shipping/setup/<int:pk>/toggle/", views.shipping_method_toggle, name="shipping-method-toggle"),
+    path("shipping/setup/<int:pk>/update/", views.shipping_method_simple_update, name="shipping-method-simple-update"),
+
+    # --- مناطق و روش‌های ارسال (Shipping Zones/Methods/Rates) ---
+    path("shipping/zones/", views.shipping_zone_list, name="shipping-zone-list"),
+    path("shipping/zones/add/", views.shipping_zone_form, name="shipping-zone-add"),
+    path("shipping/zones/<int:pk>/edit/", views.shipping_zone_form, name="shipping-zone-edit"),
+    path("shipping/zones/<int:pk>/toggle/", views.shipping_zone_toggle, name="shipping-zone-toggle"),
+    path("shipping/methods/", views.shipping_method_list, name="shipping-method-list"),
+    path("shipping/methods/add/", views.shipping_method_form, name="shipping-method-add"),
+    path("shipping/methods/<int:pk>/edit/", views.shipping_method_form, name="shipping-method-edit"),
+    path("shipping/methods/<int:pk>/archive/", views.shipping_method_archive, name="shipping-method-archive"),
+    path("shipping/methods/<int:method_id>/rates/", views.shipping_rate_rule_list, name="shipping-rate-rule-list"),
+    path("shipping/methods/<int:method_id>/rates/add/", views.shipping_rate_rule_form, name="shipping-rate-rule-add"),
+    path("shipping/methods/<int:method_id>/rates/<int:pk>/edit/", views.shipping_rate_rule_form, name="shipping-rate-rule-edit"),
+    path("shipping/methods/<int:method_id>/rates/<int:pk>/archive/", views.shipping_rate_rule_archive, name="shipping-rate-rule-archive"),
+
+    # --- تنظیمات و دسته‌ها/نرخ‌های مالیات (Tax Settings/Classes/Rates) ---
+    path("tax/settings/", views.tax_settings, name="tax-settings"),
+    path("tax/classes/", views.tax_class_list, name="tax-class-list"),
+    path("tax/classes/add/", views.tax_class_form, name="tax-class-add"),
+    path("tax/classes/<int:pk>/edit/", views.tax_class_form, name="tax-class-edit"),
+    path("tax/classes/<int:pk>/archive/", views.tax_class_archive, name="tax-class-archive"),
+    path("tax/classes/<int:tax_class_id>/rates/", views.tax_rate_list, name="tax-rate-list"),
+    path("tax/classes/<int:tax_class_id>/rates/add/", views.tax_rate_form, name="tax-rate-add"),
+    path("tax/classes/<int:tax_class_id>/rates/<int:pk>/edit/", views.tax_rate_form, name="tax-rate-edit"),
+    path("tax/classes/<int:tax_class_id>/rates/<int:pk>/archive/", views.tax_rate_archive, name="tax-rate-archive"),
+
+    # --- اشتراک و صورتحساب (Subscription/Usage/Plans) — Checkpoint 5A ---
+    path("subscription/", views.subscription_overview, name="subscription-overview"),
+    path("subscription/usage/", views.usage_overview, name="usage-overview"),
+    path("subscription/plans/", views.subscription_plans, name="subscription-plans"),
+    path("subscription/plans/preview/", views.subscription_plan_preview, name="subscription-plan-preview"),
+    path("subscription/plans/change/", views.subscription_plan_execute, name="subscription-plan-execute"),
+    path("subscription/history/", views.subscription_history, name="subscription-history"),
+
+    # --- صورتحساب و پرداختِ اشتراک (Billing) — Checkpoint 5B ---
+    path("billing/", views.billing_overview, name="billing-overview"),
+    path("billing/account/", views.billing_account_edit, name="billing-account"),
+    path("billing/invoices/", views.billing_invoices, name="billing-invoices"),
+    path("billing/invoices/<int:pk>/", views.billing_invoice_detail, name="billing-invoice-detail"),
+    path("billing/invoices/<int:pk>/print/", views.billing_invoice_print, name="billing-invoice-print"),
+    path("billing/invoices/<int:pk>/pay/", views.billing_pay, name="billing-pay"),
+    path("billing/invoices/<int:pk>/card-to-card/", views.billing_card_claim, name="billing-card-claim"),
+    path("billing/card-claims/<int:claim_id>/cancel/", views.billing_card_claim_cancel, name="billing-card-claim-cancel"),
+    path("billing/card-claims/<int:claim_id>/receipt/", views.billing_card_claim_receipt, name="billing-card-claim-receipt"),
+    path("settings/sms/package/purchase/<int:pk>/card-to-card/", views.sms_purchase_card_claim, name="sms-purchase-card-claim"),
+    # SMS دارایِ نامِ مسیرِ جدا (``sms-checkout*``) است تا نقشه‌ی ناوبری بخشِ درستِ تنظیمات («پیامک») را فعال کند؛ مسیرِ عمومیِ
+    # ``platform-checkout`` برایِ ``reverse(kind, pk)`` همان نشانیِ یکسان را می‌سازد.
+    path("billing/checkout/sms/<int:pk>/", platform_checkout_views.platform_checkout, {"kind": "sms"}, name="sms-checkout"),
+    path("billing/checkout/sms/<int:pk>/pay/", platform_checkout_views.platform_checkout_pay, {"kind": "sms"}, name="sms-checkout-pay"),
+    path("billing/checkout/sms/<int:pk>/status/", platform_checkout_views.platform_checkout_status, {"kind": "sms"}, name="sms-checkout-status"),
+    path("billing/checkout/<str:kind>/<int:pk>/", platform_checkout_views.platform_checkout, name="platform-checkout"),
+    path("billing/checkout/<str:kind>/<int:pk>/pay/", platform_checkout_views.platform_checkout_pay, name="platform-checkout-pay"),
+    path("billing/checkout/<str:kind>/<int:pk>/coupon/apply/", platform_checkout_views.platform_checkout_coupon_apply, name="platform-checkout-coupon-apply"),
+    path("billing/checkout/<str:kind>/<int:pk>/coupon/remove/", platform_checkout_views.platform_checkout_coupon_remove, name="platform-checkout-coupon-remove"),
+    path("billing/checkout/<str:kind>/<int:pk>/status/", platform_checkout_views.platform_checkout_status, name="platform-checkout-status"),
+    path("billing/payment-result/", views.billing_payment_result, name="billing-payment-result"),
+    path("billing/cancel/", views.billing_cancel, name="billing-cancel"),
+]

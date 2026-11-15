@@ -1,0 +1,23 @@
+{% comment %}
+U2A shared NAV_HEADER menu-item loop — reused by every Global Header
+Variant's navigation row. ``NAV_HEADER`` comes from the global menu
+context processor (apps.content.context_processors) — real merchant menu
+data, never hardcoded here. Keyboard-accessible: a two-level item exposes
+``aria-expanded``/``aria-haspopup`` on its own trigger button and returns
+focus to that trigger on Escape, exactly the existing legacy behavior.
+
+Optional geometry (a variant passes them via ``include ... with``; absent = unchanged behaviour):
+``nav_limit``       show at most N plain links (0/absent = all);
+``nav_chip_count``  render the LAST N items as highlighted chips (``gh-nl--chip``; every chip except
+                    the very last also carries ``gh-nl--chip-alt``). Chips are never dropped by the limit.
+{% endcomment %}
+{% if NAV_HEADER %}
+{% for item in NAV_HEADER.items %}
+{% if nav_chip_count and forloop.revcounter <= nav_chip_count %}
+{% if forloop.revcounter == 1 %}{% include "storefront_builder/partials/global_header/_shared/nav_header_item.html" with chip_class="gh-nl--chip" item_index=forloop.counter %}{% else %}{% include "storefront_builder/partials/global_header/_shared/nav_header_item.html" with chip_class="gh-nl--chip gh-nl--chip-alt" item_index=forloop.counter %}{% endif %}
+{% elif nav_limit and forloop.counter > nav_limit %}
+{% else %}
+{% include "storefront_builder/partials/global_header/_shared/nav_header_item.html" with chip_class="" item_index=forloop.counter %}
+{% endif %}
+{% endfor %}
+{% endif %}

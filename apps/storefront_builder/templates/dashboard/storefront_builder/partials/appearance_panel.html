@@ -1,0 +1,352 @@
+{% load storefront_builder_extras %}
+{% comment %}
+هابِ «ظاهر سایت» — پیش‌تنظیمِ صفحه‌آرایی، پالت و شخصی‌سازیِ تکمیلی همه
+اینجا هستند (طبقِ الزامِ صریحِ کار: «یک فرمِ غول‌پیکر نه؛ یک هاب ساده»).
+هرگز destination_type/JSON/model اصطلاحاتِ داخلی به تاجر نشان داده
+نمی‌شود — فقط برچسبِ فارسیِ گزینه‌ها.
+
+Phase 8 P0-7 — کارتِ مستقلِ «قالب فروشگاه» و گالریِ آن عمداً حذف شده‌اند:
+۶ از ۱۱ فیلدِ یک Template همان فیلدهایی بودند که پنلِ «تنظیماتِ بیشتر»
+از قبل مستقیماً ویرایش می‌کرد (فونت/گردی/تراکم/حرکت/اندازه‌متن/سبکِ
+دکمه) — یعنی انتخابِ یک Template صرفاً همان‌ها را یک‌جا override
+می‌کرد، هیچ مفهومِ منحصربه‌فردی نداشت؛ و اعمالش می‌توانست بی‌صدا
+انتخاب‌هایِ دستیِ مرچنت در «تنظیماتِ بیشتر» را (بدونِ هشدار) پاک کند.
+۵ فیلدِ واقعاً ساختاریِ باقی‌مانده (عرضِ محتوا/تعدادِ ستون/سایه و
+هاورِ کارت/سبکِ هیرو) اکنون مستقیماً همان‌جا، به‌عنوانِ کنترل‌هایِ
+مستقل، در دسترس‌اند — مدلِ ذهنیِ مرچنت اکنون فقط سه مفهوم است: پیش‌تنظیم
+(شروعِ سریع)، پالت (رنگ) و طراحی/تنظیماتِ بیشتر (بقیه). ``template_slug``
+هنوز در دیتابیس نگه‌داری می‌شود (فقط برایِ سازگاریِ خواندنیِ فروشگاه‌هایِ
+قدیمی‌تر که از قبل یک Templateِ غیرِ«modern» انتخاب کرده بودند) اما دیگر
+هیچ UIی مرچنت‌محور آن را مستقیماً عوض نمی‌کند.
+{% endcomment %}
+<div class="sfb-appearance-panel" x-data="{ view: 'hub', paletteQuery: '' }">
+
+  <div x-show="view === 'hub'">
+    <div class="sfb-appearance-intro">
+      <strong>ظاهر سایت</strong>
+      <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">پیش‌تنظیم، پالت رنگ و شخصی‌سازی — همه اینجا. تغییرات فقط در پیش‌نویس اعمال می‌شوند، تا انتشار روی فروشگاه عمومی دیده نمی‌شوند.</p>
+    </div>
+
+    <button type="button" class="sfb-appearance-card" @click="view = 'palettes'">
+      <div>
+        <span class="sfb-appearance-kicker">پالت کل سایت</span>
+        <strong>{% if config.palette_slug %}{% for p in palettes %}{% if p.slug == config.palette_slug %}{{ p.name_fa }}{% endif %}{% endfor %}{% else %}رنگ‌های سفارشی{% endif %}{% if config.color_overrides or config.theme_overrides %} — شخصی‌سازی‌شده{% endif %}</strong>
+      </div>
+      <div class="sfb-appearance-stripe">
+        <span style="background:{{ resolved_colors.primary }}"></span>
+        <span style="background:{{ resolved_colors.secondary }}"></span>
+        <span style="background:{{ resolved_colors.accent }}"></span>
+        <span style="background:{{ resolved_colors.surface }}"></span>
+        <span style="background:{{ resolved_colors.text }}"></span>
+      </div>
+      <span class="sfb-appearance-action">تغییر پالت ←</span>
+    </button>
+
+    <button type="button" class="sfb-appearance-card" @click="view = 'colors'">
+      <div>
+        <span class="sfb-appearance-kicker">رنگ‌های دلخواه</span>
+        <strong>ویرایش رنگ‌ها</strong>
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 0">مثلاً فقط رنگ متن را عوض کنید و بقیه پالت حفظ شود.</p>
+      </div>
+      <span class="sfb-appearance-action">ویرایش رنگ‌ها ←</span>
+    </button>
+
+    <button type="button" class="sfb-appearance-card" @click="view = 'advanced'">
+      <div>
+        <span class="sfb-appearance-kicker">تنظیمات بیشتر</span>
+        <strong>فونت، اندازه متن، گردی و فاصله‌ها</strong>
+      </div>
+      <span class="sfb-appearance-action">شخصی‌سازی ←</span>
+    </button>
+
+    <button type="button" class="sfb-appearance-card" @click="view = 'presets'">
+      <div>
+        <span class="sfb-appearance-kicker">پیش‌تنظیمِ صفحه‌آرایی</span>
+        <strong>{% if active_layout_preset_key %}{% for lp in layout_presets %}{% if lp.key == active_layout_preset_key %}{{ lp.label_fa }}{% endif %}{% endfor %}{% else %}چیدمانِ فعلی{% endif %}</strong>
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 0">شروعِ سریع با یک چیدمانِ کاملِ آماده — بعداً هر بخش را آزادانه ویرایش کنید.</p>
+      </div>
+      <span class="sfb-appearance-action">انتخابِ پیش‌تنظیم ←</span>
+    </button>
+
+    <button type="button" class="sfb-appearance-card"
+            hx-get="{% url 'dashboard:storefront-builder-header' %}" hx-target="#sfbInspectorBody" hx-swap="innerHTML">
+      <div>
+        <span class="sfb-appearance-kicker">هدر فروشگاه</span>
+        <strong>جستجو، حساب کاربری، سبد خرید و نوار اعلان</strong>
+      </div>
+      <span class="sfb-appearance-action">ویرایش هدر ←</span>
+    </button>
+
+    <button type="button" class="sfb-appearance-card"
+            hx-get="{% url 'dashboard:storefront-builder-footer' %}" hx-target="#sfbInspectorBody" hx-swap="innerHTML">
+      <div>
+        <span class="sfb-appearance-kicker">فوتر فروشگاه</span>
+        <strong>ستون‌های فوتر و نمایش هرکدام</strong>
+      </div>
+      <span class="sfb-appearance-action">ویرایش فوتر ←</span>
+    </button>
+  </div>
+
+  <div x-show="view === 'palettes'">
+    <button type="button" class="btn btn-ghost btn-sm" @click="view = 'hub'">← بازگشت</button>
+    <p style="color:var(--muted);font-size:12.5px;margin:8px 0 12px"><strong>تم کامل:</strong> با یک کلیک پس‌زمینه صفحه، هدر، منو، کارت‌ها، متن‌ها، قیمت‌ها، ردیف‌های رنگی و فوتر تغییر می‌کنند. بعداً هر رنگ را جداگانه می‌توانی اصلاح کنی.</p>
+    <div class="form-group" style="margin:10px 0 14px">
+      <label for="sfbPaletteSearch" style="display:block;margin-bottom:6px">جستجو در ۶۴ پالت</label>
+      <input id="sfbPaletteSearch" type="search" class="form-input"
+             x-model.debounce.120ms="paletteQuery"
+             placeholder="نام یا گروه پالت را بنویسید..." autocomplete="off">
+      <p class="tiny" style="color:var(--muted);margin:6px 0 0">همه پالت‌ها برای همه قالب‌ها قابل انتخاب‌اند؛ بعد از انتخاب می‌توانید فقط یک رنگ را هم جداگانه تغییر دهید.</p>
+    </div>
+    <div class="sfb-palette-gallery">
+      {% for p in palettes %}
+      <form method="post" action="{% url 'dashboard:storefront-builder-appearance' %}"
+            x-show="paletteQuery === '' || '{{ p.name_fa|escapejs }} {{ p.group_fa|escapejs }} {{ p.slug|escapejs }}'.toLowerCase().includes(paletteQuery.toLowerCase())">
+        {% csrf_token %}
+        <input type="hidden" name="palette_slug" value="{{ p.slug }}">
+        <input type="hidden" name="template_slug" value="{{ config.template_slug }}">
+        <input type="hidden" name="font" value="{{ config.font }}">
+        <input type="hidden" name="radius" value="{{ config.radius }}">
+        <input type="hidden" name="button_radius" value="{{ config.button_radius }}">
+        <input type="hidden" name="density" value="{{ config.density }}">
+        <input type="hidden" name="motion" value="{{ config.motion }}">
+        <input type="hidden" name="type_scale" value="{{ config.type_scale }}">
+        <input type="hidden" name="content_width" value="{{ config.content_width|default:'' }}">
+        <input type="hidden" name="grid_density" value="{{ config.grid_density|default:'' }}">
+        <input type="hidden" name="card_shadow" value="{{ config.card_shadow|default:'' }}">
+        <input type="hidden" name="card_hover" value="{{ config.card_hover|default:'' }}">
+        <input type="hidden" name="hero_style" value="{{ config.hero_style|default:'' }}">
+        <button type="submit" class="sfb-palette-card {% if config.palette_slug == p.slug %}active{% endif %}">
+          <div class="sfb-palette-mini"
+               style="--p-bg:{{ p.colors.background }};--p-surface:{{ p.colors.surface }};--p-text:{{ p.colors.text }};--p-primary:{{ p.colors.primary }};--p-accent:{{ p.colors.accent }}">
+            <span class="sfb-palette-mini-header"></span>
+            <span class="sfb-palette-mini-card one"></span>
+            <span class="sfb-palette-mini-card two"></span>
+            <span class="sfb-palette-mini-button"></span>
+          </div>
+          <strong>{{ p.name_fa }}</strong>
+          <span class="tiny" style="color:var(--muted)">{{ p.group_fa }}</span>
+          <div class="sfb-appearance-stripe">
+            <span style="background:{{ p.colors.primary }}"></span>
+            <span style="background:{{ p.colors.secondary }}"></span>
+            <span style="background:{{ p.colors.accent }}"></span>
+            <span style="background:{{ p.colors.surface }}"></span>
+            <span style="background:{{ p.colors.text }}"></span>
+          </div>
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div x-show="view === 'presets'">
+    <button type="button" class="btn btn-ghost btn-sm" @click="view = 'hub'">← بازگشت</button>
+    <p style="font-size:12.5px;color:var(--muted);margin:8px 0 12px">
+      هرکدام یک چیدمانِ کاملِ پیشنهادی برایِ صفحه‌ی اصلی، جزئیاتِ محصول، لیست، کالکشن، جستجو و سبدِ خرید است —
+      بعد از اعمال هم می‌توانید هر بخش را دستی اضافه/حذف/جابه‌جا/ویرایش کنید. رنگِ فعلیِ شما دست‌نخورده می‌ماند
+      مگر هنوز هیچ پالتی انتخاب نکرده باشید.
+    </p>
+    <div class="sfb-template-gallery">
+      {% for lp in layout_presets %}
+      <div class="sfb-template-card {% if active_layout_preset_key == lp.key %}active{% endif %}">
+        <strong>{{ lp.label_fa }}</strong>
+        <p style="font-size:12px;margin:6px 0 0">{{ lp.description_fa }}</p>
+        <div class="sfb-template-card-actions">
+          <form method="post" action="{% url 'dashboard:storefront-builder-apply-preset' %}"
+                onsubmit="if(!confirm('اعمالِ این پیش‌تنظیم، چیدمانِ صفحاتِ پوشش‌داده‌شده در پیش‌نویسِ فعلی را جایگزین می‌کند. ادامه می‌دهید؟')){return false;} this.confirm_preset_apply.value='1'; return true;">
+            {% csrf_token %}
+            <input type="hidden" name="preset_key" value="{{ lp.key }}">
+            <input type="hidden" name="confirm_preset_apply" value="0">
+            <button type="submit" class="btn btn-sm btn-primary">اعمالِ این پیش‌تنظیم</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div x-show="view === 'colors'">
+    <button type="button" class="btn btn-ghost btn-sm" @click="view = 'hub'">← بازگشت</button>
+    <p style="font-size:12.5px;color:var(--muted);margin:8px 0 12px">هر رنگ را مستقل تغییر بده؛ مثلاً اگر تم «مشکی طلایی» متن را زرد کرده، فقط «رنگ متن اصلی کل سایت» را قرمز کن و باقی تم دست‌نخورده می‌ماند.</p>
+    <h4 style="margin:14px 0 8px">رنگ‌های اصلی</h4>
+    <form method="post" action="{% url 'dashboard:storefront-builder-appearance' %}">
+      {% csrf_token %}
+      <input type="hidden" name="template_slug" value="{{ config.template_slug }}">
+      <input type="hidden" name="palette_slug" value="{{ config.palette_slug|default:'' }}">
+      <input type="hidden" name="font" value="{{ config.font }}">
+      <input type="hidden" name="radius" value="{{ config.radius }}">
+      <input type="hidden" name="button_radius" value="{{ config.button_radius }}">
+      <input type="hidden" name="density" value="{{ config.density }}">
+      <input type="hidden" name="motion" value="{{ config.motion }}">
+      <input type="hidden" name="type_scale" value="{{ config.type_scale }}">
+      <input type="hidden" name="content_width" value="{{ config.content_width|default:'' }}">
+      <input type="hidden" name="grid_density" value="{{ config.grid_density|default:'' }}">
+      <input type="hidden" name="card_shadow" value="{{ config.card_shadow|default:'' }}">
+      <input type="hidden" name="card_hover" value="{{ config.card_hover|default:'' }}">
+      <input type="hidden" name="hero_style" value="{{ config.hero_style|default:'' }}">
+      {% for key, label in color_field_labels %}
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div>
+          <label style="display:block">{{ label }}</label>
+          <span class="tiny" style="color:var(--muted)" dir="ltr">{{ resolved_colors|dictget:key }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="color" name="color_{{ key }}" value="{{ resolved_colors|dictget:key }}">
+          {% if key in config.color_overrides %}
+          <button type="submit" name="reset_color" value="{{ key }}" class="btn btn-ghost btn-sm" title="بازگردانی این رنگ به پالت" formnovalidate>↺</button>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      <h4 style="margin:18px 0 8px">رنگ بخش‌های سایت</h4>
+      <p class="tiny" style="color:var(--muted);margin-bottom:10px">برای کنترل دقیق‌تر هدر، منو، کارت‌ها، فوتر و قیمت‌ها.</p>
+      {% for key, label in theme_field_labels %}
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div>
+          <label style="display:block">{{ label }}</label>
+          <span class="tiny" style="color:var(--muted)" dir="ltr">{{ resolved_theme_roles|dictget:key }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="color" name="theme_{{ key }}" value="{{ resolved_theme_roles|dictget:key }}">
+          {% if key in config.theme_overrides %}
+          <button type="submit" name="reset_theme" value="{{ key }}" class="btn btn-ghost btn-sm" title="بازگردانی این رنگ به تم" formnovalidate>↺</button>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button type="submit" class="btn btn-primary">اعمال تغییرات</button>
+        {% if config.color_overrides or config.theme_overrides %}
+        <button type="submit" name="reset_all_overrides" value="1" class="btn btn-danger" formnovalidate>بازگردانی همه رنگ‌ها به پالت</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div x-show="view === 'advanced'">
+    <button type="button" class="btn btn-ghost btn-sm" @click="view = 'hub'">← بازگشت</button>
+    <form method="post" action="{% url 'dashboard:storefront-builder-appearance' %}">
+      {% csrf_token %}
+      <input type="hidden" name="template_slug" value="{{ config.template_slug }}">
+      <input type="hidden" name="palette_slug" value="{{ config.palette_slug|default:'' }}">
+      <div class="form-group">
+        <label>فونت</label>
+        <select name="font" class="form-select">
+          {% for f in font_choices %}<option value="{{ f }}" {% if config.font == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>گردی کارت‌ها</label>
+        <input type="range" name="radius" min="0" max="32" value="{{ config.radius }}" class="form-input">
+      </div>
+      <div class="form-group">
+        <label>گردی دکمه‌ها</label>
+        <input type="range" name="button_radius" min="0" max="32" value="{{ config.button_radius }}" class="form-input">
+      </div>
+      <div class="form-group">
+        <label>سبک دکمه‌ها</label>
+        <select name="button_style" class="form-select">
+          {% for b in button_style_choices %}<option value="{{ b }}" {% if config.button_style == b %}selected{% endif %}>{% if b == "soft" %}نرم{% elif b == "outline" %}خط‌دور{% else %}پر‌رنگ{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>عرض محتوای سایت</label>
+        <select name="content_width" class="form-select">
+          {% for w in site_content_width_choices %}
+          <option value="{{ w }}" {% if config.content_width == w or not config.content_width and w == 1200 %}selected{% endif %}>{% if w == 1100 %}باریک{% elif w == 1320 %}عریض{% elif w == 1500 %}خیلی عریض{% else %}استاندارد{% endif %}</option>
+          {% endfor %}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0">حداکثر عرضِ محتوایِ صفحه‌ی اصلی روی صفحه‌نمایش‌های بزرگ.</p>
+      </div>
+      <div class="form-group">
+        <label>تعداد ستون گرید محصول (دسکتاپ)</label>
+        <select name="grid_density" class="form-select">
+          {% for n in site_grid_density_choices %}<option value="{{ n }}" {% if config.grid_density == n or not config.grid_density and n == 4 %}selected{% endif %}>{{ n }}</option>{% endfor %}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0">پیش‌فرضِ بخش‌هایِ محصولی که تعدادِ ستون را جداگانه تنظیم نکرده‌اند.</p>
+      </div>
+      <div class="form-group">
+        <label>سایه‌ی کارت محصول</label>
+        <select name="card_shadow" class="form-select">
+          {% for s in site_card_shadow_choices %}<option value="{{ s }}" {% if config.card_shadow == s or not config.card_shadow and s == "soft" %}selected{% endif %}>{% if s == "none" %}بدون سایه{% elif s == "strong" %}پررنگ{% else %}ملایم{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>هاور کارت محصول</label>
+        <select name="card_hover" class="form-select">
+          {% for h in site_card_hover_choices %}<option value="{{ h }}" {% if config.card_hover == h or not config.card_hover and h == "lift" %}selected{% endif %}>{% if h == "none" %}بدون افکت{% elif h == "zoom" %}بزرگ‌نمایی{% else %}بالا آمدنِ ملایم{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>سبک هیرو (بخش تصویر بزرگ)</label>
+        <select name="hero_style" class="form-select">
+          {% for h in site_hero_style_choices %}<option value="{{ h }}" {% if config.hero_style == h or not config.hero_style and h == "wide" %}selected{% endif %}>{% if h == "tall" %}بلند{% elif h == "split" %}دوستونه{% else %}عریض{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>تراکم فاصله‌ها</label>
+        <select name="density" class="form-select">
+          {% for d in density_choices %}<option value="{{ d }}" {% if config.density == d %}selected{% endif %}>{% if d == "compact" %}فشرده{% elif d == "relaxed" %}باز{% else %}عادی{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>سبک حرکت</label>
+        <select name="motion" class="form-select">
+          {% for m in motion_choices %}<option value="{{ m }}" {% if config.motion == m %}selected{% endif %}>{% if m == "none" %}بدون حرکت{% elif m == "dynamic" %}پویا{% else %}ملایم{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>اندازه متن</label>
+        <select name="type_scale" class="form-select">
+          {% for s in type_scale_choices %}<option value="{{ s }}" {% if config.type_scale == s %}selected{% endif %}>{% if s == "compact" %}کوچک{% elif s == "large" %}بزرگ{% else %}متوسط{% endif %}</option>{% endfor %}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0">اندازه‌ی عنوان‌ها، نام محصول، قیمت و متن کم‌رنگ در کل فروشگاه.</p>
+      </div>
+      <div class="form-group">
+        <label>نمایش تصویر محصول</label>
+        <select name="image_fit" class="form-select">
+          {% for f in image_fit_choices %}<option value="{{ f }}" {% if config.image_fit == f %}selected{% endif %}>{% if f == "contain" %}کامل و بدون برش (Contain){% else %}پرکردن قاب (Cover){% endif %}</option>{% endfor %}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0">«پرکردن قاب» ممکن است لبه‌های تصویر را ببرد؛ «کامل و بدون برش» کل تصویر را نگه می‌دارد و ممکن است حاشیه خالی بگذارد.</p>
+      </div>
+      <div class="form-group">
+        <label>هاور تصویر محصول</label>
+        <select name="image_hover" class="form-select">
+          {% for h in image_hover_choices %}<option value="{{ h }}" {% if config.image_hover == h %}selected{% endif %}>{% if h == "none" %}بدون افکت{% else %}بزرگ‌نمایی ملایم{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>تصویر دومِ محصول (Crossfade)</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+          <input type="hidden" name="card_image_crossfade" value="">
+          <input type="checkbox" name="card_image_crossfade" value="1" {% if config.card_image_crossfade %}checked{% endif %}>
+          نمایشِ تصویرِ دوم هنگامِ هاور (مستقل از بزرگ‌نمایی)
+        </label>
+      </div>
+      <div class="form-group">
+        <label>بزرگ‌نمایی تصویرِ محصول (Zoom)</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+          <input type="hidden" name="card_image_zoom" value="">
+          <input type="checkbox" name="card_image_zoom" value="1" {% if config.card_image_zoom %}checked{% endif %}>
+          بزرگ‌نمایی ملایمِ تصویر هنگامِ هاور (مستقل از Crossfade)
+        </label>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button type="submit" class="btn btn-primary">اعمال شخصی‌سازی</button>
+      </div>
+    </form>
+    {% if draft.template_baseline_snapshot.appearance %}
+    {# Post-demo hardening pass (Issue 7) — RESET FIELD for a top-level #}
+    {# appearance key. Placed as its own standalone form (the big #}
+    {# customization form above already owns a single POST/action, and a #}
+    {# nested <form> would be invalid HTML) — "تراکم فاصله‌ها" (density) #}
+    {# is the one appearance setting every Ready Template baseline sets. #}
+    <form method="post" action="{% url 'dashboard:storefront-builder-appearance-field-reset' %}" style="margin-top:10px"
+          onsubmit="return confirm('«تراکمِ فاصله‌ها» به مقدارِ اولیه‌یِ قالب بازنشانی می‌شود. ادامه می‌دهید؟')">
+      {% csrf_token %}<input type="hidden" name="field" value="density">
+      <button type="submit" class="btn btn-ghost btn-sm sfb-reset-field-btn">⟲ بازنشانی «تراکم فاصله‌ها» به قالب</button>
+    </form>
+    {% endif %}
+  </div>
+</div>

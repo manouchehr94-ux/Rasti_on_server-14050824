@@ -1,0 +1,269 @@
+{% load static dashboard_nav storefront_builder_extras persian %}<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}پنل مدیریت فروشگاه | {{ SHOP_NAME }}{% endblock %}</title>
+<link rel="stylesheet" href="{% static 'css/admin.css' %}">
+<link rel="stylesheet" href="{% static 'css/product_entry_prototype.css' %}">
+<link rel="stylesheet" href="{% static 'css/admin_v2.css' %}?v=20261106-1">
+<link rel="stylesheet" href="{% static 'css/admin_ui.css' %}?v=20261030-3">
+<link rel="stylesheet" href="{% static 'notifications/inbox.css' %}?v=20261101-1">
+<link rel="stylesheet" href="{% static 'core/jalali_picker.css' %}?v=20261106-1">
+<link rel="stylesheet" href="{% static 'core/password_toggle.css' %}?v=20261106-1">
+<link rel="stylesheet" href="{% static_v 'core/image_guide.css' %}">
+{% block extra_css %}{% endblock %}
+<script>
+// توابعِ زیر باید پیش از بارگذاریِ Alpine (که defer است) تعریف شوند تا x-data
+// بتواند آن‌ها را در لحظه‌ی مقداردهی پیدا کند.
+// ویرایشگرِ متنِ غنیِ توضیحاتِ کالا (CKEditor5 Classic Build، بارگذاری‌شده در
+// پایینِ همین صفحه). $refs.source تکست‌اریایِ اصلی (name="description") است —
+// CKEditor آن را جایگزین می‌کند اما خودِ عنصر در فرم می‌ماند؛ محتوا با هر
+// تغییر به آن sync می‌شود تا htmx/ارسالِ معمولیِ فرم مقدارِ درست را بفرستد.
+function richTextEditor() {
+  return {
+    editor: null,
+    mount() {
+      if (typeof ClassicEditor === "undefined") return;
+      ClassicEditor.create(this.$refs.source, {
+        licenseKey: "GPL",
+        language: "fa",
+        toolbar: [
+          "heading", "|", "bold", "italic", "|",
+          "bulletedList", "numberedList", "outdent", "indent", "|",
+          "link", "insertTable", "blockQuote", "uploadImage", "mediaEmbed", "|", "undo", "redo",
+        ],
+      }).then((editor) => {
+        this.editor = editor;
+        editor.model.document.on("change:data", () => {
+          this.$refs.source.value = editor.getData();
+        });
+      }).catch((err) => console.error("CKEditor init failed", err));
+    },
+  };
+}
+
+// نسخه ساده و فروشنده‌محور برای Builder فروشگاه.
+// فقط ابزارهای لازمِ نوشتن محتوا نمایش داده می‌شوند؛ textarea خام صرفاً
+// منبع ارسال فرم است و در UI به کاربر نشان داده نمی‌شود.
+function storefrontRichTextEditor() {
+  return {
+    editor: null,
+    mount() {
+      const source = this.$refs.source;
+      if (!source || typeof ClassicEditor === "undefined") return;
+      ClassicEditor.create(source, {
+        licenseKey: "GPL",
+        language: "fa",
+        toolbar: [
+          "heading", "|", "bold", "italic", "|",
+          "bulletedList", "numberedList", "|",
+          "link", "|", "undo", "redo",
+        ],
+        heading: {
+          options: [
+            { model: "paragraph", title: "متن", class: "ck-heading_paragraph" },
+            { model: "heading2", view: "h2", title: "عنوان", class: "ck-heading_heading2" },
+          ],
+        },
+      }).then((editor) => {
+        this.editor = editor;
+        source.style.display = "none";
+        source.setAttribute("aria-hidden", "true");
+        source.setAttribute("tabindex", "-1");
+        source.value = editor.getData();
+        editor.model.document.on("change:data", () => {
+          source.value = editor.getData();
+        });
+      }).catch((err) => console.error("Storefront rich-text init failed", err));
+    },
+  };
+}
+</script>
+<script src="{% static 'js/htmx.min.js' %}" defer></script>
+{% comment %}
+CKEditor باید پیش از Alpine اجرا شود: هر دو اسکریپت defer دارند و مرورگر
+deferها را دقیقاً به‌ترتیبِ سند اجرا می‌کند؛ اگر Alpine زودتر اجرا شود،
+x-init="mount()" (در richTextEditor بالا) پیش از تعریف‌شدنِ سراسریِ
+ClassicEditor فراخوانی می‌شود و بی‌سروصدا (بدون خطا در کنسول) از ساختِ
+ویرایشگر صرف‌نظر می‌کند — دقیقاً همان چیزی که باعث می‌شد فیلدِ توضیحات
+هرگز ویرایشگرِ متنِ غنی نگیرد و به textarea ساده می‌ماند.
+{% endcomment %}
+<script src="{% static 'js/vendor/ckeditor5-classic/ckeditor.js' %}" defer></script>
+<script src="{% static 'js/vendor/ckeditor5-classic/translations-fa.js' %}" defer></script>
+<script src="{% static 'js/alpine.min.js' %}" defer></script>
+<script src="{% static 'js/admin_v2.js' %}" defer></script>
+<script src="{% static 'js/admin_ui.js' %}?v=20261030-1" defer></script>
+<script src="{% static 'js/card_number_input.js' %}?v=20261104-1" defer></script>
+<script src="{% static 'notifications/inbox.js' %}?v=20261101-1" defer></script>
+<script src="{% static 'core/jalali_picker.js' %}?v=20261106-1" defer></script>
+<script src="{% static 'core/password_toggle.js' %}?v=20261106-1" defer></script>
+<script src="{% static_v 'core/image_guide.js' %}" defer></script>
+</head>
+<body class="admin-body admin-v2-body"
+      x-data="{ sidebarOpen: false, modalOpen: false, theme: localStorage.getItem('adminTheme') || '' }"
+      :data-theme="theme"
+      x-init="$watch('theme', v => localStorage.setItem('adminTheme', v))"
+      @modal-close.window="modalOpen = false">
+{% csrf_token %}
+{% if support_mode_active %}
+<div style="background:linear-gradient(135deg,#c66b14,#e0a72e);color:#fff;padding:10px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;flex-wrap:wrap;position:sticky;top:0;z-index:200">
+  <span>⚠️ حالتِ پشتیبانیِ پلتفرم فعال است — شما به‌عنوانِ «{{ support_mode_admin_email }}» وارد «{{ support_mode_store_name }}» شده‌اید.</span>
+  <form method="post" action="{% url 'dashboard:exit-support-mode' %}" style="margin:0">
+    {% csrf_token %}
+    <button type="submit" style="background:#fff;color:#92400e;border:0;border-radius:8px;padding:6px 12px;font-weight:800;cursor:pointer">خروج از حالتِ پشتیبانی</button>
+  </form>
+</div>
+{% endif %}
+<div class="app">
+
+  <!-- backdrop سایه‌ی پس‌زمینه‌ی درِ کشویی موبایل — کلیک روی آن هم می‌بندد -->
+  <div class="sidebar-backdrop" :class="{ open: sidebarOpen }" @click="sidebarOpen = false" x-cloak></div>
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar" :class="{ open: sidebarOpen }" @click="if ($event.target.closest('.nav-item')) sidebarOpen = false">
+    <div class="brand">
+      <div class="logo">{{ SHOP_NAME|slice:":1" }}</div>
+      <div><b>{{ SHOP_NAME }}</b><span>پنل مدیریت فروشگاه</span></div>
+    </div>
+    <nav class="nav" aria-label="ناوبری اصلی">
+      {% admin_sidebar_nav %}
+    </nav>
+    <div class="sidebar-foot">
+      {% if RASTISI_PORTAL_URL %}
+      <a href="{{ RASTISI_PORTAL_URL }}" style="display:flex;align-items:center;gap:6px;color:#9aa3bd;font-size:11.5px;padding:6px 10px;margin-bottom:6px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        بازگشت به راستیسی
+      </a>
+      {% endif %}
+      <div class="card-mini">
+        <div class="avatar">{{ request.user.customer_profile.full_name|default:request.user.username|slice:":2" }}</div>
+        <div style="min-width:0;flex:1">
+          <b style="color:#fff;font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ request.user.customer_profile.full_name|default:request.user.username }}</b>
+          <span style="font-size:11px">{% if request.user.is_superuser %}مدیر کل فروشگاه{% else %}مدیر پنل{% endif %}</span>
+        </div>
+        <form method="post" action="{% url 'customers:logout' %}">
+          {% csrf_token %}
+          <button type="submit" title="خروج" style="color:#9aa3bd;width:28px;height:28px;display:grid;place-items:center;border-radius:8px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </button>
+        </form>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn burger" type="button" aria-label="باز و بسته کردن منوی کناری" :aria-expanded="sidebarOpen ? 'true' : 'false'" @click="sidebarOpen = !sidebarOpen">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <h1>{% block page_title %}داشبورد{% endblock %}</h1>
+        <div class="sub">{% block page_sub %}نمای کلی عملکرد فروشگاه{% endblock %}</div>
+      </div>
+      <div class="search-box" id="adminV2SearchTrigger" role="button" tabindex="0" aria-label="جستجو در پنل؛ میانبر کنترل K">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input readonly inert tabindex="-1" aria-hidden="true" placeholder="جستجو در پنل؛ کالا، لوگو، سفارش، تنظیمات...">
+        <span class="admin-v2-kbd">Ctrl K</span>
+      </div>
+      <div class="admin-v2-page-actions">{% block page_actions %}{% endblock %}</div>
+      {% include "notifications/partials/bell.html" %}
+      <button class="icon-btn" @click="theme = theme === 'dark' ? '' : 'dark'" title="حالت شب / روز">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
+      {% if STOREFRONT_URL %}
+      <a class="icon-btn" href="{{ STOREFRONT_URL }}" target="_blank" rel="noopener" title="بازگشت به فروشگاه">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
+      </a>
+      {% else %}
+      <span class="icon-btn" style="opacity:.4;cursor:not-allowed" title="فروشگاه هنوز منتشر نشده است.">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
+      </span>
+      {% endif %}
+    </header>
+
+    {% admin_section_tabs %}
+
+    <main class="content">
+      {% if trial_banner %}
+      <div class="alert" data-testid="trial-banner" role="status"
+           style="margin-bottom:16px;padding:12px 16px;border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#e8f3ff;color:#0b3d75">
+        <span style="flex:1">دوره‌ی آزمایشیِ فروشگاه شما: <b>{{ trial_banner.days_left|fa_number }} روز</b> مانده (تا {{ trial_banner.end_at|jalali }}).</span>
+        {% if can_change_subscription %}<a href="{% url 'dashboard:subscription-plans' %}" data-testid="trial-banner-buy" style="font-weight:600;text-decoration:underline">خرید اشتراک</a>
+        {% elif can_view_subscription %}<a href="{% url 'dashboard:subscription-overview' %}" style="font-weight:600;text-decoration:underline">وضعیت اشتراک</a>{% endif %}
+      </div>
+      {% endif %}
+      {% if subscription_banner_warning %}
+      <div class="alert {% if subscription_banner_blocks_growth %}alert-error{% else %}alert-warning{% endif %}" role="alert"
+           style="margin-bottom:16px;padding:12px 16px;border-radius:10px;display:flex;align-items:center;gap:10px;
+                  background:{% if subscription_banner_blocks_growth %}#fde8e8;color:#9b1c1c{% else %}#fef3c7;color:#92400e{% endif %}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span style="flex:1">{{ subscription_banner_warning }}</span>
+        {% if can_view_subscription %}
+        <a href="{% url 'dashboard:subscription-overview' %}" style="font-weight:600;text-decoration:underline">مدیریتِ اشتراک</a>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+
+<!-- Admin V2 global command palette. The index is generated from
+     apps/dashboard/navigation.py (same permission-aware IA as the sidebar and
+     section tabs): every result points at an existing screen, no parallel CRUD. -->
+<div id="adminV2CommandIndex" aria-hidden="true">
+  {% admin_command_index %}
+</div>
+<div id="adminV2CommandPalette" class="admin-v2-command-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="جستجو در پنل">
+  <div class="admin-v2-command">
+    <div class="admin-v2-command-head">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input id="adminV2CommandInput" class="admin-v2-command-input" autocomplete="off" placeholder="کجا می‌خواهید بروید؟ مثلاً لوگو، دسته‌بندی‌ها، سفارش‌ها...">
+      <span class="admin-v2-command-esc">Esc</span>
+    </div>
+    <div id="adminV2CommandResults" class="admin-v2-command-results"></div>
+  </div>
+</div>
+
+<!-- generic modal shell — هر صفحه فرم خودش را با HTMX داخل آن بارگذاری می‌کند -->
+<div class="overlay" :class="{ open: modalOpen }" x-cloak @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+  <div class="modal" id="admin-modal-content"></div>
+</div>
+
+<!-- toasts -->
+<div class="toasts"
+     x-data="{ toasts: [] }"
+     x-init="
+        {% for message in messages %}
+        toasts.push({ id: Date.now() + Math.random() + {{ forloop.counter }}, message: '{{ message.message|escapejs }}', type: '{% if message.tags == "error" %}err{% elif message.tags == "success" %}ok{% else %}info{% endif %}' });
+        {% endfor %}
+        {% if messages %}setTimeout(() => { toasts = [] }, 3200);{% endif %}
+     "
+     @toast.window="
+        const item = { id: Date.now() + Math.random(), message: $event.detail.message, type: $event.detail.type || 'ok' };
+        toasts.push(item);
+        setTimeout(() => { toasts = toasts.filter(t => t.id !== item.id) }, 2800)
+     ">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="{ err: t.type === 'err', info: t.type === 'info' }"
+         x-text="(t.type === 'err' ? '⚠️ ' : t.type === 'info' ? 'ℹ️ ' : '✅ ') + t.message"></div>
+  </template>
+</div>
+
+<script>
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+}
+document.body.addEventListener('htmx:configRequest', (event) => {
+  event.detail.headers['X-CSRFToken'] = getCookie('csrftoken');
+});
+</script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

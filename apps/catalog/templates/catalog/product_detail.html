@@ -1,0 +1,165 @@
+{% extends "storefront_shell.html" %}
+{% load static persian catalog_extras storefront_builder_extras seo_tags %}
+
+{% block title %}{{ product.seo_title|default:product.name }} | {{ SHOP_NAME }}{% endblock %}
+{% block meta_description %}<meta name="description" content="{{ product.seo_description|default:product.name }}">{% endblock %}
+{% block canonical %}{{ SEO_ORIGIN }}{% url 'catalog:product-detail' product.slug %}{% endblock %}
+{% block og_title %}{{ product.name }}{% endblock %}
+{% block og_tags %}{{ block.super }}
+{% if gallery_slides.0.url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ gallery_slides.0.url }}">{% endif %}
+{% og_price_meta product %}{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">{% jsonld_product product %}</script>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/product_card.css' %}">
+<link rel="stylesheet" href="{% static 'css/product_detail.css' %}">
+<link rel="stylesheet" href="{% sfb_static 'css/storefront_builder.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="wrap sfb-preview-sections pdp-page">
+  {% if is_merchant_preview %}
+  <div class="notice" style="border-right-color:#f59e0b;background:#fff7ed;color:#9a3412;margin-bottom:14px">
+    👁️ این یک پیش‌نمایشِ مدیریتی است — این کالا با وضعیتِ «{{ product.get_status_display }}» ثبت شده و ممکن است برایِ مشتری‌ها قابلِ مشاهده نباشد.
+  </div>
+  {% endif %}
+  {% include "storefront_builder/partials/render_rows.html" %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('variantSelector', (selectorData, productData) => ({
+    mode: selectorData.mode,
+    axes: selectorData.axes,
+    matrix: selectorData.matrix,
+    groups: selectorData.groups,
+    selected: {},
+    selectedVariantId: null,
+    current: null,
+    activeSlide: 0,
+    rootEl: null,
+    // کادوپیچی (toranj_gifting: optional_addon_checkbox_updates_total) —
+    // فقط یک پرچمِ UI برایِ به‌روزرسانیِ زنده‌یِ جمعِ *نمایشی*؛ منبعِ
+    // حقیقتِ نهاییِ قیمت/در دسترس‌بودن همیشه سرور است (cart_service.add_item_to_cart
+    // با gift_wrap_service.resolve_gift_wrap_selection دوباره بررسی می‌کند) —
+    // این مقدار هرگز به‌تنهایی به سرور اعتماد نمی‌شود.
+    giftWrapSelected: false,
+
+    init() {
+      // $el داخلِ متدهایی که از یک @click در x-forِ تودرتو صدا زده می‌شوند،
+      // ممکن است به عنصرِ کلیک‌شده اشاره کند نه ریشه‌ی کامپوننت؛ این‌جا در
+      // init() (که همیشه با $el ریشه صدا زده می‌شود) یک‌بار ذخیره می‌شود.
+      this.rootEl = this.$el;
+      if (this.mode === 'multi_axis') {
+        const defaultKey = selectorData.default_key;
+        if (defaultKey && this.matrix[defaultKey]) {
+          const parts = defaultKey.split('|');
+          this.axes.forEach((axis, i) => { this.selected[axis.id] = parseInt(parts[i], 10); });
+        } else {
+          this.axes.forEach(axis => { if (axis.values.length) this.selected[axis.id] = axis.values[0].id; });
+        }
+        this.resolveMultiAxis();
+      } else if (this.mode === 'legacy') {
+        const defaultKey = selectorData.default_key;
+        this.selectedVariantId = defaultKey ? parseInt(defaultKey, 10) : ((this.groups[0] && this.groups[0].values[0]) ? this.groups[0].values[0].id : null);
+        this.resolveLegacy();
+      }
+      this.updateGallery();
+    },
+
+    formatToman(n) {
+      const fa = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+      const grouped = Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '٬');
+      return grouped.replace(/[0-9]/g, (d) => fa[d]) + ' تومان';
+    },
+    discountPercentText() {
+      const p = this.displayPrice;
+      if (!p.regular || p.regular <= 0) return '';
+      const percent = Math.round((p.savings / p.regular) * 100);
+      const fa = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+      return String(percent).replace(/[0-9]/g, (d) => fa[d]) + '٪ تخفیف';
+    },
+
+    selectedLabel(axis) {
+      const value = axis.values.find((v) => v.id === this.selected[axis.id]);
+      return value ? value.label : '';
+    },
+    currentLegacyLabel(group) {
+      const value = group.values.find((v) => v.id === this.selectedVariantId);
+      return value ? value.label : '';
+    },
+
+    selectAxisValue(axisId, valueId) {
+      this.selected[axisId] = valueId;
+      this.resolveMultiAxis();
+    },
+    resolveMultiAxis() {
+      const key = this.axes.map((axis) => this.selected[axis.id]).join('|');
+      this.current = this.matrix[key] || null;
+      this.selectedVariantId = this.current ? this.current.variant_id : null;
+      this.updateGallery();
+    },
+    selectLegacy(valueId) {
+      this.selectedVariantId = valueId;
+      this.resolveLegacy();
+    },
+    resolveLegacy() {
+      this.current = null;
+      for (const group of this.groups) {
+        const match = group.values.find((v) => v.id === this.selectedVariantId);
+        if (match) { this.current = match; break; }
+      }
+      this.updateGallery();
+    },
+
+    isValueAvailable(axisId, valueId) {
+      if (this.mode !== 'multi_axis') return true;
+      const trial = Object.assign({}, this.selected);
+      trial[axisId] = valueId;
+      const key = this.axes.map((axis) => trial[axis.id]).join('|');
+      const entry = this.matrix[key];
+      return !!entry && entry.is_purchasable;
+    },
+
+    updateGallery() {
+      const url = this.current ? this.current.image_url : '';
+      const slides = [...this.rootEl.querySelectorAll('[data-slide]')];
+      let idx = url ? slides.findIndex((s) => s.dataset.slideUrl === url) : -1;
+      if (idx < 0) idx = slides.findIndex((s) => s.dataset.cover === 'true');
+      this.activeSlide = idx >= 0 ? idx : 0;
+    },
+
+    get displayPrice() {
+      if (this.current) {
+        return { price: this.current.price, regular: this.current.regular_price, savings: this.current.savings };
+      }
+      return { price: productData.price, regular: productData.regular, savings: productData.savings };
+    },
+    get displayStock() {
+      return this.current ? this.current.stock : productData.stock;
+    },
+    get needsSelection() {
+      return this.mode !== 'none' && !this.current;
+    },
+    get canAddToCart() {
+      return !this.needsSelection && this.displayStock > 0;
+    },
+    get giftWrapUnitPrice() {
+      return productData.gift_wrap_price || 0;
+    },
+    // جمعِ نمایشیِ «قیمت + کادوپیچی (اگر انتخاب شده)» — برایِ نمایشِ زنده‌یِ
+    // بروزرسانیِ جمعِ کل روی خودِ صفحه‌ی محصول، پیش از افزودن به سبد. جمعِ
+    // *واقعیِ* سبد/تسویه‌حساب همچنان توسطِ apps.cart.services.pricing.cart_totals
+    // (سمتِ سرور) محاسبه می‌شود؛ این فقط یک پیش‌نمایشِ سمتِ کلاینت است.
+    get displayTotalWithGiftWrap() {
+      return this.displayPrice.price + (this.giftWrapSelected ? this.giftWrapUnitPrice : 0);
+    },
+  }));
+});
+</script>
+{% endblock %}

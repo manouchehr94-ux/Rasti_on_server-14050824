@@ -1,0 +1,145 @@
+{% load storefront_builder_extras %}<section class="section product-section{% if settings.carousel_autoplay and settings.display_mode == 'carousel' %} product-section--spotlight{% endif %}{% if settings.display_mode == 'campaign_band' %} product-section--campaign-band{% elif settings.display_mode == 'catalog_grid' %} product-section--catalog-grid{% endif %}{% if tabs %} product-section--tabs{% endif %}{% if settings.row_backdrop == 'glow' %} product-section--glow{% endif %}{% if settings.heading_style == 'plain_outline' %} product-section--hs-plain{% elif settings.heading_style == 'underlined' %} product-section--hs-underlined{% elif settings.heading_style == 'plain_link' %} product-section--hs-link{% elif settings.heading_style == 'icon_chip' %} product-section--hs-icon{% endif %}"{% if settings.carousel_autoplay and settings.display_mode == 'carousel' %} data-sfb-section-surface="ink"{% endif %}>
+  {% if settings.display_mode == "campaign_band" %}
+  {% comment %}
+  Campaign band: heading (the section's own title — never invented copy), then the band holding an OPTIONAL promotional
+  panel and the product grid. The panel, its copy, its visual (registered icon key or a Store-scoped media asset) and its
+  colours are all engine configuration (``campaign`` context, see render_service._campaign_panel_view).
+  {% endcomment %}
+  {% if settings.title %}
+  <div class="beauty-section-title product-campaign-heading" aria-hidden="true">
+    <span></span><h2>{{ settings.title }}</h2><span></span>
+  </div>
+  {% endif %}
+  <div class="product-campaign-band{% if not campaign.enabled %} product-campaign-band--no-panel{% endif %}"{% if campaign.band_style %} style="{{ campaign.band_style }}"{% endif %}>
+    {% if campaign.enabled %}
+    <aside class="product-campaign-copy" data-align="{{ campaign.align }}"{% if campaign.style %} style="{{ campaign.style }}"{% endif %}>
+      {% if campaign.visual == "icon" %}
+      <span class="product-campaign-gift" aria-hidden="true">{{ campaign.icon_svg }}</span>
+      {% elif campaign.visual == "media" %}
+      <span class="product-campaign-gift product-campaign-media" aria-hidden="true"><img src="{{ campaign.media_url }}" data-img-role="product" alt="" loading="lazy"></span>
+      {% endif %}
+      {% if campaign.title %}<h2>{{ campaign.title }}</h2>{% endif %}
+      {% if campaign.subtitle %}<p>{{ campaign.subtitle }}</p>{% endif %}
+      {% if settings.show_view_all %}
+      {% url 'catalog:product-list' as campaign_all_url %}
+      <a href="{{ view_all_url|default:campaign_all_url }}" class="product-campaign-link">مشاهده همه محصولات</a>
+      {% endif %}
+    </aside>
+    {% endif %}
+    <div class="product-campaign-products grid rsec-cols"{% if settings.gap is not None %} style="gap:{{ settings.gap }}px"{% endif %}>
+      {% include "catalog/partials/product_grid.html" with products=products card_settings=settings.card %}
+    </div>
+  </div>
+  {% elif settings.display_mode == "catalog_grid" %}
+  <div class="catalog-grid-head">
+    <span class="catalog-grid-bar" aria-hidden="true"></span>
+    {% if settings.title %}<h2>{{ settings.title }}</h2>{% endif %}
+    {% if settings.subtitle %}<p>{{ settings.subtitle }}</p>{% endif %}
+  </div>
+  <div class="grid rsec-cols catalog-grid-products"{% if settings.gap is not None %} style="gap:{{ settings.gap }}px"{% endif %}>
+    {% include "catalog/partials/product_grid.html" with products=products card_settings=settings.card %}
+  </div>
+  {% if settings.show_view_all %}
+  {% url 'catalog:product-list' as catalog_all_url %}
+  <div class="catalog-grid-bar-row">
+    <a href="{{ view_all_url|default:catalog_all_url }}" class="catalog-grid-more">مشاهده همه</a>
+    <span class="catalog-grid-page" aria-hidden="true">صفحه <span class="catalog-grid-page-box">۱</span> از ۱</span>
+    <span class="catalog-grid-next" aria-hidden="true">صفحه قبل</span>
+  </div>
+  {% endif %}
+  {% elif tabs %}
+  {% comment %}Tabs beside the heading: each tab is a REAL Store category (or a sort) with its own product row; the first one is shown until a shopper picks another.{% endcomment %}
+  <div class="product-tabs{% if settings.tabs_style == "pills" %} product-tabs--pills{% endif %}" x-data="{ tab: 0 }">
+    <div class="product-tabs-head">
+      <h2>{{ settings.title|default:"محصولات" }}</h2>
+      <div class="product-tabs-list" role="tablist">
+        {% for tab in tabs %}
+        <button type="button" role="tab" class="product-tab{% if forloop.first %} is-active{% endif %}" :class="{ 'is-active': tab === {{ forloop.counter0 }} }" :aria-selected="(tab === {{ forloop.counter0 }}).toString()" @click="tab = {{ forloop.counter0 }}">{{ tab.label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    {% for tab in tabs %}
+    <div class="product-tabs-pane" role="tabpanel"{% if not forloop.first %} hidden{% endif %} :hidden="tab !== {{ forloop.counter0 }}">
+      {% include "storefront_builder/partials/product_row.html" with products=tab.products %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  {% if settings.header_position != "inside" %}
+  <div class="sec-head">
+    <h2>{% if settings.heading_style == "icon_chip" and settings.heading_icon %}<span class="sec-head-icon" aria-hidden="true">{{ settings.heading_icon|engine_icon }}</span>{% else %}<span class="bar"></span>{% endif %}{{ settings.title|default:"محصولات" }}</h2>
+    {% if view_all_url and settings.show_view_all and settings.view_all_placement != "bottom" %}
+    <a href="{{ view_all_url }}" class="btn btn-sm">مشاهده همه</a>
+    {% elif settings.show_view_all and settings.heading_style and settings.view_all_placement != "bottom" %}
+    {% comment %}Headings with an explicit style always show the outlined "view all" pill; an automatic source has no
+    dedicated destination, so it points at the Store's product listing.{% endcomment %}
+    {% url 'catalog:product-list' as catalog_all_url %}
+    <a href="{{ catalog_all_url }}" class="btn btn-sm">مشاهده همه</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if settings.subtitle and settings.header_position != "inside" %}
+  <p class="product-section-subtitle">{{ settings.subtitle }}</p>
+  {% endif %}
+
+  {% if settings.display_mode == "carousel" and settings.carousel_autoplay %}
+  <div class="product-spotlight-slider" data-sfb-section-surface="ink"
+       x-data="{ active: 0, count: {{ products|length }}, timer: null,
+                  next() { this.active = (this.active + 1) % this.count },
+                  prev() { this.active = (this.active - 1 + this.count) % this.count },
+                  start() { if (this.count > 1 && !this.timer) this.timer = setInterval(() => this.next(), {{ settings.carousel_interval_ms|default:3500 }}) },
+                  stop() { if (this.timer) { clearInterval(this.timer); this.timer = null } } }"
+       x-init="start()"
+       @mouseenter="stop()"
+       @mouseleave="start()">
+
+    {% if settings.header_position == "inside" %}
+    <div class="product-spotlight-head" data-sfb-section-surface="ink">
+      <h2><span class="bar"></span>{{ settings.title|default:"محصولات" }}</h2>
+      {% if settings.subtitle %}<p>{{ settings.subtitle }}</p>{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="product-spotlight-track" data-sfb-section-surface="ink">
+      {% if products %}
+      {% for product in products %}
+      <div class="product-spotlight-slide"
+           x-show="active === {{ forloop.counter0 }}"
+           x-cloak
+           x-transition:enter="product-spotlight-enter"
+           x-transition:enter-start="product-spotlight-enter-start"
+           x-transition:enter-end="product-spotlight-enter-end"
+           x-transition:leave="product-spotlight-leave"
+           x-transition:leave-start="product-spotlight-leave-start"
+           x-transition:leave-end="product-spotlight-leave-end">
+        {% include "catalog/partials/product_card.html" with card_settings=settings.card %}
+      </div>
+      {% endfor %}
+      {% else %}
+      {% if empty_state %}{% include "storefront_builder/sections/_empty_state_body.html" %}{% else %}<p class="product-spotlight-empty">فعلاً کالایی برای نمایش وجود ندارد.</p>{% endif %}
+      {% endif %}
+    </div>
+
+    {% if settings.carousel_show_arrows and products|length > 1 %}
+    <button type="button" class="product-spotlight-arrow product-spotlight-prev" @click="prev(); start()" aria-label="محصول قبلی">‹</button>
+    <button type="button" class="product-spotlight-arrow product-spotlight-next" @click="next(); start()" aria-label="محصول بعدی">›</button>
+    {% endif %}
+
+    {% if products|length > 1 %}
+    <div class="product-spotlight-dots" aria-label="محصولات پیشنهاد لحظه‌ای">
+      {% for product in products %}
+      <button type="button" @click="active={{ forloop.counter0 }}; start()" :class="{ 'active': active === {{ forloop.counter0 }} }" aria-label="محصول {{ forloop.counter }}"></button>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  {% include "storefront_builder/partials/product_row.html" %}
+  {% endif %}
+  {% if settings.show_view_all and settings.view_all_placement == "bottom" and settings.display_mode != "campaign_band" and settings.display_mode != "catalog_grid" %}
+  {% url 'catalog:product-list' as more_all_url %}
+  <div class="product-more"><a href="{{ view_all_url|default:more_all_url }}" class="product-more-link">محصولات بیشتر <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 11l4 4 4-4"/></svg></a></div>
+  {% endif %}
+  {% endif %}
+</section>

@@ -1,0 +1,110 @@
+{% extends "dashboard/base_admin.html" %}
+{% load persian %}
+
+{% block title %}مدیریت کالاها | پنل مدیریت {{ SHOP_NAME }}{% endblock %}
+{% block page_title %}مدیریت کالاها{% endblock %}
+{% block page_sub %}افزودن، ویرایش و مدیریت موجودی محصولات{% endblock %}
+
+{% block content %}
+{% if selected_health %}
+<div class="info-box" style="margin-bottom:14px;display:flex;align-items:center;gap:10px">
+  <span>🩺 نمایشِ کالاهایی که
+    {% if selected_health == "no_images" %}هنوز تصویری ندارند
+    {% elif selected_health == "no_seo" %}اطلاعاتِ سئو (عنوان/توضیحات) ندارند
+    {% elif selected_health == "missing_variants" %}«دارایِ تنوع» علامت خورده‌اند اما هنوز هیچ تنوعی برایشان تعریف نشده
+    {% endif %}.</span>
+  <a href="{% url 'dashboard:product-list' %}" class="btn btn-sm" style="margin-inline-start:auto">✕ حذفِ فیلتر</a>
+</div>
+{% endif %}
+<div class="stats-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+  <div class="card" style="padding:14px 16px">
+    <div style="font-size:22px;font-weight:700">{{ product_stats.total|fa_number }}</div>
+    <div style="font-size:12.5px;color:var(--muted)">کل کالاها</div>
+  </div>
+  <div class="card" style="padding:14px 16px">
+    <div style="font-size:22px;font-weight:700;color:var(--green-ink)">{{ product_stats.active|fa_number }}</div>
+    <div style="font-size:12.5px;color:var(--muted)">کالای فعال</div>
+  </div>
+  <div class="card" style="padding:14px 16px">
+    <div style="font-size:22px;font-weight:700;color:var(--warning,#b58105)">{{ product_stats.draft|fa_number }}</div>
+    <div style="font-size:12.5px;color:var(--muted)">پیش‌نویس</div>
+  </div>
+  <div class="card" style="padding:14px 16px">
+    <div style="font-size:22px;font-weight:700">{{ product_stats.active_variants|fa_number }}</div>
+    <div style="font-size:12.5px;color:var(--muted)">تنوع‌های فعال</div>
+  </div>
+  <div class="card" style="padding:14px 16px">
+    <div style="font-size:22px;font-weight:700;color:var(--red-ink)">{{ product_stats.low_stock|fa_number }}</div>
+    <div style="font-size:12.5px;color:var(--muted)">کالایِ کم‌موجود</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input class="inp" id="prodSearch" name="q" value="{{ q }}" placeholder="جستجوی کالا..." style="width:220px"
+             hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+             hx-trigger="keyup changed delay:300ms" hx-include="#prodCatFilter,#prodStatusFilter,#prodBrandFilter,#prodTypeFilter,#prodSortSelect">
+      <select class="inp" id="prodCatFilter" name="category" style="width:190px"
+              hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+              hx-trigger="change" hx-include="#prodSearch,#prodStatusFilter,#prodBrandFilter,#prodTypeFilter,#prodSortSelect">
+        <option value="">همه‌ی دسته‌بندی‌ها</option>
+        {% regroup category_options by parent as category_groups %}
+        {% for group in category_groups %}
+        <optgroup label="{{ group.grouper.icon }} {{ group.grouper.name }}">
+          {% for cat in group.list %}
+          <option value="{{ cat.pk }}" {% if selected_category|stringformat:"s" == cat.pk|stringformat:"s" %}selected{% endif %}>{{ cat.icon }} {{ cat.name }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      {% if brand_options %}
+      <select class="inp" id="prodBrandFilter" name="brand" style="width:160px"
+              hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+              hx-trigger="change" hx-include="#prodSearch,#prodCatFilter,#prodStatusFilter,#prodTypeFilter,#prodSortSelect">
+        <option value="">همه‌ی برندها</option>
+        {% for brand in brand_options %}
+        <option value="{{ brand.pk }}" {% if selected_brand|stringformat:"s" == brand.pk|stringformat:"s" %}selected{% endif %}>{{ brand.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <select class="inp" id="prodStatusFilter" name="status" style="width:140px"
+              hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+              hx-trigger="change" hx-include="#prodSearch,#prodCatFilter,#prodBrandFilter,#prodTypeFilter,#prodSortSelect">
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select class="inp" id="prodTypeFilter" name="product_type" style="width:150px"
+              hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+              hx-trigger="change" hx-include="#prodSearch,#prodCatFilter,#prodBrandFilter,#prodStatusFilter,#prodSortSelect">
+        <option value="">همه‌ی انواع</option>
+        {% for value, label in product_type_options %}
+        <option value="{{ value }}" {% if selected_product_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select class="inp" id="prodSortSelect" name="sort" style="width:170px"
+              hx-get="{% url 'dashboard:product-table' %}" hx-target="#productsTableWrap" hx-swap="innerHTML"
+              hx-trigger="change" hx-include="#prodSearch,#prodCatFilter,#prodBrandFilter,#prodStatusFilter,#prodTypeFilter">
+        {% for value, label in sort_options %}
+        <option value="{{ value }}" {% if selected_sort == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="prod-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-inline-start:auto">
+      {% if can_manage_imports %}
+      <a href="{% url 'dashboard:import-upload' %}?type=products" class="btn" data-testid="bulk-import-products" title="ورود یا بروزرسانی دسته‌جمعیِ کالاها با فایل اکسل">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6M9 9h2"/></svg>
+        ورود گروهی کالاها
+      </a>
+      {% endif %}
+      <a href="{% url 'dashboard:product-add' %}" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        افزودن کالای جدید
+      </a>
+    </div>
+  </div>
+  <div class="table-wrap" id="productsTableWrap">
+    {% include "dashboard/partials/products_table_inner.html" %}
+  </div>
+</div>
+{% endblock %}

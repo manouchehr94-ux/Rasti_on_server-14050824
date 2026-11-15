@@ -1,0 +1,49 @@
+{% extends "portal/base_platform.html" %}
+{% block title %}فروشگاه‌های من | راستیسی{% endblock %}
+{% block robots_meta %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<section class="p-section"><div class="p-wrap">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+    <h2 style="margin:0">فروشگاه‌های من</h2>
+    <div style="display:flex;gap:10px">
+      <a class="p-btn p-btn-ghost" href="{% url 'portal:notifications' %}">اعلان‌ها</a>
+      <a class="p-btn p-btn-primary" href="{% url 'portal:store-create' %}">+ فروشگاه تازه</a>
+      <form method="post" action="{% url 'portal:logout' %}">{% csrf_token %}<button type="submit" class="p-btn p-btn-ghost">خروج</button></form>
+    </div>
+  </div>
+
+  {% if memberships %}
+  <div class="p-grid cols-3">
+    {% for membership in memberships %}
+    <div class="p-card">
+      <h3>{{ membership.store.name }}</h3>
+      <p style="font-size:13px">وضعیت فروشگاه: {{ membership.store.get_status_display }}</p>
+      <p style="font-size:13px">نقش شما: {{ membership.get_role_display }}</p>
+      <p style="font-size:12px;color:var(--p-muted);direction:ltr;text-align:left">{{ membership.store.platform_code }}</p>
+      {% if not membership.store.onboarding_completed_at %}
+      <span class="p-plan-badge" style="margin-top:6px;display:inline-block">راه‌اندازی ناتمام</span>
+      <a class="p-btn p-btn-primary" style="width:100%;margin-top:10px" href="{% url 'portal:onboarding' membership.store.public_id %}">ادامه‌ی راه‌اندازی</a>
+      {% elif membership.store.status == "active" %}
+      <form method="post" action="{% url 'portal:enter-admin' membership.store.public_id %}" style="margin-top:10px">
+        {% csrf_token %}
+        <button type="submit" class="p-btn p-btn-ghost" style="width:100%">ورود به پنل مدیریت</button>
+      </form>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <a class="p-btn p-btn-ghost" style="flex:1;text-align:center;font-size:12px" href="{% url 'portal:billing-plans' membership.store.public_id %}">پلن و اشتراک</a>
+        <a class="p-btn p-btn-ghost" style="flex:1;text-align:center;font-size:12px" href="{% url 'portal:claim-handle' membership.store.public_id %}">نامِ دائمی</a>
+        <a class="p-btn p-btn-ghost" style="flex:1;text-align:center;font-size:12px" href="{% url 'portal:custom-domains' membership.store.public_id %}">دامنه‌ی اختصاصی</a>
+      </div>
+      <a class="p-btn p-btn-ghost" style="width:100%;margin-top:6px;font-size:12px" href="{% url 'portal:initiate-ownership-transfer' membership.store.public_id %}">انتقالِ مالکیت</a>
+      <a class="p-btn p-btn-ghost" style="width:100%;margin-top:6px;font-size:12px;color:#e07a72" href="{% url 'portal:request-store-deletion' membership.store.public_id %}">حذفِ فروشگاه</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="p-card" style="max-width:520px;text-align:center">
+    <p>هنوز هیچ فروشگاهی نساخته‌اید.</p>
+    <a class="p-btn p-btn-primary" style="margin-top:14px" href="{% url 'portal:store-create' %}">ساخت اولین فروشگاه</a>
+  </div>
+  {% endif %}
+</div></section>
+{% endblock %}

@@ -1,0 +1,535 @@
+from django import forms
+
+from apps.portal.services.owner_auth_service import (
+    LOGIN_IDENTIFIER_MAX_LENGTH,
+    LOGIN_PASSWORD_MAX_LENGTH,
+)
+from apps.stores.services.enamad_verification_service import (
+    EnamadBadgeError,
+    EnamadVerificationMetaError,
+    parse_enamad_badge_identifiers,
+    parse_enamad_verification_meta_tag,
+)
+
+
+_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+_PHONE_ATTRS = {
+    "autocomplete": "tel", "inputmode": "tel", "dir": "ltr", "aria-describedby": "id_phone_hint",
+    "placeholder": "0912 123 4567", "autocapitalize": "off", "spellcheck": "false", "maxlength": "20",
+}
+
+
+class _FieldErrorA11yMixin:
+    """وقتی فیلدی خطا دارد، ``aria-invalid`` و اتصالِ ``aria-describedby`` به
+    عنصرِ خطایِ همان فیلد (``id_<name>_error``) را روی ویجت می‌گذارد؛ در حالتِ
+    عادی ``aria-describedby``ِ ثابتِ ویجت (مثلاً راهنمایِ فیلد) دست‌نخورده می‌ماند."""
+
+    #: فرم‌هایِ بدونِ فیلدِ مشخص (مثلاً «اطلاعاتِ ورود صحیح نیست») می‌توانند
+    #: فیلدهایی را که خطای کلی به آن‌ها مربوط است نام ببرند؛ آن فیلدها
+    #: ``aria-invalid`` می‌گیرند و به عنصرِ خطایِ کلی (``id_form_error``) وصل می‌شوند.
+    non_field_error_fields: tuple = ()
+
+    def add_error(self, field, error):
+        super().add_error(field, error)
+        if field:
+            targets = [(field, f"id_{field}_error")]
+        else:
+            targets = [(name, "id_form_error") for name in self.non_field_error_fields]
+        for name, error_id in targets:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["aria-invalid"] = "true"
+                described = widget.attrs.get("aria-describedby", "").split()
+                if error_id not in described:
+                    described.append(error_id)
+                widget.attrs["aria-describedby"] = " ".join(described)
+
+
+class OwnerPhoneRequestForm(_FieldErrorA11yMixin, forms.Form):
+    """درخواستِ OTP برایِ **ورود** (``/login/``). نام نمی‌گیرد و هرگز نباید
+    بگیرد — ثبت‌نام فرمِ جدا دارد (``OwnerRegistrationRequestForm``)."""
+
+    phone = forms.CharField(
+        label="شماره موبایل", widget=forms.TextInput(attrs=_PHONE_ATTRS),
+    )
+    remember_me = forms.BooleanField(label="مرا به خاطر بسپار", required=False)
+
+    def clean_phone(self):
+        """شماره را همین‌جا به شکلِ متعارفِ ``09xxxxxxxxx`` درمی‌آورد تا خطا کنارِ
+        خودِ فیلد نمایش داده شود (نه یک پیامِ کلیِ بالایِ فرم)."""
+        from .phone import InvalidPhoneError, normalize_iranian_phone
+
+        raw = str(self.cleaned_data.get("phone") or "")
+        if len(raw) > 20:
+            raise forms.ValidationError("شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود (مثل ۰۹۱۲۱۲۳۴۵۶۷).")
+        try:
+            return normalize_iranian_phone(raw)
+        except InvalidPhoneError as exc:
+            raise forms.ValidationError(exc.messages[0]) from exc
+
+
+class OwnerFullNameForm(_FieldErrorA11yMixin, forms.Form):
+    """نامِ کاملِ مالک — یک منبعِ واحد برایِ اعتبارسنجی/نرمال‌سازی (ثبت‌نام و
+    مرحله‌ی «تکمیل ثبت‌نام»)؛ در ``OwnerProfile.full_name`` ذخیره می‌شود."""
+
+    full_name = forms.CharField(
+        label="نام و نام خانوادگی", strip=True,
+        error_messages={"required": "نام و نام خانوادگی را وارد کنید."},
+        widget=forms.TextInput(attrs={
+            "autocomplete": "name", "autocapitalize": "words", "placeholder": "مثلاً سارا احمدی",
+            "maxlength": "100",
+        }),
+    )
+
+    def clean_full_name(self):
+        from .services.owner_auth_service import OwnerAuthError, normalize_owner_full_name
+
+        try:
+            return normalize_owner_full_name(self.cleaned_data.get("full_name"))
+        except OwnerAuthError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+
+class TermsAcceptanceMixin(_FieldErrorA11yMixin, forms.Form):
+    """تأییدِ الزامیِ «قوانین و مقررات» (فرمِ ثبت‌نام و تکمیلِ ثبت‌نام).
+
+    فقط وجود/صحتِ *علامتِ تأیید* اینجا اعتبارسنجی می‌شود؛ **نسخه‌ی قوانین هرگز از
+    کلاینت نمی‌آید** — نسخه‌ی فعلی را سرور از ``apps.portal.terms`` می‌داند. فقط مقدارِ
+    دقیقِ ``"1"`` (مقدارِ چک‌باکس) تأیید است؛ رشته‌هایی مثلِ ``"0"``/``"false"``/خالی نه."""
+
+    #: چک‌باکس در قالب دستی رندر می‌شود (``name="accept_terms" value="1"``)؛ این فیلد فقط
+    #: مقدارِ خامِ ارسالی را می‌خواند و اعتبارسنجی می‌کند.
+    accept_terms = forms.CharField(required=False)
+
+    def clean_accept_terms(self):
+        from .terms import TERMS_ACCEPTANCE_REQUIRED_MESSAGE
+
+        if (self.data.get("accept_terms") or "").strip() != "1":
+            raise forms.ValidationError(TERMS_ACCEPTANCE_REQUIRED_MESSAGE)
+        return True
+
+
+class OwnerRegistrationRequestForm(TermsAcceptanceMixin, OwnerFullNameForm, OwnerPhoneRequestForm):
+    """درخواستِ OTP برایِ **ثبت‌نامِ مالکِ تازه** (``/register/``): نامِ کامل
+    و تأییدِ صریحِ قوانین الزامی است."""
+
+    field_order = ["full_name", "phone", "remember_me", "accept_terms"]
+
+
+class OwnerAccountCompletionForm(TermsAcceptanceMixin, OwnerFullNameForm):
+    """«اطلاعات حساب» — **تنها** فرمِ ساختِ مالکِ تازه پس از تأییدِ موبایل با OTP؛ هم برایِ مسیرِ ``/register/``
+    و هم ``/login/`` ← «تکمیل ثبت‌نام». **هیچ فیلدِ شماره‌ای ندارد**: شمارهٔ تأییدشده فقط از نشستِ
+    سمتِ سرور می‌آید.
+
+    فیلدها بر اساسِ نیازِ *واقعیِ* همان حساب (سرور) ساخته می‌شوند، نه کلاینت:
+
+    * ``full_name`` — فقط اگر ``/register/`` پیش‌تر آن را نگرفته باشد؛
+    * ``accept_terms`` — فقط اگر پذیرشِ نسخه‌یِ *فعلیِ* قوانین پیش‌تر در نشستِ سرور نیست؛
+    * ``email`` — الزامی برایِ حسابِ بدونِ ایمیل (نرمال‌سازی + تعارضِ بدونِ حساسیت به حروف)؛
+    * ``password`` + ``password_confirm`` — الزامی برایِ حسابِ بدونِ رمزِ قابل‌استفاده؛ فقط با
+      ``AUTH_PASSWORD_VALIDATORS`` (سیاستِ جداگانه‌ای نیست). رمزِ قابل‌استفاده‌یِ حسابِ موجود هرگز
+      خواسته یا بازنویسی نمی‌شود.
+    """
+
+    email = forms.EmailField(
+        label="ایمیل", required=True,  # length is validated by clean_email with our own Persian message
+        error_messages={"required": "ایمیل را وارد کنید.", "invalid": "ایمیل واردشده معتبر نیست؛ مثلاً name@example.com."},
+        widget=forms.EmailInput(attrs={
+            "autocomplete": "email", "inputmode": "email", "dir": "ltr", "autocapitalize": "off",
+            "spellcheck": "false", "maxlength": "254", "placeholder": "name@example.com",
+        }),
+    )
+    password = forms.CharField(
+        label="رمز عبور", max_length=LOGIN_PASSWORD_MAX_LENGTH, strip=False, required=True,
+        error_messages={"required": "رمز عبور را وارد کنید."},
+        widget=forms.PasswordInput(attrs={
+            "autocomplete": "new-password", "dir": "ltr", "aria-describedby": "id_password_hint",
+            "maxlength": str(LOGIN_PASSWORD_MAX_LENGTH),
+        }),
+    )
+    password_confirm = forms.CharField(
+        label="تکرار رمز عبور", max_length=LOGIN_PASSWORD_MAX_LENGTH, strip=False, required=True,
+        error_messages={"required": "رمز عبور را یک بار دیگر وارد کنید."},
+        widget=forms.PasswordInput(attrs={
+            "autocomplete": "new-password", "dir": "ltr", "maxlength": str(LOGIN_PASSWORD_MAX_LENGTH),
+        }),
+    )
+
+    def __init__(
+        self, *args, phone: str, need_full_name: bool = True, need_terms: bool = True,
+        need_email: bool = True, need_password: bool = True, user=None, **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.phone = phone
+        self.existing_user = user  # ``User``ِ موجودِ همین شماره (یا None)؛ فقط برایِ تعارضِ ایمیل/شباهتِ رمز
+        for name, needed in (
+            ("full_name", need_full_name), ("accept_terms", need_terms),
+            ("email", need_email), ("password", need_password), ("password_confirm", need_password),
+        ):
+            if not needed:
+                del self.fields[name]
+        first = next(iter(self.fields), None)
+        if first:
+            self.fields[first].widget.attrs["data-autofocus"] = ""
+
+    def clean_email(self):
+        from .services import owner_auth_service as auth
+
+        try:
+            email = auth.normalize_and_validate_email(self.cleaned_data.get("email"))
+        except auth.OwnerEmailError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+        if auth.email_belongs_to_another_user(email, exclude_user=self.existing_user):
+            raise forms.ValidationError(auth.EMAIL_CONFLICT_MESSAGE)
+        return email
+
+    def clean(self):
+        from django.contrib.auth import get_user_model
+
+        from .services import owner_auth_service as auth
+
+        cleaned = super().clean()
+        if "password" not in self.fields:
+            return cleaned
+        password, confirm = cleaned.get("password"), cleaned.get("password_confirm")
+        if password and confirm and password != confirm:
+            self.add_error("password_confirm", "رمز عبور و تکرار آن یکسان نیستند.")
+        elif password:
+            candidate = self.existing_user or get_user_model()(
+                username=self.phone, email=cleaned.get("email") or "",
+            )
+            try:
+                auth.validate_new_account_password(password, user=candidate)
+            except auth.PasswordPolicyError as exc:
+                self.add_error("password", forms.ValidationError(exc.messages))
+        return cleaned
+
+
+class OwnerOtpVerifyForm(_FieldErrorA11yMixin, forms.Form):
+    """تأییدِ کد. شماره و نام **از نشستِ سمتِ سرور** می‌آیند؛ فیلدِ مخفیِ
+    ``phone`` فقط برایِ تشخیصِ صفحه‌ی کهنه (چندتب) است و هیچ ``full_name``ای
+    از کلاینت خوانده نمی‌شود."""
+
+    phone = forms.CharField(widget=forms.HiddenInput, required=False)
+    code = forms.CharField(
+        label="کد تأیید", strip=True,
+        error_messages={"required": "کد ۶ رقمی را وارد کنید."},
+        widget=forms.TextInput(attrs={
+            "autocomplete": "one-time-code", "inputmode": "numeric", "pattern": "[0-9۰-۹ ]*",
+            "dir": "ltr", "placeholder": "••••••",
+        }),
+    )
+
+    def clean_code(self):
+        raw = str(self.cleaned_data.get("code") or "")
+        code = raw.translate(_DIGIT_MAP).replace(" ", "").replace("-", "")
+        if len(code) != 6 or not code.isascii() or not code.isdigit():
+            raise forms.ValidationError("کد باید ۶ رقم باشد.")
+        return code
+
+
+class OwnerLoginForm(forms.Form):
+    """Platform-admin password form: three identifiers, unchanged superuser gate.
+
+    The hidden optional email is a POST-compatibility alias for legacy
+    clients; only identifier is rendered by the current template.
+    """
+
+    identifier = forms.CharField(
+        label="شماره موبایل، نام کاربری یا ایمیل", required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "username", "dir": "ltr"}),
+    )
+    email = forms.EmailField(required=False, widget=forms.HiddenInput)
+    password = forms.CharField(
+        label="رمز عبور",
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+    )
+    remember_me = forms.BooleanField(label="مرا به خاطر بسپار", required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        identifier = (cleaned.get("identifier") or cleaned.get("email") or "").strip()
+        if not identifier:
+            self.add_error("identifier", "شماره موبایل، نام کاربری یا ایمیل الزامی است")
+        cleaned["identifier"] = identifier
+        return cleaned
+
+
+class OwnerIdentifierLoginForm(_FieldErrorA11yMixin, forms.Form):
+    """فرمِ یکپارچه‌ی ورود با رمز: موبایل، نام کاربری یا ایمیل.
+
+    فقط *کدام شناسه‌ها پذیرفته می‌شوند* را محدود می‌کند، نه سیاستِ ساختِ رمز:
+    هیچ ``validate_password``ای در ورود اجرا نمی‌شود. خطایِ «اطلاعات ورود صحیح
+    نیست» عمداً به هیچ فیلدِ مشخصی نسبت داده نمی‌شود، فقط هر دو فیلد را به آن
+    وصل می‌کند."""
+
+    non_field_error_fields = ("identifier", "password")
+
+    identifier = forms.CharField(
+        label="شماره موبایل، نام کاربری یا ایمیل", max_length=LOGIN_IDENTIFIER_MAX_LENGTH,
+        strip=True,
+        error_messages={
+            "required": "شماره موبایل، نام کاربری یا ایمیل را وارد کنید.",
+            "max_length": "شناسه‌ی واردشده بیش از حد بلند است.",
+        },
+        widget=forms.TextInput(attrs={
+            "autocomplete": "username", "dir": "ltr", "autocapitalize": "off", "spellcheck": "false",
+            "maxlength": str(LOGIN_IDENTIFIER_MAX_LENGTH),
+        }),
+    )
+    password = forms.CharField(
+        label="رمز عبور", max_length=LOGIN_PASSWORD_MAX_LENGTH, strip=False,
+        error_messages={
+            "required": "رمز عبور را وارد کنید.",
+            "max_length": "رمز عبور واردشده بیش از حد بلند است.",
+        },
+        widget=forms.PasswordInput(attrs={
+            "autocomplete": "current-password", "dir": "ltr", "maxlength": str(LOGIN_PASSWORD_MAX_LENGTH),
+        }),
+    )
+    remember_me = forms.BooleanField(label="مرا به خاطر بسپار", required=False)
+
+
+class PasswordResetRequestForm(OwnerPhoneRequestForm):
+    """درخواستِ بازیابی/تعیینِ رمز با **موبایل** (کدِ پیامکی) — همان اعتبارسنجیِ شماره‌ی
+    ورود با OTP، بدونِ «مرا به خاطر بسپار». ایمیل دیگر در مسیرِ عمومیِ بازیابی نیست."""
+
+    remember_me = None  # a reset never logs anyone in
+
+
+class PasswordResetConfirmForm(_FieldErrorA11yMixin, forms.Form):
+    """رمزِ جدید: اعتبارسنجی فقط با ``AUTH_PASSWORD_VALIDATORS`` (در سرویس) — این
+    فرم هیچ سیاستِ رمزِ جداگانه‌ای نمی‌سازد."""
+
+    password = forms.CharField(
+        label="رمز عبور جدید", max_length=LOGIN_PASSWORD_MAX_LENGTH, strip=False,
+        error_messages={"required": "رمز عبور جدید را وارد کنید."},
+        widget=forms.PasswordInput(attrs={
+            "autocomplete": "new-password", "dir": "ltr", "aria-describedby": "id_password_hint",
+            "maxlength": str(LOGIN_PASSWORD_MAX_LENGTH),
+        }),
+    )
+    password_confirm = forms.CharField(
+        label="تکرار رمز عبور", max_length=LOGIN_PASSWORD_MAX_LENGTH, strip=False,
+        error_messages={"required": "رمز عبور را یک بار دیگر وارد کنید."},
+        widget=forms.PasswordInput(attrs={
+            "autocomplete": "new-password", "dir": "ltr", "maxlength": str(LOGIN_PASSWORD_MAX_LENGTH),
+        }),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        password, confirm = cleaned.get("password"), cleaned.get("password_confirm")
+        if password and confirm and password != confirm:
+            self.add_error("password_confirm", "رمز عبور و تکرار آن یکسان نیستند.")
+        return cleaned
+
+
+class CreateStoreForm(forms.Form):
+    name = forms.CharField(
+        label="نام فروشگاه", max_length=200,
+        help_text="نامی که مشتریان می‌بینند؛ بعداً هم از پنلِ مدیریت قابلِ تغییر است.",
+        widget=forms.TextInput(attrs={"placeholder": "مثلاً: فروشگاه لوازم خانگی رضایی", "autocomplete": "organization"}),
+    )
+    submission_token = forms.CharField(widget=forms.HiddenInput, required=False)
+
+
+class PlatformConfigurationForm(forms.ModelForm):
+    """تنظیماتِ عمومیِ پلتفرم (Platform Owner Admin » تنظیماتِ پلتفرم) — هویت،
+    پیش‌فرض‌هایِ تجاری، و عملیات. پیکربندیِ درگاهِ پیامکِ مرکزی از این فرم جدا
+    است (نگاه کنید به ``PlatformSmsConfigForm``/صفحه‌ی «پیامک › تنظیماتِ
+    درگاه») تا این دو دغدغه‌ی متفاوت (هویتِ برند در برابرِ اعتبارنامه‌ی
+    زیرساخت) در یک فرم قاطی نشوند."""
+
+    class Meta:
+        from .models import PlatformConfiguration
+
+        model = PlatformConfiguration
+        fields = [
+            "default_trial_days", "deletion_retention_days",
+            "primary_brand_color", "secondary_brand_color",
+            "temporary_logo_text", "logo",
+            "support_contact_phone", "support_contact_email",
+            "default_payment_provider", "enamad_verification_meta_tag",
+            "enamad_id", "enamad_auth_code", "enamad_badge_enabled",
+            "maintenance_mode_enabled", "new_store_registration_enabled",
+        ]
+        widgets = {
+            "enamad_verification_meta_tag": forms.Textarea(attrs={
+                "rows": 3,
+                "dir": "ltr",
+                "placeholder": '<meta name="..." content="...">',
+                "spellcheck": "false",
+            }),
+        }
+
+    def clean_enamad_verification_meta_tag(self):
+        value = (self.cleaned_data.get("enamad_verification_meta_tag") or "").strip()
+        if not value:
+            return ""
+        try:
+            parse_enamad_verification_meta_tag(value)
+        except EnamadVerificationMetaError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+        return value
+
+    def clean(self):
+        cleaned_data = super().clean()
+        enamad_id = (cleaned_data.get("enamad_id") or "").strip()
+        auth_code = (cleaned_data.get("enamad_auth_code") or "").strip()
+        try:
+            parse_enamad_badge_identifiers(enamad_id, auth_code)
+        except EnamadBadgeError as exc:
+            self.add_error("enamad_auth_code", str(exc))
+        cleaned_data["enamad_id"] = enamad_id
+        cleaned_data["enamad_auth_code"] = auth_code
+        return cleaned_data
+
+    def clean_default_trial_days(self):
+        from apps.subscriptions.services import trial_service
+
+        try:
+            return trial_service.validate_days(self.cleaned_data["default_trial_days"])
+        except trial_service.TrialPolicyError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+    def clean_deletion_retention_days(self):
+        days = self.cleaned_data["deletion_retention_days"]
+        if not (180 <= days <= 365):
+            raise forms.ValidationError("روزهای نگهداری باید بین ۱۸۰ تا ۳۶۵ باشد.")
+        return days
+
+
+class PlatformSmsConfigForm(forms.ModelForm):
+    """درگاهِ پیامکِ مرکزیِ پلتفرم — صفحه‌ی جداگانه‌ی «پیامک › تنظیماتِ درگاه»
+    (Platform Owner Admin بخشِ ۱۲)؛ اعتبارنامه‌ها فیلدهایِ مدل نیستند (داخلِ
+    ``encrypted_sms_credentials`` رمزنگاری‌شده ذخیره می‌شوند) — اینجا صراحتاً
+    به‌صورتِ فیلدِ اضافیِ فرم اعلام شده‌اند، write-only مثلِ
+    ``dashboard.forms.SmsConnectionForm`` (هرگز مقدارِ ذخیره‌شده echo
+    نمی‌شود؛ خالی‌ماندن یعنی «بدونِ تغییر»، نه «پاک‌کردن»)."""
+
+    sms_melipayamak_username = forms.CharField(
+        label="نام کاربری ملی‌پیامک", max_length=100, required=False,
+    )
+    sms_melipayamak_password = forms.CharField(
+        label="رمز عبور ملی‌پیامک", max_length=100, required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"placeholder": "برای تغییر وارد کنید"}),
+    )
+    sms_melipayamak_otp_body_id = forms.CharField(
+        label="BodyId الگوی OTP ملی‌پیامک", max_length=30, required=False,
+        help_text="BodyId الگوی خدماتی تأیید موبایل/OTP در پنل ملی‌پیامک.",
+    )
+    sms_melipayamak_otp_variables_order = forms.CharField(
+        label="ترتیب متغیرهای الگوی OTP", max_length=120, required=False,
+        initial="otp_code",
+        help_text="مثال: otp_code یا otp_code,expire_minutes",
+    )
+    sms_otp_fallback_enabled = forms.BooleanField(
+        label="اگر ملی‌پیامک خطا داد، OTP با کاوه‌نگار ارسال شود",
+        required=False,
+    )
+    sms_kavenegar_api_key = forms.CharField(
+        label="کلید API کاوه‌نگار", max_length=100, required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"placeholder": "برای تغییر وارد کنید"}),
+    )
+    sms_kavenegar_otp_template = forms.CharField(
+        label="نام Template کاوه‌نگار برای OTP", max_length=100, required=False,
+        help_text="فقط برای Fallback VerifyLookup؛ در حالت عادی استفاده نمی‌شود.",
+    )
+
+    class Meta:
+        from .models import PlatformConfiguration
+
+        model = PlatformConfiguration
+        fields = ["sms_backend", "sms_sender_number"]
+
+
+class OnboardingIdentityForm(forms.Form):
+    """مرحله‌ی ۱ ویزارد آنبوردینگ (Section 5): معرفیِ فروشگاه.
+
+    راهنمای هر فیلدِ اختیاری فقط به‌صورت HTML ``placeholder`` نشان داده
+    می‌شود — یک متنِ نمونه/راهنما هرگز نباید مقدارِ واقعیِ فیلد باشد و
+    هرگز در دیتابیس ذخیره نمی‌شود؛ اگر کاربر چیزی وارد نکند، فیلد واقعاً
+    خالی می‌ماند."""
+
+    name = forms.CharField(
+        label="نام فروشگاه", max_length=150,
+        help_text="نامی که مشتریان در ویترین و پیام‌های فروشگاه می‌بینند.",
+        widget=forms.TextInput(attrs={"placeholder": "مثلاً: فروشگاه لوازم خانگی رضایی", "autocomplete": "organization"}),
+    )
+    tagline = forms.CharField(
+        label="شعار فروشگاه", max_length=200, required=False,
+        help_text="یک جمله‌ی کوتاه درباره‌ی فروشگاه (حداکثر ۲۰۰ نویسه).",
+        widget=forms.TextInput(attrs={"placeholder": "مثلاً: بهترین کیفیت، مناسب‌ترین قیمت"}),
+    )
+    description = forms.CharField(
+        label="درباره‌ی فروشگاه", required=False,
+        help_text="چند جمله برای معرفیِ کسب‌وکارتان به مشتریان؛ هر زمان قابلِ ویرایش است.",
+        widget=forms.Textarea(attrs={"rows": 5, "placeholder": "مثلاً: فروشگاه ما از سال ... با هدف ... راه‌اندازی شده است."}),
+    )
+    contact_phone = forms.CharField(
+        label="شماره تماس", max_length=30, required=False,
+        help_text="شماره‌ی ثابت یا موبایل برای تماسِ مشتریان.",
+        widget=forms.TextInput(attrs={
+            "placeholder": "مثلاً: 021-12345678", "dir": "auto", "inputmode": "tel", "autocomplete": "tel",
+        }),
+    )
+    contact_email = forms.EmailField(
+        label="ایمیل فروشگاه", required=False,
+        help_text="ایمیلی که مشتریان می‌توانند با آن با شما در تماس باشند.",
+        widget=forms.EmailInput(attrs={"placeholder": "مثلاً: info@example.com", "dir": "auto", "autocomplete": "email"}),
+    )
+    contact_address = forms.CharField(
+        label="آدرس", max_length=300, required=False,
+        help_text="نشانیِ فروشگاه یا دفتر (حداکثر ۳۰۰ نویسه).",
+        widget=forms.TextInput(attrs={"placeholder": "مثلاً: تهران، خیابان ..."}),
+    )
+
+
+class OnboardingIndustryForm(forms.Form):
+    """مرحله‌ی ۲ ویزارد آنبوردینگ: انتخابِ صنف (اختیاری، فقط یک‌بار قابلِ نصب - ADR-25)."""
+
+    industry_template_id = forms.IntegerField(required=False)
+    #: تأییدِ صریحِ نصبِ یک‌بارمصرف — فقط وقتی لازم است که واقعاً قرار است قالبی نصب شود
+    #: (رد کردن/ادامه‌ی حالتِ «نصب‌شده» آن را لازم ندارد)؛ مرجعِ اجرایی همین سمتِ سرور است.
+    #: عمداً «فقط مقدارِ دقیقِ ۱» پذیرفته می‌شود (نه هر رشته‌ی غیرخالی؛ مثلاً "0"/"false" تأیید نیست).
+    confirm_industry_install = forms.CharField(required=False)
+    #: نامِ واقعیِ صنف — فقط برایِ «سایر (صنف آزاد)» معنا دارد؛ اعتبارسنجیِ مرجع در
+    #: ``industry_template_service.validate_custom_industry_name`` است (سرور، نه JS). حدِّ بالا برایِ جلوگیریِ از بدنه‌یِ عظیم.
+    custom_industry_name = forms.CharField(required=False, max_length=400)
+
+    def clean_confirm_industry_install(self):
+        return (self.cleaned_data.get("confirm_industry_install") or "").strip() == "1"
+
+
+class OnboardingBrandingForm(forms.Form):
+    """مرحله‌ی ۳ ویزارد آنبوردینگ: هویتِ بصریِ فروشگاه (اختیاری).
+
+    فقط لوگو — انتخابِ رنگِ اصلی/مکمل (کدِ hex) عمداً از آنبوردینگ حذف شده:
+    یک تاجرِ معمولی نباید هنگامِ ساختِ اولیه‌ی فروشگاه با مقادیرِ hex سروکار
+    داشته باشد؛ رنگ‌ها هر زمان از داخلِ Storefront Builder/پنلِ مدیریت
+    قابلِ‌تنظیم‌اند (که کنترل‌های رنگِ خودش را همچنان دارد و از این تغییر
+    متأثر نمی‌شود) — پیش‌فرضِ ``ShopSettings.primary_color``/``accent_color``
+    هم دست‌نخورده می‌ماند."""
+
+    logo = forms.ImageField(
+        label="لوگو", required=False,
+        help_text="PNG، JPG یا WebP؛ حداکثر ۲ مگابایت.",
+        widget=forms.FileInput(attrs={
+            "accept": "image/png,image/jpeg,image/webp", "data-ob-logo-input": "",
+        }),
+    )
+
+    def clean_logo(self):
+        # R4-14 — the help text promised < 2 MB but nothing enforced it; format is the one Pillow detects (no GIF)
+        from apps.core.image_validation import validate_uploaded_image
+
+        return validate_uploaded_image(self.cleaned_data.get("logo"), max_bytes=2 * 1024 * 1024, label="لوگو")
+
+
+class ContactForm(forms.Form):
+    full_name = forms.CharField(label="نام", max_length=150)
+    email = forms.EmailField(label="ایمیل")
+    subject = forms.CharField(label="موضوع", max_length=200, required=False)
+    message = forms.CharField(label="پیام", widget=forms.Textarea, max_length=4000)

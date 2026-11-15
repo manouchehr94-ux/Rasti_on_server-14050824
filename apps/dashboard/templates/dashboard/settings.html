@@ -1,0 +1,52 @@
+{% extends "dashboard/base_admin.html" %}
+{% load persian %}
+
+{% block title %}تنظیمات | پنل مدیریت {{ SHOP_NAME }}{% endblock %}
+{% block page_title %}تنظیمات{% endblock %}
+{% block page_sub %}مدیریت اطلاعات، پرداخت، ارسال و ظاهر فروشگاه{% endblock %}
+
+{% block extra_css %}
+<style>
+.settings-nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:16px}
+.settings-nav-item{
+  display:flex;align-items:center;gap:8px;padding:10px 18px;border-radius:999px;
+  font-size:13px;font-weight:600;color:var(--muted);transition:.18s;border:1px solid var(--border);
+  text-decoration:none;background:var(--card);white-space:nowrap;
+}
+.settings-nav-item:hover{border-color:var(--primary);color:var(--primary)}
+.settings-nav-item.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.settings-nav-item .sn-icon{font-size:15px}
+.settings-content{min-width:0}
+@media (max-width:860px){
+  .settings-nav{flex-wrap:nowrap;overflow-x:auto;padding-bottom:12px}
+}
+</style>
+{% endblock %}
+
+{% block content %}
+{% comment %}Navigation is rendered once by base_admin (section tabs + level-3 screens + settings search) — no second tab row here.{% endcomment %}
+<!-- Settings Content -->
+<div class="settings-content">
+  {% if active_section == "general" %}
+  {% include "dashboard/partials/settings_general.html" %}
+  {% elif active_section == "domain" %}
+  {% include "dashboard/partials/settings_domain.html" %}
+  {% elif active_section == "finance" %}
+  {% include "dashboard/partials/settings_finance.html" %}
+  {% elif active_section == "unpaid-orders" %}
+  {% include "dashboard/partials/settings_unpaid_orders.html" %}
+  {% elif active_section == "delivery-payment" %}
+  {% include "dashboard/partials/settings_delivery_payment.html" %}
+  {% elif active_section == "payment-config" %}
+  {% include "dashboard/partials/settings_payment_config.html" %}
+  {% elif active_section == "sms" %}
+  {% include "dashboard/partials/settings_sms.html" %}
+  {% elif active_section == "appearance" %}
+  {% include "dashboard/partials/settings_appearance.html" %}
+  {% elif active_section == "industry" %}
+  {% include "dashboard/partials/settings_industry.html" %}
+  {% elif active_section == "integrations" %}
+  {% include "dashboard/partials/settings_integrations.html" %}
+  {% endif %}
+</div>
+{% endblock %}

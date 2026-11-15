@@ -1,0 +1,76 @@
+{% load persian %}
+{% if product.images.all %}
+<p class="field-help" style="margin-bottom:10px">🖐️ تصاویر را برای تغییرِ ترتیب بکشید و رها کنید.</p>
+{% endif %}
+<div id="productImagesList" class="img-manage-grid" x-data="{ dragId: null }">
+  {% for image in product.images.all %}
+  <div class="img-manage-item{% if image.is_cover %} is-cover{% endif %}" draggable="true" data-id="{{ image.pk }}"
+       @dragstart="dragId = {{ image.pk }}"
+       @dragover.prevent
+       @drop.prevent="
+         if (dragId !== null && dragId !== {{ image.pk }}) {
+           const grid = $el.parentElement;
+           const from = grid.querySelector('[data-id=\'' + dragId + '\']');
+           if (from) {
+             grid.insertBefore(from, from.compareDocumentPosition($el) & Node.DOCUMENT_POSITION_FOLLOWING ? $el.nextSibling : $el);
+             const ids = [...grid.children].filter(c => c.dataset.id).map(c => c.dataset.id);
+             htmx.ajax('POST', '{% url 'dashboard:product-image-reorder' product.pk %}', {values: {image_ids: ids}, target: '#productImagesList', swap: 'outerHTML'});
+           }
+         }
+         dragId = null;
+       "
+       style="cursor:grab">
+    <div class="img-manage-thumb" style="background-image:url('{{ image.thumbnail.url|default:image.image.url }}')">
+      {% if image.is_cover %}<span class="pill pill-new img-manage-cover-badge">⭐ کاورِ کالا</span>{% endif %}
+    </div>
+    <input class="inp img-manage-alt" placeholder="متن جایگزین (alt)" value="{{ image.alt }}" name="alt"
+           title="توضیحِ کوتاهِ تصویر برایِ نابینایان و موتورهای جست‌وجو — برایِ سئوی تصاویر مهم است."
+           hx-post="{% url 'dashboard:product-image-alt' product.pk image.pk %}" hx-trigger="change"
+           hx-target="#productImagesList" hx-swap="outerHTML">
+    <input class="inp img-manage-alt" placeholder="کپشن (اختیاری)" value="{{ image.caption }}" name="caption"
+           title="زیرنویسِ کوتاهی که هنگامِ نمایشِ بزرگ‌شده‌ی تصویر در صفحه‌ی محصول دیده می‌شود."
+           hx-post="{% url 'dashboard:product-image-caption' product.pk image.pk %}" hx-trigger="change"
+           hx-target="#productImagesList" hx-swap="outerHTML">
+    {% if variants %}
+    <select class="inp img-manage-variant" name="variant"
+            title="با اختصاصِ این تصویر به یک تنوعِ خاص، وقتی مشتری آن تنوع را انتخاب کند تصویر خودکار عوض می‌شود."
+            hx-post="{% url 'dashboard:product-image-variant' product.pk image.pk %}" hx-trigger="change"
+            hx-target="#productImagesList" hx-swap="outerHTML">
+      <option value="">— تصویر عمومی کالا —</option>
+      {% for variant in variants %}
+      <option value="{{ variant.pk }}" {% if image.variant_id == variant.pk %}selected{% endif %}>{{ variant.attribute }}: {{ variant.value }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    {% if image_driving_values %}
+    <select class="inp img-manage-variant" name="option_value"
+            title="با اختصاصِ این تصویر به یک مقدارِ ویژگی (مثلاً «قرمز»)، وقتی مشتری آن مقدار را انتخاب کند — صرف‌نظر از انتخابِ سایرِ محورها — تصویر خودکار عوض می‌شود."
+            hx-post="{% url 'dashboard:product-image-option-value' product.pk image.pk %}" hx-trigger="change"
+            hx-target="#productImagesList" hx-swap="outerHTML">
+      <option value="">— بدونِ اختصاص به مقدارِ ویژگی —</option>
+      {% for value in image_driving_values %}
+      <option value="{{ value.pk }}" {% if image.option_value_id == value.pk %}selected{% endif %}>{{ value.option.label }}: {{ value.label }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <div class="img-manage-actions">
+      <button type="button" class="btn btn-sm" title="جابه‌جایی به بالا" {% if forloop.first %}disabled{% endif %}
+              hx-post="{% url 'dashboard:product-image-move' product.pk image.pk %}" hx-vals='{"direction":"up"}'
+              hx-target="#productImagesList" hx-swap="outerHTML">⬆️</button>
+      <button type="button" class="btn btn-sm" title="جابه‌جایی به پایین" {% if forloop.last %}disabled{% endif %}
+              hx-post="{% url 'dashboard:product-image-move' product.pk image.pk %}" hx-vals='{"direction":"down"}'
+              hx-target="#productImagesList" hx-swap="outerHTML">⬇️</button>
+      {% if not image.is_cover %}
+      <button type="button" class="btn btn-sm" title="این تصویر به‌عنوانِ کاورِ اصلیِ کالا نمایش داده می‌شود"
+              hx-post="{% url 'dashboard:product-image-set-cover' product.pk image.pk %}"
+              hx-target="#productImagesList" hx-swap="outerHTML">⭐ تعیینِ کاور</button>
+      {% endif %}
+      <button type="button" class="btn btn-sm btn-danger" title="حذف"
+              hx-post="{% url 'dashboard:product-image-delete' product.pk image.pk %}"
+              hx-target="#productImagesList" hx-swap="outerHTML" hx-confirm="آیا از حذف این تصویر مطمئن هستید؟">🗑️</button>
+    </div>
+  </div>
+  {% empty %}
+  <p class="img-manage-empty">هنوز تصویری برای این کالا اضافه نشده است.</p>
+  {% endfor %}
+</div>

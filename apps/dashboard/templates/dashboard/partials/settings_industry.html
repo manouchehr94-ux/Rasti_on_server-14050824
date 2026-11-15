@@ -1,0 +1,72 @@
+{% load persian %}
+<div class="card" style="margin-bottom:18px">
+  <div class="card-head"><h3>🏭 صنف فروشگاه</h3><span class="hint">نصب الگوی کاتالوگ آماده بر اساس صنف فعالیت</span></div>
+  <div class="card-body">
+    {% if industry_installation %}
+    <div class="info-box">
+      <b>صنف:</b> {% if industry_installation.installation.custom_industry_name %}{{ industry_installation.installation.custom_industry_name }}{% else %}{{ industry_installation.installation.industry_template.name }}{% endif %}<br>
+      <b>قالب نصب‌شده:</b> {{ industry_installation.installation.industry_template.name }}
+      (نسخه {{ industry_installation.installation.installed_version|fa_number }})<br>
+      <b>وضعیت نصب:</b>
+      {% if industry_installation.installation.status == "completed" %}
+        <span style="color:var(--success,#16a34a)">✅ {{ industry_installation.installation.get_status_display }}</span>
+      {% else %}
+        <span style="color:var(--danger,#dc2626)">⚠️ {{ industry_installation.installation.get_status_display }}</span>
+      {% endif %}<br>
+      <b>تاریخ نصب:</b> {{ industry_installation.installation.created_at|jalali }}<br>
+      {{ industry_installation.installation.categories_created|fa_number }} دسته‌بندی و
+      {{ industry_installation.installation.attributes_created|fa_number }} ویژگی ساخته شد.
+      <br><small style="color:var(--muted)">هر فروشگاه فقط یک‌بار می‌تواند الگوی صنف نصب کند؛ برای تغییر صنف با پشتیبانی تماس بگیرید.</small>
+    </div>
+    {% if industry_installation.update_available %}
+    <div class="info-box" style="margin-top:12px;border-color:var(--accent, #6366f1)">
+      🆕 نسخه‌ی جدیدتری از این صنف موجود است (نسخه {{ industry_installation.latest_version.version|fa_number }}).
+      می‌توانید تغییرات جدید را بررسی و افزودنی‌های امن را انتخاب کنید — سفارشی‌سازی‌های شما هرگز بازنویسی نمی‌شود.
+      <br>
+      <a class="btn btn-sm btn-primary" style="margin-top:8px"
+         href="{% url 'dashboard:settings-industry-update-plan' %}">مشاهده‌ی تغییرات و به‌روزرسانی</a>
+      <a class="btn btn-sm" style="margin-top:8px"
+         href="{% url 'dashboard:settings-industry-update-history' %}">تاریخچه‌ی به‌روزرسانی‌ها</a>
+    </div>
+    {% endif %}
+    {% else %}
+    <p style="color:var(--muted);font-size:12.5px;margin-bottom:14px">
+      با انتخاب صنف فعالیت خود، دسته‌بندی‌ها، ویژگی‌ها و محورهای تنوع پیشنهادی به‌صورت خودکار برای فروشگاه شما ساخته می‌شود.
+      این عملیات را می‌توانید بعداً کاملاً سفارشی‌سازی کنید و هرگز قالب پایه‌ی پلتفرم را تغییر نمی‌دهد.
+    </p>
+    {% if industry_templates %}
+    {% include "catalog/partials/industry_filter_bar.html" with sector_tabs=industry_sector_tabs search_placeholder="جستجوی صنف شغلی..." search_input_id="industrySettingsSearch" %}
+    <div class="industry-grid">
+      {% for template in industry_templates %}
+      <div class="industry-card" data-name="{{ template.name }}" data-sector="{{ template.sector }}"
+           data-sector-label="{{ template.get_sector_display }}">
+        <div class="ic-emoji">{{ template.icon|default:"🏷️" }}</div>
+        <div class="ic-name">{{ template.name }}</div>
+        <div class="ic-sector">{{ template.get_sector_display }} — {{ template.categories.count|fa_number }} دسته، {{ template.attributes.count|fa_number }} ویژگی</div>
+        <div class="ic-actions">
+          <a class="btn btn-sm" href="{% url 'dashboard:settings-industry-preview' template.pk %}">پیش‌نمایش</a>
+          <form method="post" action="{% url 'dashboard:settings-industry-install' template.pk %}"
+                onsubmit="return confirm('نصب الگوی «{{ template.name }}» ساختار کاتالوگ فروشگاه شما را می‌سازد. ادامه می‌دهید؟');">
+            {% csrf_token %}
+            {% if template.slug == "other" %}<input type="text" name="custom_industry_name" maxlength="80" minlength="2" required autocomplete="off" class="input"
+                   placeholder="نامِ صنفِ شما" aria-label="نامِ صنفِ شما" data-testid="custom-industry-name">{% endif %}
+            <button type="submit" class="btn btn-primary btn-sm">نصب</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% include "catalog/partials/industry_empty_state.html" %}
+    {% else %}
+    <div class="info-box" style="border-color:var(--danger,#dc2626)">
+      ⚠️ هیچ الگوی صنفِ فعالی در سامانه ثبت نشده است — این یک وضعیتِ داده‌ایِ ناقص است، نه پایانِ راه‌اندازی.
+      <br><small style="color:var(--muted)">
+        برای رفعِ آن، اپراتورِ پلتفرم باید دستورِ
+        <code>python manage.py seed_industry_templates</code> را اجرا کند
+        (این عملیات idempotent است و داده‌ی مرچنت‌ها را تغییر نمی‌دهد).
+      </small>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
