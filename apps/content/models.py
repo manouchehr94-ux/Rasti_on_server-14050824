@@ -19,6 +19,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db import models
 
+from apps.core.media_paths import StoreMediaPath
 from apps.core.models import TimeStampedModel
 
 # ---------------------------------------------------------------- محدودیت حجم تصویر
@@ -439,7 +440,7 @@ class MediaAsset(TimeStampedModel):
         related_name="media_assets",
     )
     image = models.ImageField(
-        "تصویر", upload_to="media-assets/",
+        "تصویر", upload_to=StoreMediaPath("media-assets"),
         validators=[validate_image_size, validate_image_content],
     )
 
@@ -507,8 +508,8 @@ class HeroSlide(TimeStampedModel, DestinationMixin):
     )
     title = models.CharField("عنوان", max_length=200, blank=True)
     subtitle = models.CharField("زیرعنوان", max_length=300, blank=True)
-    desktop_image = models.ImageField("تصویر دسکتاپ", upload_to="homepage/hero/", blank=True, validators=[validate_image_size, validate_image_content])
-    mobile_image = models.ImageField("تصویر موبایل", upload_to="homepage/hero/", blank=True, validators=[validate_image_size, validate_image_content])
+    desktop_image = models.ImageField("تصویر دسکتاپ", upload_to=StoreMediaPath("homepage/hero"), blank=True, validators=[validate_image_size, validate_image_content])
+    mobile_image = models.ImageField("تصویر موبایل", upload_to=StoreMediaPath("homepage/hero"), blank=True, validators=[validate_image_size, validate_image_content])
     desktop_asset = models.ForeignKey(
         "MediaAsset", verbose_name="فایلِ رسانه — دسکتاپ",
         on_delete=models.PROTECT, null=True, blank=True, related_name="hero_placements",
@@ -589,8 +590,8 @@ class PromotionalBanner(TimeStampedModel, DestinationMixin):
     )
     title = models.CharField("عنوان", max_length=200, blank=True)
     description = models.CharField("توضیحات", max_length=500, blank=True)
-    desktop_image = models.ImageField("تصویر دسکتاپ", upload_to="homepage/banners/", blank=True, validators=[validate_image_size, validate_image_content])
-    mobile_image = models.ImageField("تصویر موبایل", upload_to="homepage/banners/", blank=True, validators=[validate_image_size, validate_image_content])
+    desktop_image = models.ImageField("تصویر دسکتاپ", upload_to=StoreMediaPath("homepage/banners"), blank=True, validators=[validate_image_size, validate_image_content])
+    mobile_image = models.ImageField("تصویر موبایل", upload_to=StoreMediaPath("homepage/banners"), blank=True, validators=[validate_image_size, validate_image_content])
     desktop_asset = models.ForeignKey(
         "MediaAsset", verbose_name="فایلِ رسانه — دسکتاپ",
         on_delete=models.PROTECT, null=True, blank=True, related_name="banner_desktop_placements",
@@ -1014,7 +1015,7 @@ class FooterTrustBadge(TimeStampedModel):
         related_name="footer_trust_badges",
     )
     title = models.CharField("عنوان", max_length=150)
-    image = models.ImageField("تصویر", upload_to="footer/trust-badges/", validators=[validate_image_size, validate_image_content])
+    image = models.ImageField("تصویر", upload_to=StoreMediaPath("footer/trust-badges"), validators=[validate_image_size, validate_image_content])
     destination_url = models.URLField("لینک مقصد", blank=True, max_length=500)
     display_order = models.PositiveIntegerField("ترتیب نمایش", default=0)
     is_active = models.BooleanField("فعال", default=True)
@@ -1047,7 +1048,7 @@ class FooterPaymentLogo(TimeStampedModel):
         related_name="footer_payment_logos",
     )
     title = models.CharField("عنوان", max_length=150)
-    image = models.ImageField("تصویر", upload_to="footer/payment-logos/", validators=[validate_image_size, validate_image_content])
+    image = models.ImageField("تصویر", upload_to=StoreMediaPath("footer/payment-logos"), validators=[validate_image_size, validate_image_content])
     display_order = models.PositiveIntegerField("ترتیب نمایش", default=0)
     is_active = models.BooleanField("فعال", default=True)
 
@@ -1084,7 +1085,7 @@ class StoryRailItem(TimeStampedModel, DestinationMixin):
     )
     title = models.CharField("عنوان", max_length=60, blank=True)
     image = models.ImageField(
-        "تصویر", upload_to="storyrail/", blank=True,
+        "تصویر", upload_to=StoreMediaPath("storyrail"), blank=True,
         validators=[validate_image_size, validate_image_content],
     )
     image_asset = models.ForeignKey(

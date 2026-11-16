@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from apps.core.media_paths import StoreMediaPath
 from apps.core.models import TimeStampedModel
 
 
@@ -27,7 +28,7 @@ class Vendor(TimeStampedModel):
         blank=True,
         related_name="vendors",
     )
-    logo = models.ImageField("لوگو", upload_to="vendors/logos/", null=True, blank=True)
+    logo = models.ImageField("لوگو", upload_to=StoreMediaPath("vendors/logos"), null=True, blank=True)
     description = models.TextField("توضیحات", blank=True)
     is_active = models.BooleanField("فعال", default=True)
 
@@ -61,7 +62,7 @@ class Category(TimeStampedModel):
     slug = models.SlugField("اسلاگ", max_length=140, allow_unicode=True)
     icon = models.CharField("آیکون", max_length=20, blank=True)
     image = models.ImageField(
-        "تصویر دسته‌بندی", upload_to="categories/images/", null=True, blank=True,
+        "تصویر دسته‌بندی", upload_to=StoreMediaPath("categories/images"), null=True, blank=True,
         help_text="تصویر واقعی برای نمایش در کارت/تایلِ دسته‌بندی. اگر خالی باشد، آیکون (ایموجی) به‌عنوان جایگزین نمایش داده می‌شود.",
     )
     parent = models.ForeignKey(
@@ -112,7 +113,7 @@ class Brand(TimeStampedModel):
     name = models.CharField("نام برند", max_length=120)
     name_en = models.CharField("نام انگلیسی", max_length=120, blank=True)
     slug = models.SlugField("اسلاگ", max_length=140, allow_unicode=True)
-    logo = models.ImageField("لوگو", upload_to="brands/logos/", null=True, blank=True)
+    logo = models.ImageField("لوگو", upload_to=StoreMediaPath("brands/logos"), null=True, blank=True)
     description = models.CharField("توضیح کوتاه", max_length=300, blank=True)
     website = models.URLField("وب‌سایت", max_length=300, blank=True)
     country = models.CharField("کشور", max_length=80, blank=True)
@@ -404,8 +405,8 @@ class ProductImage(TimeStampedModel):
         "ProductOptionValue", verbose_name="مقدارِ ویژگیِ مرتبط", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="images",
     )
-    image = models.ImageField("تصویر", upload_to="products/gallery/")
-    thumbnail = models.ImageField("تصویر بندانگشتی", upload_to="products/thumbnails/", null=True, blank=True)
+    image = models.ImageField("تصویر", upload_to=StoreMediaPath("products/gallery"))
+    thumbnail = models.ImageField("تصویر بندانگشتی", upload_to=StoreMediaPath("products/thumbnails"), null=True, blank=True)
     alt = models.CharField("متن جایگزین", max_length=200, blank=True)
     caption = models.CharField("توضیحِ کوتاه (کپشن)", max_length=300, blank=True)
     order = models.PositiveIntegerField("ترتیب", default=0)
@@ -1184,7 +1185,7 @@ class AttributeValue(TimeStampedModel):
     normalized_label = models.CharField(max_length=140, editable=False, blank=True, default="")
     color_hex = models.CharField("کد رنگ (Hex)", max_length=9, blank=True)
     swatch_image = models.ImageField(
-        "تصویر نمونه (Swatch)", upload_to="attributes/swatches/", null=True, blank=True,
+        "تصویر نمونه (Swatch)", upload_to=StoreMediaPath("attributes/swatches"), null=True, blank=True,
         help_text="برای نمایشِ نمونه‌ی تصویری به‌جای/همراهِ رنگ — مثلاً بافتِ پارچه یا الگوی چوب.",
     )
     display_order = models.PositiveIntegerField("ترتیب نمایش", default=0)
@@ -1388,7 +1389,7 @@ class MerchantCollection(TimeStampedModel):
     name = models.CharField("نام", max_length=150)
     slug = models.SlugField("اسلاگ", max_length=170, allow_unicode=True)
     description = models.TextField("توضیحات", blank=True)
-    image = models.ImageField("تصویر", upload_to="collections/images/", null=True, blank=True)
+    image = models.ImageField("تصویر", upload_to=StoreMediaPath("collections/images"), null=True, blank=True)
     is_active = models.BooleanField("فعال", default=True)
     price_mode = models.CharField(
         "حالت قیمت‌گذاری کالکشن", max_length=10, choices=PriceMode.choices, default=PriceMode.STANDARD,

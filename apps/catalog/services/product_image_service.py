@@ -101,6 +101,10 @@ ORIGINALS_DIR = "products/originals"
 
 def original_storage_name(main_name: str) -> str:
     """مسیرِ نسخهٔ اصلیِ آپلودشده برای یک تصویرِ کالا — از نامِ فایلِ اصلی مشتق می‌شود (بدون ستونِ جدید/Migration)."""
+    parts = (main_name or "").split("/")
+    if len(parts) == 5 and parts[0] == "stores" and parts[2:4] == ["products", "gallery"]:
+        return f"stores/{parts[1]}/{ORIGINALS_DIR}/{parts[-1]}"
+    # Legacy files retain their original lookup/deletion location.
     return f"{ORIGINALS_DIR}/{(main_name or '').rsplit('/', 1)[-1]}"
 
 
@@ -140,8 +144,8 @@ def add_product_image(product, file, *, alt: str = "") -> ProductImage:
 
     next_order = product.images.count()
     instance = ProductImage(product=product, alt=(alt or "").strip(), order=next_order, is_cover=next_order == 0)
-    _keep_original(file, f"{base_name}{ext}")
     instance.image.save(f"{base_name}{ext}", ContentFile(_encode(main_image, fmt)), save=False)
+    _keep_original(file, instance.image.name)
     instance.thumbnail.save(f"{base_name}-thumb{ext}", ContentFile(_encode(thumb_image, fmt)), save=False)
     instance.save()
     return instance

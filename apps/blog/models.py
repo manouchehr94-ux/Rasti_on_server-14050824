@@ -1,6 +1,7 @@
 from django.db import models
 from django.urls import reverse
 
+from apps.core.media_paths import blog_cover_upload_path
 from apps.core.models import TimeStampedModel
 
 
@@ -15,7 +16,7 @@ class BlogPost(TimeStampedModel):
     slug = models.SlugField("اسلاگ", max_length=240, unique=True, allow_unicode=True)
     category_label = models.CharField("دسته‌ی نمایشی", max_length=80, blank=True)
     cover_emoji = models.CharField("اموجی کاور", max_length=10, blank=True)
-    cover_image = models.ImageField("تصویر کاور", upload_to="blog/covers/", null=True, blank=True)
+    cover_image = models.ImageField("تصویر کاور", upload_to=blog_cover_upload_path, null=True, blank=True)
     tint = models.CharField("رنگ پس‌زمینه", max_length=20, blank=True)
     excerpt = models.CharField("خلاصه", max_length=300, blank=True)
     body = models.TextField("متن مطلب")

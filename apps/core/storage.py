@@ -35,6 +35,9 @@ class PrivateFileSystemStorage(FileSystemStorage):
         kwargs.setdefault("base_url", None)
         super().__init__(*args, **kwargs)
 
+    def url(self, name):
+        raise ValueError("Private media has no public URL; use an authorized download view.")
+
     def deconstruct(self):
         return ("apps.core.storage.PrivateFileSystemStorage", [], {})
 

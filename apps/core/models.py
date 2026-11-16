@@ -1,10 +1,10 @@
 import re
-import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from apps.core.media_paths import StoreMediaPath
 from apps.core.storage import private_storage
 
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -160,7 +160,7 @@ class ShopSettings(TimeStampedModel):
     )
     gift_wrap_title = models.CharField("عنوان سرویسِ کادوپیچی", max_length=80, default="کادوپیچی")
     gift_wrap_description = models.CharField("توضیحِ سرویسِ کادوپیچی", max_length=300, blank=True, default="")
-    gift_wrap_image = models.ImageField("تصویرِ نمونه‌ی کادوپیچی", upload_to="shop/gift_wrap/", blank=True)
+    gift_wrap_image = models.ImageField("تصویرِ نمونه‌ی کادوپیچی", upload_to=StoreMediaPath("shop/gift_wrap"), blank=True)
     gift_wrap_message_enabled = models.BooleanField("امکانِ نوشتنِ پیامِ کارت‌هدیه", default=True)
 
     # --- انقضایِ سفارش‌هایِ پرداخت‌نشده‌ی آنلاین (پیش‌فرض: غیرفعال) ---
@@ -201,8 +201,8 @@ class ShopSettings(TimeStampedModel):
     smsrasti_last_seen_at = models.DateTimeField("آخرین اتصالِ دستگاهِ اسمس‌راستی", null=True, blank=True)
 
     # --- هویت بصری ---
-    logo = models.ImageField("لوگوی فروشگاه", upload_to="shop/branding/", blank=True)
-    favicon = models.ImageField("فاوآیکون", upload_to="shop/branding/", blank=True)
+    logo = models.ImageField("لوگوی فروشگاه", upload_to=StoreMediaPath("shop/branding"), blank=True)
+    favicon = models.ImageField("فاوآیکون", upload_to=StoreMediaPath("shop/branding"), blank=True)
     primary_color = models.CharField("رنگ اصلی", max_length=7, default="#6D28D9", validators=[validate_hex_color])
     accent_color = models.CharField("رنگ مکمل", max_length=7, default="#FF4D77", validators=[validate_hex_color])
     secondary_color = models.CharField("رنگ ثانویه", max_length=7, default="#7C3AED", validators=[validate_hex_color])
@@ -367,12 +367,12 @@ def export_job_upload_path(instance, filename: str) -> str:
     فایلِ اصلی (``filename``) را در مسیر استفاده نمی‌کند و به‌جایِ آن یک
     نامِ تصادفیِ UUID تولید می‌کند، تا هیچ ورودیِ کاربر (حتی نامِ فایل)
     مستقیماً وارد مسیرِ دیسک نشود (محافظت در برابر Path Traversal — نگاه
-    کنید به ADR-52). فایل‌ها زیرِ ``exports/<store_id>/`` جدا می‌شوند تا
+    کنید به ADR-52). فایل‌ها زیرِ ``stores/<store_uuid>/exports/`` جدا می‌شوند تا
     حتی در سطحِ فایل‌سیستم هم داده‌ی دو Store در یک پوشه مخلوط نشود."""
     # خروجی‌هایِ تازه همیشه XLSX‌اند؛ فایل‌هایِ CSVِ قدیمی با همان مسیرِ خود
     # ذخیره‌شده‌اند و دست‌نخورده می‌مانند.
     ext = "xlsx"
-    return f"exports/{instance.store_id}/{uuid.uuid4().hex}.{ext}"
+    return StoreMediaPath("exports")(instance, f"export.{ext}")
 
 
 class ExportJob(models.Model):
@@ -446,12 +446,12 @@ def import_job_upload_path(instance, filename: str) -> str:
     فقط *پسوندِ* فایل (از یک فهرستِ سفید: xlsx/csv) حفظ می‌شود تا فایلِ منبع در
     قالبِ اصلیِ خودش دانلود شود."""
     extension = "xlsx" if (filename or "").lower().endswith(".xlsx") else "csv"
-    return f"imports/{instance.store_id}/{uuid.uuid4().hex}.{extension}"
+    return StoreMediaPath("imports")(instance, f"source.{extension}")
 
 
 def import_error_report_upload_path(instance, filename: str) -> str:
     extension = "xlsx" if (filename or "").lower().endswith(".xlsx") else "csv"
-    return f"imports/{instance.store_id}/errors/{uuid.uuid4().hex}.{extension}"
+    return StoreMediaPath("imports/errors")(instance, f"errors.{extension}")
 
 
 class ImportJob(models.Model):
