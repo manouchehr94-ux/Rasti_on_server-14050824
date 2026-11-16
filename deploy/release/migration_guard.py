@@ -15,6 +15,7 @@ Rollback policy that follows from the level (see ``rollback_safe``): only NONE a
 """
 
 import argparse
+import hashlib
 import ast
 import json
 import re
@@ -23,6 +24,24 @@ import sys
 from pathlib import Path
 
 LEVELS = ("NONE", "ADDITIVE", "REVIEW", "DESTRUCTIVE")
+
+# Reviewed upload_to-only state changes: each uses SeparateDatabaseAndState with
+# database_operations=[]; sqlmigrate is a no-op and N-1 schema is unchanged.
+# Approval is for these exact bytes at these exact paths, only when newly added.
+# Unknown/edited migrations keep the ordinary REVIEW/DESTRUCTIVE policy. Listing
+# these as compatible never skips the fresh-backup requirement for pending work.
+_REVIEWED_STATE_ONLY_SHA256 = {
+    'apps/blog/migrations/0003_store_media_namespaces.py': 'fe41387d9d679bbe20c1eec416da61c567358609a893a7b47fef1824998c5c5d',
+    'apps/catalog/migrations/0044_store_media_namespaces.py': '8d5a6afaa73960ed4d54a77e7d2bd461328921a3eea87b76164bd766c952772f',
+    'apps/content/migrations/0026_store_media_namespaces.py': '560cb2d9e994b95c992fe4352501705d7e8b07a222ba7a6a241910bec341246e',
+    'apps/core/migrations/0025_store_media_namespaces.py': '9455d573a971836d64d6967cb4c1c5fa24d26344c44a6cccd05e49a2c61b0c66',
+}
+
+
+def reviewed_state_only(path, content):
+    expected = _REVIEWED_STATE_ONLY_SHA256.get(path)
+    return expected is not None and hashlib.sha256(content).hexdigest() == expected
+
 
 _DESTRUCTIVE_OPS = {
     "RemoveField", "DeleteModel", "RenameField", "RenameModel", "AlterModelTable", "AlterOrderWithRespectTo",
@@ -222,8 +241,13 @@ def analyze_range(repo, from_sha, to_sha):
             continue
         entry = {"path": path, "status": status, "findings": []}
         if status == "A":
-            show = _git(repo, "show", "%s:%s" % (to_sha, path))
-            entry["findings"] = analyze_source(show.stdout, path)
+            # Preserve raw blob bytes: even newline-only edits invalidate approval.
+            show = subprocess.run(["git", "-C", str(repo), "show", "%s:%s" % (to_sha, path)], capture_output=True, check=True)
+            if reviewed_state_only(path, show.stdout):
+                entry["findings"] = [{"op": "<reviewed-state-only>", "level": "ADDITIVE",
+                                      "why": "exact reviewed upload_to state migration; no database operations"}]
+            else:
+                entry["findings"] = analyze_source(show.stdout.decode("utf-8"), path)
             entry["level"] = worst([f["level"] for f in entry["findings"]]) if entry["findings"] else "REVIEW"
         elif status == "M":
             entry["level"] = "DESTRUCTIVE"

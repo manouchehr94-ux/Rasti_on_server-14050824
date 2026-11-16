@@ -155,7 +155,7 @@ class ModalFormContractTests(_ModalBase):
             # محتوا
             "title": "عنوان جدید", "subtitle": "زیرعنوان جدید", "show_button": "on", "button_label": "برو",
             # تصاویر
-            "desktop_image": _img("new.png"),
+            "desktop_image": _img("new.png", color=(90, 100, 110)),
             # لینک و مقصد
             "destination_type": "brand", "destination_brand": str(self.brand.pk), "open_in_new_tab": "on",
             # وضعیت (unchecked → key omitted)
@@ -167,7 +167,10 @@ class ModalFormContractTests(_ModalBase):
         self.assertEqual((slide.destination_type, slide.destination_brand_id), ("brand", self.brand.pk))
         self.assertTrue(slide.open_in_new_tab)
         self.assertFalse(slide.is_active)
-        self.assertIn("new", slide.desktop_image.name)
+        self.assertNotIn("new", slide.desktop_image.name)
+        self.assertTrue(slide.desktop_image.name.startswith(f"stores/{self.store.public_id.hex}/homepage/hero/"))
+        self.assertEqual(slide.desktop_asset.display_name, "new.png")
+        self.assertEqual(slide.desktop_image.read(), _img("new.png", color=(90, 100, 110)).read())
         self.assertIsNotNone(slide.desktop_asset_id)
 
     def test_add_through_the_modal_persists_everything_at_once(self):

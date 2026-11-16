@@ -555,12 +555,9 @@ class BillingSequence(models.Model):
 # ============================================================================================================
 
 def _receipt_upload_to(instance, filename):
-    import secrets
+    from apps.core.media_paths import StoreMediaPath
 
-    ext = ""
-    if "." in filename:
-        ext = "." + filename.rsplit(".", 1)[-1].lower()[:5]
-    return f"platform_receipts/{instance.store_id}/{secrets.token_hex(16)}{ext}"
+    return StoreMediaPath("receipts")(instance, filename)
 
 
 def _private_storage():

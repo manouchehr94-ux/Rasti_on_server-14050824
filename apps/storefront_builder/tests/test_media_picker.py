@@ -53,6 +53,29 @@ class MediaUploadAndInspectorTests(R4MutationApiTestCase):
         self.assertEqual(data["url"], asset.image.url)
         self.assertFalse(MediaAsset.objects.filter(store=self.other_store).exclude(pk=self.foreign.pk).exists())
 
+    def test_original_name_is_display_only_and_duplicate_uploads_remain_distinct(self):
+        name = "بنر <خاص>.png"
+        responses = [self.client.post(self.url, {"image": _image(name)}) for _ in range(2)]
+        for response in responses:
+            self.assertEqual(response.status_code, 200)
+        assets = [MediaAsset.objects.get(pk=response.json()["id"]) for response in responses]
+        self.assertNotEqual(assets[0].image.name, assets[1].image.name)
+        for response, asset in zip(responses, assets):
+            self.assertEqual(response.json()["name"], name)
+            self.assertEqual(asset.original_filename, name)
+            self.assertTrue(asset.image.name.startswith(f"stores/{self.store.public_id.hex}/media-assets/"))
+            self.assertNotIn(name, asset.image.name)
+        html = self._inspector(self._stage()).content.decode()
+        self.assertIn("بنر &lt;خاص&gt;.png", html)
+        self.assertNotIn('data-name="بنر <خاص>.png"', html)
+        self.assertNotIn("foreign-secret", html)
+        tree = self.client.get(reverse("dashboard:storefront-builder-r4-layout-tree")).json()
+        library = {item["id"]: item for item in tree["media"]}
+        self.assertNotIn(self.foreign.pk, library)
+        for asset in assets:
+            self.assertEqual(library[asset.pk]["name"], name)
+            self.assertEqual(library[asset.pk]["url"], asset.image.url)
+
     def test_a_non_image_an_empty_request_and_a_get_are_refused_without_creating_anything(self):
         before = MediaAsset.objects.count()
         fake = SimpleUploadedFile("evil.png", b"<script>alert(1)</script>", content_type="image/png")

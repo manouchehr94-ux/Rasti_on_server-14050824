@@ -32,6 +32,20 @@ class ClassificationTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertEqual(G.worst(levels(mig("migrations.AddField(model_name='a', name='b', field=%s)" % field))), "REVIEW")
 
+    def test_state_only_upload_path_changes_still_require_review(self):
+        source = mig("migrations.SeparateDatabaseAndState(database_operations=[], state_operations=[migrations.AlterField(model_name='x', name='image', field=models.ImageField(upload_to='stores/'))])")
+        self.assertEqual(G.worst(levels(source)), "REVIEW")
+
+    def test_reviewed_state_only_approval_rejects_changed_bytes_and_paths(self):
+        repo = Path(__file__).resolve().parents[3]
+        for path in G._REVIEWED_STATE_ONLY_SHA256:
+            content = subprocess.check_output(["git", "-C", str(repo), "show", f"HEAD:{path}"])
+            self.assertTrue(G.reviewed_state_only(path, content))
+            self.assertFalse(G.reviewed_state_only(path, content + b"\n"))
+            self.assertFalse(G.reviewed_state_only(path, content.replace(b"\n", b"\r\n")))
+            self.assertFalse(G.reviewed_state_only("unreviewed/" + path, content))
+            self.assertFalse(G.reviewed_state_only(path, content.replace(b"database_operations=[]", b"database_operations=[migrations.RunSQL('DROP TABLE x')]")))
+
     def test_destructive_operations(self):
         for op in ("migrations.RemoveField(model_name='a', name='b')", "migrations.DeleteModel(name='A')",
                    "migrations.RenameField(model_name='a', old_name='b', new_name='c')", "migrations.RenameModel(old_name='A', new_name='B')",
@@ -89,6 +103,25 @@ class GitRangeTests(unittest.TestCase):
         self.git("commit", "-q", "-m", msg)
         return self.git("rev-parse", "HEAD")
 
+    def test_only_new_exact_reviewed_state_migrations_are_compatible(self):
+        project = Path(__file__).resolve().parents[3]
+        for path in G._REVIEWED_STATE_ONLY_SHA256:
+            destination = self.repo / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(subprocess.check_output(["git", "-C", str(project), "show", f"HEAD:{path}"]))
+        head = self.commit("reviewed upload paths")
+        report = G.analyze_range(self.repo, self.base, head)
+        self.assertEqual(report["level"], "ADDITIVE")
+        self.assertEqual(len(report["new_migrations"]), 4)
+        self.assertTrue(report["rollback_safe"])
+        # Editing an already published migration stays destructive, even if the
+        # end bytes could otherwise have had an approval.
+        path = next(iter(G._REVIEWED_STATE_ONLY_SHA256))
+        (self.repo / path).write_bytes((self.repo / path).read_bytes() + b"\n")
+        edited = self.commit("changed migration")
+        self.assertEqual(G.analyze_range(self.repo, head, edited)["level"], "DESTRUCTIVE")
+        self.assertEqual(G.analyze_range(self.repo, self.base, edited)["level"], "REVIEW")
+
     def test_no_migration_change_is_NONE_and_rollback_safe(self):
         (self.repo / "README").write_text("x")
         head = self.commit("docs")
@@ -128,12 +161,18 @@ class GitRangeTests(unittest.TestCase):
 class RealHistoryTests(unittest.TestCase):
     """Sanity check against the project's own history (skipped when the commits are not available)."""
 
-    def test_the_captcha_release_has_no_migrations(self):
+    def test_the_imported_captcha_and_cicd_baseline_has_no_migrations(self):
         repo = Path(__file__).resolve().parents[3]
         have = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", "HEAD"], capture_output=True).returncode == 0
         if not have:
             self.skipTest("new repository baseline not present")
-        r = G.analyze_range(repo, "86742072855eb0d937a63be0c7662919d0dbef87", "HEAD")
+        # Pin this historical fact to the original CI/CD import. Future releases
+        # legitimately add migrations; they are checked by the current-range gate.
+        r = G.analyze_range(
+            repo,
+            "86742072855eb0d937a63be0c7662919d0dbef87",
+            "52f4700868a7e52475d29b3312005002264670e9",
+        )
         self.assertEqual((r["level"], r["new_migrations"]), ("NONE", []))
 
 

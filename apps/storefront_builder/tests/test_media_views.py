@@ -22,9 +22,9 @@ def _akhlaghi():
     return Store.objects.get(slug="akhlaghi")
 
 
-def _img(name="test.png"):
+def _img(name="test.png", color=(10, 20, 30)):
     buf = BytesIO()
-    Image.new("RGB", (800, 400), (10, 20, 30)).save(buf, "PNG")
+    Image.new("RGB", (800, 400), color).save(buf, "PNG")
     return SimpleUploadedFile(name, buf.getvalue(), content_type="image/png")
 
 
@@ -285,11 +285,14 @@ class StoryRailItemCrudTests(MediaViewsTestCase):
         item = StoryRailItem.objects.create(store=self.store, section=self.story_section, title="قدیم", image=_img("first.png"))
         resp = self.client.post(
             reverse("dashboard:storefront-builder-section-media-edit", args=[self.story_section.pk, "story-items", item.pk]),
-            {"title": "قدیم", "destination_type": "none", "is_active": "on", "image": _img("second.png")},
+            {"title": "قدیم", "destination_type": "none", "is_active": "on", "image": _img("second.png", color=(90, 100, 110))},
         )
         self.assertEqual(resp.status_code, 302)
         item.refresh_from_db()
-        self.assertIn("second", item.image.name)
+        self.assertNotIn("second", item.image.name)
+        self.assertTrue(item.image.name.startswith(f"stores/{self.store.public_id.hex}/storyrail/"))
+        self.assertEqual(item.image_asset.display_name, "second.png")
+        self.assertEqual(item.image.read(), _img("second.png", color=(90, 100, 110)).read())
         self.assertEqual(MediaAsset.objects.get(pk=item.image_asset_id).image, item.image.name)
 
     def test_media_list_shows_story_item_thumbnail(self):

@@ -36,6 +36,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}
@@ -64,6 +65,9 @@ jobs:
     name: One production dependency lock for every job
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -94,6 +98,7 @@ jobs:
             python tools/ci/prepare_dependencies.py
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        id: upload
         with:
           name: production-dependencies-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-deps/
@@ -117,6 +122,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
       - name: Freeze the tested production set, then add CI-only tools
         run: |
           pip freeze > "$RUNNER_TEMP/production-lock.txt"      # exactly what production installs, before any CI tool is added
@@ -157,6 +165,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
       - run: pip install tblib
       - name: Fast tier through the quality gate
         run: python tools/ci/test_gate.py --tier fast --parallel 4 --output fast-tier.log
@@ -183,6 +194,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
       - run: pip install tblib
       - name: Tenant tier through the quality gate
         run: python tools/ci/test_gate.py --tier tenant --parallel 4 --output tenant-tier.log
@@ -226,6 +240,9 @@ jobs:
           for _ in $(seq 1 20); do redis-cli -p 6390 -a ci-only-redis --no-auth-warning ping | grep -q PONG && break; sleep 0.5; done
           if redis-cli -p 6390 -a wrong-password --no-auth-warning ping | grep -q PONG; then echo "::error::Redis accepts a wrong password"; exit 1; fi
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
       - run: pip install tblib
       - name: Security tier (OTP concurrency, CAPTCHA store, auth on real Redis)
         run: python tools/ci/test_gate.py --tier security_pg --parallel 4 --output security-tier.log
@@ -262,6 +279,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
       - name: Decide the base commit
         id: base
         run: |
@@ -327,6 +347,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - uses: ./.github/actions/install-production
+        with:
+          artifact-id: ${{ needs.dependencies.outputs.artifact-id }}
+          artifact-digest: ${{ needs.dependencies.outputs.artifact-digest }}
         if: steps.changed.outputs.run == 'true'
       - name: Install tools
         if: steps.changed.outputs.run == 'true'
@@ -353,11 +376,13 @@ jobs:
           RASTISI_TEST_PG_ADMIN_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/postgres
           RASTISI_TEST_REDIS_BIN: /usr/bin/redis-server
           PROD_SHA: ${{ vars.RASTISI_REHEARSAL_PROD_SHA || '86742072855eb0d937a63be0c7662919d0dbef87' }}
-          CAPTCHA_SHA: ${{ vars.RASTISI_REHEARSAL_NEXT_SHA || github.sha }}
+          CAPTCHA_SHA: ${{ vars.RASTISI_REHEARSAL_NEXT_SHA || 'a42e4e2d6ad42a04d161685e0b05a8f320ec37a7' }}
+          CANDIDATE_SHA: ${{ env.TEST_REF }}
         run: |
           sudo apt-get install -y -qq postgresql-client-16
           RASTISI_TEST_RESTIC="$(command -v restic)"
           export RASTISI_TEST_RESTIC
           git cat-file -e "$PROD_SHA^{commit}"
           git cat-file -e "$CAPTCHA_SHA^{commit}"
+          git cat-file -e "$CANDIDATE_SHA^{commit}"
           python deploy/release/selftest/real_app_selftest.py

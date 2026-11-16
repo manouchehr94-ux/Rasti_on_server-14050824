@@ -1,14 +1,28 @@
 name: Install reviewed production dependencies
 description: Install the one hashed wheelhouse shared by all test jobs and the release
+inputs:
+  artifact-id:
+    description: Immutable artifact ID from the successful dependency job
+    required: true
+  artifact-digest:
+    description: SHA256 digest from the successful dependency job
+    required: true
 runs:
   using: composite
   steps:
     - shell: bash
       run: python tools/ci/qa_assets.py
+    - shell: bash
+      env:
+        DEPENDENCY_ARTIFACT_ID: ${{ inputs.artifact-id }}
+        DEPENDENCY_ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+        GH_TOKEN: ${{ github.token }}
+      run: python tools/ci/dependency_artifact.py
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
-        name: production-dependencies-${{ github.run_id }}-${{ github.run_attempt }}
+        artifact-ids: ${{ inputs.artifact-id }}
         path: .ci-deps
+        digest-mismatch: error
     - shell: bash
       run: |
         python -m pip install --no-index --find-links .ci-deps/wheelhouse --require-hashes --no-deps -r .ci-deps/requirements.lock

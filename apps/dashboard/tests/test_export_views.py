@@ -379,7 +379,7 @@ class DirectDownloadViewTests(ExportTestCase):
     def test_no_file_is_stored_and_job_keeps_only_metadata(self):
         from apps.core.storage import private_storage
 
-        exports_dir = f"exports/{self.store.pk}"
+        exports_dir = f"stores/{self.store.public_id.hex}/exports"
 
         def stored():
             return set(private_storage.listdir(exports_dir)[1]) if private_storage.exists(exports_dir) else set()

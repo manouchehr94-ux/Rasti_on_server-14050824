@@ -256,13 +256,16 @@ class AdoptDefaultsTests(_DefaultsBase):
         keep = (second.desktop_asset_id, third.desktop_asset_id)
         resp = self.client.post(
             self.url("edit", self.hero_section.pk, "hero-slides", second.pk),
-            {"title": "دمو ۲ — جایگزین", "subtitle": "x", "desktop_image": _img("replacement.png"),
+            {"title": "دمو ۲ — جایگزین", "subtitle": "x", "desktop_image": _img("replacement.png", color=(90, 100, 110)),
              "is_active": "on", "destination_type": "none"}, **INLINE,
         )
         self.assertEqual(resp.status_code, 200, resp.content)
         first.refresh_from_db(), second.refresh_from_db(), third.refresh_from_db()
         self.assertEqual(second.title, "دمو ۲ — جایگزین")
-        self.assertIn("replacement", second.desktop_asset.image.name)
+        self.assertNotIn("replacement", second.desktop_asset.image.name)
+        self.assertTrue(second.desktop_asset.image.name.startswith(f"stores/{self.store.public_id.hex}/homepage/hero/"))
+        self.assertEqual(second.desktop_asset.display_name, "replacement.png")
+        self.assertEqual(second.desktop_asset.image.read(), _img("replacement.png", color=(90, 100, 110)).read())
         self.assertNotEqual(second.desktop_asset_id, keep[0])
         self.assertEqual((first.title, third.title), ("دمو ۱", "دمو ۳"))
         self.assertEqual(third.desktop_asset_id, keep[1])

@@ -58,7 +58,7 @@
     <select name="background_media_asset_id" id="id_section_bg_asset_{{ section.pk }}" class="form-select">
       <option value="">— انتخاب تصویر —</option>
       {% for asset in background_media_assets %}
-      <option value="{{ asset.pk }}" {% if section.settings.background.media_asset_id == asset.pk %}selected{% endif %}>رسانه #{{ asset.pk }} — {{ asset.image.name }}</option>
+      <option value="{{ asset.pk }}" {% if section.settings.background.media_asset_id == asset.pk %}selected{% endif %}>رسانه #{{ asset.pk }} — {{ asset.display_name }}</option>
       {% endfor %}
     </select>
     {% if not background_media_assets %}

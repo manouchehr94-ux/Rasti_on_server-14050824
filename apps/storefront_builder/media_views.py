@@ -391,7 +391,7 @@ def _flash_success(request, text):
         messages.success(request, text)
 
 
-def _sync_asset_references(obj, config, store, *, changed_fields: set[str]) -> None:
+def _sync_asset_references(obj, config, store, *, changed_fields: set[str], original_names=None) -> None:
     """Phase 0.5 — تصمیمِ مالک ۵: پس از ذخیره‌ی موفقِ ``obj`` (که فیلدِ
     فایلِ قدیمی‌اش از قبل ذخیره شده)، برایِ هر جفتِ (فیلدِ فایلِ قدیمی →
     فیلدِ FKِ asset) که واقعاً تغییر کرده، یک ``MediaAsset`` جدید ایجاد
@@ -424,7 +424,12 @@ def _sync_asset_references(obj, config, store, *, changed_fields: set[str]) -> N
         old_assets[asset_field] = MediaAsset.objects.filter(pk=old_asset_id).first() if old_asset_id else None
         file_obj = getattr(obj, file_field)
         if file_obj:
-            asset = MediaAsset.objects.create(store=store, image=file_obj.name)
+            from apps.core.media_paths import upload_display_name
+
+            asset = MediaAsset.objects.create(
+                store=store, image=file_obj.name,
+                original_filename=upload_display_name((original_names or {}).get(file_field, "")),
+            )
             setattr(obj, f"{asset_field}_id", asset.pk)
         else:
             setattr(obj, f"{asset_field}_id", None)
@@ -542,7 +547,10 @@ def storefront_section_media_form(request, pk, kind, item_pk=None):
                     and getattr(obj, f"{asset_field}_id", None)
                 ):
                     changed.add(name)
-            old_assets = _sync_asset_references(obj, config, store, changed_fields=changed) if changed else {}
+            old_assets = _sync_asset_references(
+                obj, config, store, changed_fields=changed,
+                original_names={name: upload.name for name, upload in request.FILES.items()},
+            ) if changed else {}
             for f in file_fields:
                 name = f["name"]
                 if name not in changed or not old_names[name]:
