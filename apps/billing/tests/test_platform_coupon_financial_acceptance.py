@@ -335,6 +335,9 @@ class PortalPurchaseContentionTests(TransactionTestCase):
                                           max_redemptions=1)
 
     def test_last_free_allocation_goes_to_exactly_one_store_through_the_portal_view(self):
+        from apps.portal.services import platform_gateway_service as pgs
+
+        original_checkout_options = pgs.checkout_options
         barrier = threading.Barrier(2)
 
         def worker(pair):
@@ -344,13 +347,17 @@ class PortalPurchaseContentionTests(TransactionTestCase):
                 c = Client(HTTP_HOST=PORTAL_HOST)
                 c.force_login(owner)
                 barrier.wait(timeout=15)
-                with mock.patch("apps.portal.services.platform_gateway_service.checkout_options", return_value=[]):
-                    return c.post(f"/app/stores/{store.public_id}/billing/checkout/{self.pro.pk}/", {"billing_interval": "monthly"}).status_code
+                return c.post(f"/app/stores/{store.public_id}/billing/checkout/{self.pro.pk}/", {"billing_interval": "monthly"}).status_code
             finally:
                 connection.close()
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            codes = list(pool.map(worker, self.buyers))
+        # A module-level patch is process-global, not thread-local. Separate
+        # overlapping worker patches can restore each other's mocks out of order
+        # and poison subsequent gateway readiness checks in this test process.
+        with mock.patch.object(pgs, "checkout_options", return_value=[]):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                codes = list(pool.map(worker, self.buyers))
+        self.assertIs(pgs.checkout_options, original_checkout_options)
         self.assertEqual(codes, [302, 302])
         invoices = list(SubscriptionInvoice.objects.filter(kind="plan_change"))
         self.assertEqual(len(invoices), 1, "the loser (full price, no gateway) must leave no invoice")

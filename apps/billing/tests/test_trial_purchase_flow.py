@@ -398,6 +398,10 @@ class ConcurrentPurchaseTests(TransactionTestCase):
         self.assertEqual(SubscriptionInvoice.objects.filter(store=self.store, kind="plan_change").count(), 1)
 
     def test_parallel_verified_callbacks_activate_exactly_once(self):
+        from apps.portal.services import platform_gateway_service as pgs
+
+        self.assertTrue(pgs.gateway_state("zibal").ready)
+        self.assertIn("zibal", [option["code"] for option in pgs.checkout_options("subscription", store=self.store)])
         client = Client(HTTP_HOST=f"{self.store.admin_subdomain}.{settings.RASTISI_ADMIN_DOMAIN_SUFFIX}")
         self.assertTrue(client.login(username=self.owner.username, password=PW))
         # Follow the actual merchant flow: request middleware resolves current
