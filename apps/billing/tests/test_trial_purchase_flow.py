@@ -410,6 +410,11 @@ class ConcurrentPurchaseTests(TransactionTestCase):
                                {"version_id": self.pro.pk, "billing_interval": "monthly",
                                 "preview_token": preview.context["preview"]["token"]})
         self.assertEqual(executed.status_code, 302)
+        if not SubscriptionInvoice.objects.filter(store=self.store, kind="plan_change").exists():
+            from django.contrib.messages import get_messages
+            feedback = " | ".join(str(message) for message in get_messages(executed.wsgi_request))
+            self.fail(f"purchase did not create an invoice: location={executed.get('Location', '')}, "
+                      f"is_upgrade={preview.context['preview'].get('is_upgrade')}, messages={feedback}")
         invoice = SubscriptionInvoice.objects.get(store=self.store, kind="plan_change")
         response = client.post(reverse("dashboard:platform-checkout-pay", args=["subscription", invoice.pk]), {"method": "zibal"})
         self.assertEqual(response.status_code, 302)

@@ -45,9 +45,11 @@ reference the same existing file instead of duplicating bytes.
 
 Four new Django migrations use SeparateDatabaseAndState with empty database operations
 to record upload_to field state without backend-dependent table rebuilds. They do not copy files,
-rewrite stored database paths or change field database types. Follow the existing
-release migration-review and backup policy; do not bypass the guard because these
-are state changes. Review `sqlmigrate` output on the target backend before release.
+rewrite stored database paths or change field database types. The four exact migration blobs are reviewed in migration_guard.py by path and
+SHA256 as compatible (ADDITIVE). Any byte/path change loses that approval; editing
+an already published migration remains DESTRUCTIVE. Unknown state-only migrations
+still require REVIEW. The fresh verified-backup requirement remains in force even
+for these no-SQL migrations. Review `sqlmigrate` on the target backend before release.
 
 Existing-shop migration is a separate phase: inventory references and ownership,
 identify shared/ambiguous files, take verified backups, prepare a dry-run mapping,

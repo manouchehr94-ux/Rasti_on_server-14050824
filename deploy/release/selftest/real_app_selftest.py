@@ -16,7 +16,7 @@ Scenario (each step asserts and prints):
   5  Redis down -> pre-flight stops the deploy, nothing changes; Redis back
   6  additive migration: refused without a verified backup; real restic backup; deployed; rollback of the CODE keeps the column and the
      old code runs against the new schema
-  7  the actual candidate commit: real backup, explicit migration review if required, exact-SHA activation and HTTP probes
+  7  the actual candidate commit: real backup and exact-SHA activation for compatible changes; unsafe online changes are refused
   8  persistent data (database rows, media, uploaded files) identical to step 0 throughout; no secret anywhere in logs/history
 
 Needs: RASTISI_TEST_PG_BIN, RASTISI_TEST_PG_ADMIN_URL (disposable server), RASTISI_TEST_REDIS_BIN (redis-server), RASTISI_TEST_RESTIC,
@@ -401,20 +401,22 @@ class RealApplicationRehearsal(unittest.TestCase):
         art, digest = self.build(REPO, CANDIDATE_SHA, CAPTCHA_SHA)
         report = json.loads((self.dist / CANDIDATE_SHA[:12] / "migration-report.json").read_text())
         rid = self.stage_via_gate(art, CANDIDATE_SHA, digest)
-        flags = ""
-        if report.get("requires_allow_migrations"):
-            # The prior drill has a real fresh backup: review permission must still
-            # be checked independently, rather than assuming every future HEAD is NONE.
-            code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA)
-            self.assertEqual(code, C.EXIT_POLICY, text)
-            self.assertEqual(self.status()["current_sha"], CAPTCHA_SHA)
-            flags = "allow-migrations"
-        if report.get("requires_destructive_ack"):
-            flags += " destructive-ack=" + report["destructive_ack_phrase"]
+        if report["level"] not in ("NONE", "ADDITIVE"):
+            # A reviewed offline procedure is required for unsafe online changes.
+            # Neither a real backup nor approval flags may bypass that boundary.
+            for flags in ("", "allow-migrations"):
+                if report.get("requires_destructive_ack"):
+                    flags += " destructive-ack=" + report["destructive_ack_phrase"]
+                code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA, flags.strip())
+                self.assertEqual(code, C.EXIT_POLICY, text)
+                self.assertIn("separately reviewed offline migration procedure", text)
+                self.assertEqual(self.status()["current_sha"], CAPTCHA_SHA)
+            self.assertEqual(self.fingerprint(), self.fp_before)
+            return
         if report["new_migrations"]:
             sh([PY, str(TOOLS.parent / "backup" / "rastisi_backup.py"), "run"],
                env=dict(os.environ, RASTISI_BACKUP_CONF=str(self.root / "backup.conf")), timeout=1800)
-        code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA, flags.strip())
+        code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA)
         self.assertEqual(code, 0, text)
         self.assertEqual(self.status()["current_sha"], CANDIDATE_SHA)
         self.assertEqual(self.http("/login/")[0], 200)

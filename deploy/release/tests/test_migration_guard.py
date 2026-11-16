@@ -36,6 +36,16 @@ class ClassificationTests(unittest.TestCase):
         source = mig("migrations.SeparateDatabaseAndState(database_operations=[], state_operations=[migrations.AlterField(model_name='x', name='image', field=models.ImageField(upload_to='stores/'))])")
         self.assertEqual(G.worst(levels(source)), "REVIEW")
 
+    def test_reviewed_state_only_approval_rejects_changed_bytes_and_paths(self):
+        repo = Path(__file__).resolve().parents[3]
+        for path in G._REVIEWED_STATE_ONLY_SHA256:
+            content = subprocess.check_output(["git", "-C", str(repo), "show", f"HEAD:{path}"])
+            self.assertTrue(G.reviewed_state_only(path, content))
+            self.assertFalse(G.reviewed_state_only(path, content + b"\n"))
+            self.assertFalse(G.reviewed_state_only(path, content.replace(b"\n", b"\r\n")))
+            self.assertFalse(G.reviewed_state_only("unreviewed/" + path, content))
+            self.assertFalse(G.reviewed_state_only(path, content.replace(b"database_operations=[]", b"database_operations=[migrations.RunSQL('DROP TABLE x')]")))
+
     def test_destructive_operations(self):
         for op in ("migrations.RemoveField(model_name='a', name='b')", "migrations.DeleteModel(name='A')",
                    "migrations.RenameField(model_name='a', old_name='b', new_name='c')", "migrations.RenameModel(old_name='A', new_name='B')",
@@ -92,6 +102,25 @@ class GitRangeTests(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", msg)
         return self.git("rev-parse", "HEAD")
+
+    def test_only_new_exact_reviewed_state_migrations_are_compatible(self):
+        project = Path(__file__).resolve().parents[3]
+        for path in G._REVIEWED_STATE_ONLY_SHA256:
+            destination = self.repo / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(subprocess.check_output(["git", "-C", str(project), "show", f"HEAD:{path}"]))
+        head = self.commit("reviewed upload paths")
+        report = G.analyze_range(self.repo, self.base, head)
+        self.assertEqual(report["level"], "ADDITIVE")
+        self.assertEqual(len(report["new_migrations"]), 4)
+        self.assertTrue(report["rollback_safe"])
+        # Editing an already published migration stays destructive, even if the
+        # end bytes could otherwise have had an approval.
+        path = next(iter(G._REVIEWED_STATE_ONLY_SHA256))
+        (self.repo / path).write_bytes((self.repo / path).read_bytes() + b"\n")
+        edited = self.commit("changed migration")
+        self.assertEqual(G.analyze_range(self.repo, head, edited)["level"], "DESTRUCTIVE")
+        self.assertEqual(G.analyze_range(self.repo, self.base, edited)["level"], "REVIEW")
 
     def test_no_migration_change_is_NONE_and_rollback_safe(self):
         (self.repo / "README").write_text("x")
