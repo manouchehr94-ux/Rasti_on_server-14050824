@@ -16,10 +16,11 @@ Scenario (each step asserts and prints):
   5  Redis down -> pre-flight stops the deploy, nothing changes; Redis back
   6  additive migration: refused without a verified backup; real restic backup; deployed; rollback of the CODE keeps the column and the
      old code runs against the new schema
-  7  persistent data (database rows, media, uploaded files) identical to step 0 throughout; no secret anywhere in logs/history
+  7  the actual candidate commit: real backup, explicit migration review if required, exact-SHA activation and HTTP probes
+  8  persistent data (database rows, media, uploaded files) identical to step 0 throughout; no secret anywhere in logs/history
 
 Needs: RASTISI_TEST_PG_BIN, RASTISI_TEST_PG_ADMIN_URL (disposable server), RASTISI_TEST_REDIS_BIN (redis-server), RASTISI_TEST_RESTIC,
-       network for pip (only when the wheelhouse is built), PROD_SHA / CAPTCHA_SHA (default: this repository's known commits).
+       network for pip (only when the wheelhouse is built), PROD_SHA / CAPTCHA_SHA (fixed historical commits), CANDIDATE_SHA (default: HEAD).
 """
 
 import hashlib
@@ -44,7 +45,9 @@ import rastisi_common as C  # noqa: E402
 
 PY = sys.executable
 PROD_SHA = os.environ.get("PROD_SHA", "86742072855eb0d937a63be0c7662919d0dbef87")
-CAPTCHA_SHA = os.environ.get("CAPTCHA_SHA") or subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip()
+# The rollback/no-migration scenario is historical; HEAD may legitimately migrate.
+CAPTCHA_SHA = os.environ.get("CAPTCHA_SHA", "a42e4e2d6ad42a04d161685e0b05a8f320ec37a7")
+CANDIDATE_SHA = os.environ.get("CANDIDATE_SHA") or subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip()
 PG_BIN = os.environ.get("RASTISI_TEST_PG_BIN", "")
 ADMIN_URL = os.environ.get("RASTISI_TEST_PG_ADMIN_URL", "")
 REDIS_BIN = os.environ.get("RASTISI_TEST_REDIS_BIN", "")
@@ -394,7 +397,31 @@ class RealApplicationRehearsal(unittest.TestCase):
         drill = sh([PY, str(TOOLS.parent / "backup" / "rastisi_backup.py"), "restore-drill"], env=dict(os.environ, RASTISI_BACKUP_CONF=str(bconf)), timeout=1800)
         self.assertIn("restore drill OK", drill.stdout.decode())
 
-    def test_07_persistent_data_untouched_and_no_secret_anywhere(self):
+    def test_07_deploy_the_actual_candidate_with_its_reviewed_migration_policy(self):
+        art, digest = self.build(REPO, CANDIDATE_SHA, CAPTCHA_SHA)
+        report = json.loads((self.dist / CANDIDATE_SHA[:12] / "migration-report.json").read_text())
+        rid = self.stage_via_gate(art, CANDIDATE_SHA, digest)
+        flags = ""
+        if report.get("requires_allow_migrations"):
+            # The prior drill has a real fresh backup: review permission must still
+            # be checked independently, rather than assuming every future HEAD is NONE.
+            code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA)
+            self.assertEqual(code, C.EXIT_POLICY, text)
+            self.assertEqual(self.status()["current_sha"], CAPTCHA_SHA)
+            flags = "allow-migrations"
+        if report.get("requires_destructive_ack"):
+            flags += " destructive-ack=" + report["destructive_ack_phrase"]
+        if report["new_migrations"]:
+            sh([PY, str(TOOLS.parent / "backup" / "rastisi_backup.py"), "run"],
+               env=dict(os.environ, RASTISI_BACKUP_CONF=str(self.root / "backup.conf")), timeout=1800)
+        code, text = self.activate_via_gate(rid, CANDIDATE_SHA, CAPTCHA_SHA, flags.strip())
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.status()["current_sha"], CANDIDATE_SHA)
+        self.assertEqual(self.http("/login/")[0], 200)
+        self.assertEqual(self.http("/contact/")[0], 200)
+        self.assertEqual(self.fingerprint(), self.fp_before)
+
+    def test_08_persistent_data_untouched_and_no_secret_anywhere(self):
         self.assertEqual(self.fingerprint()[1], self.fp_before[1], "media files must be byte-identical")
         rows_now = self.fingerprint()[0]
         self.assertEqual(rows_now, self.fp_before[0], "customer rows must be identical")

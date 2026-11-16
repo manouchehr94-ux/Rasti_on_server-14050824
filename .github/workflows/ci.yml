@@ -353,11 +353,13 @@ jobs:
           RASTISI_TEST_PG_ADMIN_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/postgres
           RASTISI_TEST_REDIS_BIN: /usr/bin/redis-server
           PROD_SHA: ${{ vars.RASTISI_REHEARSAL_PROD_SHA || '86742072855eb0d937a63be0c7662919d0dbef87' }}
-          CAPTCHA_SHA: ${{ vars.RASTISI_REHEARSAL_NEXT_SHA || github.sha }}
+          CAPTCHA_SHA: ${{ vars.RASTISI_REHEARSAL_NEXT_SHA || 'a42e4e2d6ad42a04d161685e0b05a8f320ec37a7' }}
+          CANDIDATE_SHA: ${{ env.TEST_REF }}
         run: |
           sudo apt-get install -y -qq postgresql-client-16
           RASTISI_TEST_RESTIC="$(command -v restic)"
           export RASTISI_TEST_RESTIC
           git cat-file -e "$PROD_SHA^{commit}"
           git cat-file -e "$CAPTCHA_SHA^{commit}"
+          git cat-file -e "$CANDIDATE_SHA^{commit}"
           python deploy/release/selftest/real_app_selftest.py
