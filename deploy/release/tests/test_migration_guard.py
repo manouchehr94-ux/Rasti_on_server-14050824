@@ -32,6 +32,10 @@ class ClassificationTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertEqual(G.worst(levels(mig("migrations.AddField(model_name='a', name='b', field=%s)" % field))), "REVIEW")
 
+    def test_state_only_upload_path_changes_still_require_review(self):
+        source = mig("migrations.SeparateDatabaseAndState(database_operations=[], state_operations=[migrations.AlterField(model_name='x', name='image', field=models.ImageField(upload_to='stores/'))])")
+        self.assertEqual(G.worst(levels(source)), "REVIEW")
+
     def test_destructive_operations(self):
         for op in ("migrations.RemoveField(model_name='a', name='b')", "migrations.DeleteModel(name='A')",
                    "migrations.RenameField(model_name='a', old_name='b', new_name='c')", "migrations.RenameModel(old_name='A', new_name='B')",
@@ -128,12 +132,18 @@ class GitRangeTests(unittest.TestCase):
 class RealHistoryTests(unittest.TestCase):
     """Sanity check against the project's own history (skipped when the commits are not available)."""
 
-    def test_the_captcha_release_has_no_migrations(self):
+    def test_the_imported_captcha_and_cicd_baseline_has_no_migrations(self):
         repo = Path(__file__).resolve().parents[3]
         have = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", "HEAD"], capture_output=True).returncode == 0
         if not have:
             self.skipTest("new repository baseline not present")
-        r = G.analyze_range(repo, "86742072855eb0d937a63be0c7662919d0dbef87", "HEAD")
+        # Pin this historical fact to the original CI/CD import. Future releases
+        # legitimately add migrations; they are checked by the current-range gate.
+        r = G.analyze_range(
+            repo,
+            "86742072855eb0d937a63be0c7662919d0dbef87",
+            "52f4700868a7e52475d29b3312005002264670e9",
+        )
         self.assertEqual((r["level"], r["new_migrations"]), ("NONE", []))
 
 
