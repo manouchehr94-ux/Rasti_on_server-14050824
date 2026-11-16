@@ -3,6 +3,7 @@
 بازاستفاده‌شده، نه یک دفترِ حسابرسیِ جداگانه)."""
 
 from django.utils import timezone
+from django.db import transaction
 
 from apps.core.services.audit_service import record_audit_event
 from apps.stores.integrations.registry import all_providers, get_provider
@@ -69,15 +70,47 @@ def get_or_create_connection(*, store, provider_code: str) -> StoreIntegrationCo
     return connection
 
 
+@transaction.atomic
 def connect(*, store, provider_code: str, values: dict, actor) -> StoreIntegrationConnection:
     """اعتبارنامه‌ها را (پس از اعتبارسنجیِ فرمتِ واقعیِ Provider) ذخیره و
     یکپارچه‌سازی را فعال می‌کند."""
     provider = _require_provider(provider_code)
+    values = dict(values)
+    if provider_code == "enamad":
+        from apps.stores.services.enamad_verification_service import EnamadBadgeError, parse_enamad_badge_snippet
+
+        # Serialize stage updates even before the first connection row exists.
+        type(store).objects.select_for_update().only("pk").get(pk=store.pk)
+        raw = values.pop("enamad_badge_snippet", "")
+        clear_badge = values.pop("enamad_clear_badge", "") == "1"
+        clear_meta = values.pop("enamad_clear_meta", "") == "1"
+        existing = StoreIntegrationConnection.objects.filter(store=store, provider_code=provider_code).first()
+        saved = existing.get_credentials() if existing else {}
+        try:
+            badge = parse_enamad_badge_snippet(raw)
+            if badge and clear_badge:
+                raise EnamadBadgeError("برای حذف نماد، کادر کد کامل را خالی بگذارید.")
+        except EnamadBadgeError as exc:
+            raise IntegrationError(str(exc), field="enamad_badge_snippet") from exc
+        if badge:
+            values.update(enamad_id=badge.enamad_id, enamad_auth_code=badge.auth_code)
+        elif clear_badge:
+            values.update(enamad_id="", enamad_auth_code="")
+        elif not (values.get("enamad_id") or values.get("enamad_auth_code")):
+            values.pop("enamad_id", None)
+            values.pop("enamad_auth_code", None)
+        if clear_meta:
+            values["verification_meta_tag"] = ""
+        elif not values.get("verification_meta_tag"):
+            values.pop("verification_meta_tag", None)
+        values = {**saved, **values}
     for key, value in values.items():
         if len(str(value or "")) > MAX_VALUE_LENGTH:
             raise IntegrationError(f"مقدار واردشده برای «{_label_of(provider, key)}» بیش از حد طولانی است.", field=key)
     error = provider.validate(values)
-    if error:
+    if error and not (provider_code == "enamad" and (clear_badge or clear_meta) and not any(
+        values.get(k) for k in ("verification_meta_tag", "enamad_id", "enamad_auth_code")
+    )):
         raise IntegrationError(error, field=_error_field(provider, values))
 
     connection = get_or_create_connection(store=store, provider_code=provider_code)

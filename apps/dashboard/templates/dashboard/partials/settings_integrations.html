@@ -193,7 +193,7 @@
       <ol class="rs-steps" data-testid="enamad-steps">
         {% for st in row.enamad.stages %}<li data-state="{{ st.state }}"><b>{{ st.title }}</b> <span class="int-chip int-chip--{% if st.state == 'ready' %}ok{% elif st.state == 'invalid' %}danger{% elif st.state == 'empty' %}off{% else %}info{% endif %}">{{ st.text }}</span></li>{% endfor %}
       </ol>
-      <p class="au-note" data-testid="enamad-badge-state" data-shown="{% if row.enamad.badge_shown %}1{% else %}0{% endif %}"><b>نمایش نماد در فوتر:</b> {% if row.enamad.badge_shown %}نمایش داده می‌شود.{% else %}نمایش داده نمی‌شود — {{ row.enamad.badge_reason }}{% endif %}</p>
+      <p class="au-note" data-testid="enamad-badge-state" data-shown="{% if row.enamad.badge_shown %}1{% else %}0{% endif %}"><b>جایگاه کد نماد در سایت:</b> {% if row.enamad.badge_shown %}کد رسمی درج می‌شود؛ بارگیری تصویر و تأیید رسمی وابسته به اینماد است.{% else %}نمایش داده نمی‌شود — {{ row.enamad.badge_reason }}{% endif %}</p>
       {% endfor %}
     </div>
   </section>

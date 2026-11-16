@@ -4399,8 +4399,9 @@ def _integration_rows_with_effect(store, request):
             by_key = {"meta": ("verification_meta_tag",), "badge": ("enamad_id", "enamad_auth_code", "enamad_show_badge")}
             fields = {f.key: f for f in provider.fields}
             row["field_groups"] = [
-                {"title": st["title"], "hint": st["hint"], "state": st["state"], "text": st["text"],
-                 "fields": [fields[k] for k in by_key[st["key"]]]}
+                {"key": st["key"], "title": st["title"], "hint": st["hint"], "state": st["state"], "text": st["text"],
+                 "fields": [fields[k] for k in by_key[st["key"]] if st["key"] != "badge" or k == "enamad_show_badge"],
+                 "advanced_fields": [fields[k] for k in ("enamad_id", "enamad_auth_code")] if st["key"] == "badge" else []}
                 for st in flow["stages"]
             ]
     for row in rows:
@@ -5087,6 +5088,13 @@ def settings_integration_connect(request, provider_code):
         return HttpResponse(status=404)
 
     values = {f.key: ("1" if request.POST.get(f.key) else "0") if f.kind == "checkbox" else request.POST.get(f.key, "").strip() for f in provider.fields}
+    if provider_code == "enamad":
+        for key in ("enamad_badge_snippet", "enamad_clear_badge", "enamad_clear_meta"):
+            values[key] = request.POST.get(key, "")
+        if "enamad_show_badge" not in request.POST and "enamad_visibility_submitted" not in request.POST:
+            values.pop("enamad_show_badge", None)
+        elif "enamad_show_badge" in request.POST:
+            values["enamad_show_badge"] = "1" if request.POST["enamad_show_badge"].strip().lower() in {"1", "on", "true", "yes"} else "0"
     try:
         integration_service.connect(store=store, provider_code=provider_code, values=values, actor=request.user)
     except integration_service.IntegrationError as exc:
@@ -5094,7 +5102,7 @@ def settings_integration_connect(request, provider_code):
         request.session["integration_open"] = provider_code      # the drawer reopens so the error is seen next to the field
         request.session["integration_form_error"] = {
             "code": provider_code, "field": exc.field, "message": str(exc),
-            "values": {f.key: values[f.key] for f in provider.fields if not f.is_secret},
+            "values": {f.key: values[f.key] for f in provider.fields if not f.is_secret and f.key in values},
         }
     else:
         messages.success(request, f"شناسهٔ {provider.display_name} ذخیره شد. این فقط ذخیرهٔ شناسه است؛ به‌معنی فعال‌شدن ردیابی، اتصال یا تأییدشدن توسط سرویس بیرونی نیست.")

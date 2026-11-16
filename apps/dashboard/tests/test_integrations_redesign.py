@@ -435,7 +435,7 @@ class EnamadDisplayTests(_Base):
 
     def test_unticking_the_choice_hides_the_seal_but_keeps_the_ids(self):
         self.verified_domain()
-        self.post("connect", "enamad", enamad_id="221617", enamad_auth_code="94MqMPJEnuahlSHjb9kP")           # checkbox absent = unticked
+        self.post("connect", "enamad", enamad_id="221617", enamad_auth_code="94MqMPJEnuahlSHjb9kP", enamad_visibility_submitted="1")  # real form marker distinguishes unticked from omitted
         self.assertEqual(self.saved("enamad")["enamad_show_badge"], "0")
         self.assertEqual(self.saved("enamad")["enamad_id"], "221617")
         self.assertIn('data-testid="enamad-badge-state" data-shown="0"', view_html(self.client, "enamad"))

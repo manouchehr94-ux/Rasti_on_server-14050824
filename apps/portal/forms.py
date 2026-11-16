@@ -8,6 +8,7 @@ from apps.stores.services.enamad_verification_service import (
     EnamadBadgeError,
     EnamadVerificationMetaError,
     parse_enamad_badge_identifiers,
+    parse_enamad_badge_snippet,
     parse_enamad_verification_meta_tag,
 )
 
@@ -335,12 +336,25 @@ class CreateStoreForm(forms.Form):
     submission_token = forms.CharField(widget=forms.HiddenInput, required=False)
 
 
+class _EphemeralBadgeTextarea(forms.Textarea):
+    def format_value(self, value):
+        # Pasted HTML is input only, including when validation fails.
+        return ""
+
+
 class PlatformConfigurationForm(forms.ModelForm):
     """تنظیماتِ عمومیِ پلتفرم (Platform Owner Admin » تنظیماتِ پلتفرم) — هویت،
     پیش‌فرض‌هایِ تجاری، و عملیات. پیکربندیِ درگاهِ پیامکِ مرکزی از این فرم جدا
     است (نگاه کنید به ``PlatformSmsConfigForm``/صفحه‌ی «پیامک › تنظیماتِ
     درگاه») تا این دو دغدغه‌ی متفاوت (هویتِ برند در برابرِ اعتبارنامه‌ی
     زیرساخت) در یک فرم قاطی نشوند."""
+
+    enamad_badge_snippet = forms.CharField(
+        label="کد کامل نماد اینماد", required=False, max_length=4096, strip=False,
+        widget=_EphemeralBadgeTextarea(attrs={"rows": 5, "dir": "ltr", "spellcheck": "false"}),
+    )
+    enamad_clear_badge = forms.BooleanField(label="حذف صریح شناسه و کد نماد", required=False)
+    enamad_clear_meta = forms.BooleanField(label="حذف صریح متاتگ احراز فنی", required=False)
 
     class Meta:
         from .models import PlatformConfiguration
@@ -365,9 +379,11 @@ class PlatformConfigurationForm(forms.ModelForm):
         }
 
     def clean_enamad_verification_meta_tag(self):
+        if self.fields["enamad_clear_meta"].clean(self.data.get("enamad_clear_meta")):
+            return ""
         value = (self.cleaned_data.get("enamad_verification_meta_tag") or "").strip()
         if not value:
-            return ""
+            return self.instance.enamad_verification_meta_tag or ""
         try:
             parse_enamad_verification_meta_tag(value)
         except EnamadVerificationMetaError as exc:
@@ -378,6 +394,24 @@ class PlatformConfigurationForm(forms.ModelForm):
         cleaned_data = super().clean()
         enamad_id = (cleaned_data.get("enamad_id") or "").strip()
         auth_code = (cleaned_data.get("enamad_auth_code") or "").strip()
+        raw = cleaned_data.get("enamad_badge_snippet", "")
+        if raw.strip():
+            try:
+                badge = parse_enamad_badge_snippet(raw)
+                if cleaned_data.get("enamad_clear_badge"):
+                    raise EnamadBadgeError("برای حذف نماد، کادر کد کامل را خالی بگذارید.")
+                enamad_id, auth_code = badge.enamad_id, badge.auth_code
+            except EnamadBadgeError as exc:
+                self.add_error("enamad_badge_snippet", str(exc))
+        elif cleaned_data.get("enamad_clear_badge"):
+            enamad_id = auth_code = ""
+        elif not enamad_id and not auth_code:
+            enamad_id, auth_code = self.instance.enamad_id, self.instance.enamad_auth_code
+        if cleaned_data.get("enamad_clear_meta"):
+            cleaned_data["enamad_verification_meta_tag"] = ""
+        if "enamad_badge_enabled" not in self.data and "enamad_visibility_submitted" not in self.data:
+            cleaned_data["enamad_badge_enabled"] = self.instance.enamad_badge_enabled
+        cleaned_data.pop("enamad_badge_snippet", None)
         try:
             parse_enamad_badge_identifiers(enamad_id, auth_code)
         except EnamadBadgeError as exc:
