@@ -10,6 +10,7 @@ from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from PIL import Image
+from bs4 import BeautifulSoup
 
 from apps.cart.models import Cart, CartItem
 from apps.cart.services import item_media
@@ -55,7 +56,7 @@ class CartItemImageTests(TestCase):
 
     def test_variant_image_beats_cover_and_cover_is_the_fallback(self):
         black, white = self.item(self.black), self.item(self.white)
-        self.assertIn("black", item_media.cart_item_image(black).url)
+        self.assertEqual(item_media.cart_item_image(black).url, self.black_img.image.url)
         self.assertEqual(item_media.cart_item_image(black).alt, "مشکی")
         self.assertEqual(item_media.cart_item_image(white).url, self.cover.image.url)
 
@@ -73,7 +74,9 @@ class CartItemImageTests(TestCase):
         checkout_html = self.client.get(reverse("orders:checkout-step1")).content.decode()
         for html in (cart_html, checkout_html):
             self.assertIn('class="thumb has-img"', html)
-            self.assertIn("black", html)
+            sources = [img["src"] for img in BeautifulSoup(html, "html.parser").select(".thumb.has-img img")]
+            self.assertIn(self.black_img.image.url, sources)
+            self.assertNotIn(self.cover.image.url, sources)
             self.assertNotIn("thumb-fallback", html)
 
     def test_real_image_wins_over_the_emoji_placeholder_which_only_appears_without_media(self):

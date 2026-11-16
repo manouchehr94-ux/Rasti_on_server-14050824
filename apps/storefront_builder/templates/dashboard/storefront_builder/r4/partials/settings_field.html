@@ -236,7 +236,7 @@ must never silently fall back to a plain text input for an unsupported type.
           data-r4-media-picker>
     <option value="">— بدون تصویر —</option>
     {% for asset in media_assets %}
-    <option value="{{ asset.pk }}" data-url="{{ asset.image.url }}" data-name="{{ asset.image.name|cut:'media-assets/' }}">{{ asset.image.name|cut:"media-assets/" }}</option>
+    <option value="{{ asset.pk }}" data-url="{{ asset.image.url }}" data-name="{{ asset.display_name }}">{{ asset.display_name }}</option>
     {% endfor %}
   </select>
   {% if not media_assets %}

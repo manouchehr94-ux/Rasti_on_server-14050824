@@ -65,3 +65,20 @@ old files stay in their original locations until that separate migration.
 checks namespace separation, path traversal resistance, name-length limits, missing
 owners, migration serialization, platform exceptions, private URL denial, exact
 original bytes, deletion isolation and unchanged legacy references.
+
+## Original filenames in the editor
+
+`MediaAsset.original_filename` stores a normalized client basename as display
+metadata. The upload path captures it before randomization; the placement editor
+passes the incoming name when linking an already saved hero/banner/story file.
+The picker API, JSON asset listing and both background selectors use
+`MediaAsset.display_name`, never the physical storage key as the primary label.
+Django escapes labels in markup and the picker uses textContent. Client-supplied
+directories/control characters are removed; Persian filenames remain supported.
+
+Migration `content.0027_mediaasset_original_filename` adds a varchar column with
+an empty database default, so old application INSERTs remain compatible. It is a
+normal ADDITIVE migration, not part of the four hash-pinned state-only approvals.
+There is no legacy backfill or file rename: old rows display their existing
+basename. A missing historical original name cannot be recovered from a UUID key.
+Fresh verified-backup requirements still apply at any later controlled deployment.

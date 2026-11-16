@@ -35,7 +35,13 @@ class CategoryImageFieldTests(TestCase):
         field = Category._meta.get_field("image")
         self.assertTrue(field.blank)
         self.assertTrue(field.null)
-        self.assertEqual(field.upload_to, "categories/images/")
+        from apps.stores.models import Store
+
+        store = Store.objects.get(slug="akhlaghi")
+        name = field.generate_filename(Category(store=store), "category.png")
+        self.assertTrue(name.startswith(f"stores/{store.public_id.hex}/categories/images/"))
+        self.assertRegex(name.rsplit("/", 1)[-1], r"^[0-9a-f]{32}\.png$")
+        self.assertNotIn("category.png", name)
 
     def test_category_without_image_uses_icon(self):
         """دسته‌بندی بدون تصویر — icon (emoji) باید به‌عنوان fallback عمل کند."""

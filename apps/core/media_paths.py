@@ -4,11 +4,19 @@ The store UUID (not its editable name, slug or domain) is the namespace.
 Public and private roots use the same relative layout; storage controls access.
 """
 import re
+import unicodedata
 import uuid
 from pathlib import PurePosixPath
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.utils.deconstruct import deconstructible
+
+
+def upload_display_name(filename):
+    """Untrusted upload basename for display only, never a storage path."""
+    name = PurePosixPath(str(filename or "").replace("\\", "/")).name
+    name = "".join(c for c in name if unicodedata.category(c) != "Cc").strip()
+    return name[:255] if name not in (".", "..") else ""
 
 
 def store_media_path(instance, filename, directory):
@@ -43,7 +51,12 @@ class StoreMediaPath:
         self.directory = directory
 
     def __call__(self, instance, filename):
-        return store_media_path(instance, filename, self.directory)
+        path = store_media_path(instance, filename, self.directory)
+        # Capture before Django replaces the client name with a random storage key.
+        # Historical model states without this metadata column remain supported.
+        if instance._meta.label_lower == "content.mediaasset" and hasattr(instance, "original_filename"):
+            instance.original_filename = upload_display_name(filename)
+        return path
 
     def __eq__(self, other):
         return isinstance(other, StoreMediaPath) and self.directory == other.directory

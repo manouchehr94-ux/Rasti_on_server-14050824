@@ -1068,7 +1068,7 @@ def storefront_r4_layout_tree(request):
     from apps.content.models import MediaAsset
 
     media = [
-        {"id": asset.pk, "url": asset.image.url if asset.image else "", "name": (asset.image.name or "").rsplit("/", 1)[-1]}
+        {"id": asset.pk, "url": asset.image.url if asset.image else "", "name": asset.display_name}
         for asset in MediaAsset.objects.filter(store=store).order_by("-created_at", "-id")[:60]
     ]
     return JsonResponse({
@@ -1780,8 +1780,6 @@ def storefront_r4_media_upload(request):
     pickers and the Media Library use — no parallel store of files). The model's own validators run (size ≤ 5 MB, a real decodable image of an
     allowed format). Store-scoped by ``resolve_store_for_service``; the file never leaves the Store's own library. Returns what the picker
     needs: the new asset's id, URL and display name."""
-    import os
-
     from django.core.exceptions import ValidationError
 
     from apps.content.models import MediaAsset
@@ -1800,7 +1798,7 @@ def storefront_r4_media_upload(request):
     except ValidationError as exc:
         return JsonResponse({"ok": False, "message": " ".join(exc.messages) or "این فایل به‌عنوان تصویر پذیرفته نشد."}, status=400)
     asset.save()
-    return JsonResponse({"ok": True, "id": asset.pk, "url": asset.image.url, "name": os.path.basename(asset.image.name)})
+    return JsonResponse({"ok": True, "id": asset.pk, "url": asset.image.url, "name": asset.display_name})
 
 
 @require_GET

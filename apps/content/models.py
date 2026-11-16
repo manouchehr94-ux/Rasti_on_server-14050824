@@ -19,7 +19,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db import models
 
-from apps.core.media_paths import StoreMediaPath
+from apps.core.media_paths import StoreMediaPath, upload_display_name
 from apps.core.models import TimeStampedModel
 
 # ---------------------------------------------------------------- محدودیت حجم تصویر
@@ -430,6 +430,9 @@ class MediaAsset(TimeStampedModel):
     (نگاه کنید به ``on_delete=PROTECT`` روی فیلدهایِ asset در HeroSlide/
     PromotionalBanner/StoryRailItem).
 
+    ``original_filename`` is display-only upload metadata; it never controls
+    the randomized storage path. Legacy rows fall back to the stored basename.
+
     عمداً حداقلی نگه داشته شده — بدونِ فیلدهایِ اضافیِ «شاید بعداً لازم
     شود» (caption، تگ، دسته‌بندی و ...). اگر آینده به آن‌ها نیاز داشت،
     می‌توان بعداً افزود؛ بدونِ فیلدهایِ حدسی، ریسکِ Migration/معنایِ
@@ -443,6 +446,21 @@ class MediaAsset(TimeStampedModel):
         "تصویر", upload_to=StoreMediaPath("media-assets"),
         validators=[validate_image_size, validate_image_content],
     )
+
+    original_filename = models.CharField(
+        "نام اصلی فایل", max_length=255, blank=True, default="", db_default="", editable=False,
+    )
+
+    @property
+    def display_name(self):
+        # Existing rows keep their original stored path and need no backfill.
+        return upload_display_name(self.original_filename or self.image.name)
+
+    def save(self, *args, **kwargs):
+        fields = kwargs.get("update_fields")
+        if fields is not None and "image" in fields:
+            kwargs["update_fields"] = set(fields) | {"original_filename"}
+        return super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "فایل رسانه"
