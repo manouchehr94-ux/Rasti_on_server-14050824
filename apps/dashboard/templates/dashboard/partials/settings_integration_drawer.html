@@ -1,18 +1,19 @@
 {% load persian dashboard_extras %}
-{% comment %}Management drawer of ONE service — a native <dialog> opened by settings_integrations.html's script (Escape, focus return and the backdrop come with it).
+{% comment %}Large centered management dialog of ONE service — a native <dialog> opened by the opt-in management_modal.js controller (Escape, focus return and the backdrop come with it).
    Real Django form: POST to settings-integration-connect (CSRF, permission and store scoping enforced there); a rejected value comes back as a field error and the previously
    SAVED value is untouched. Never localStorage. Secrets are never echoed.{% endcomment %}
 {% with code=row.provider.code %}
-<dialog class="rs-drawer" id="drawer-{{ code }}" aria-labelledby="drawer-title-{{ code }}" data-testid="drawer-{{ code }}"{% if integration_open == code %} data-autoopen="1"{% endif %}>
-  <div class="rs-drawer__head">
+<dialog class="au-modal au-modal--management rs-drawer" data-management-modal tabindex="-1" id="drawer-{{ code }}" aria-labelledby="drawer-title-{{ code }}" aria-describedby="drawer-description-{{ code }}" data-testid="drawer-{{ code }}"{% if integration_open == code %} data-autoopen="1"{% endif %}>
+  <div class="au-modal__head rs-drawer__head">
     <div>
       <p class="rs-drawer__kicker">مدیریت سرویس</p>
       <h2 id="drawer-title-{{ code }}">{{ row.provider.display_name }}</h2>
+      <p class="au-hint" id="drawer-description-{{ code }}">اطلاعات سرویس را بررسی و ویرایش کنید؛ تغییرات با دکمهٔ ذخیره ثبت می‌شوند.</p>
     </div>
     <button type="button" class="rs-drawer__x" data-drawer-close aria-label="بستن پنل {{ row.provider.display_name }}">✕</button>
   </div>
 
-  <div class="rs-drawer__body">
+  <div class="au-modal__body rs-drawer__body">
     {% if row.field_error and not row.field_error.field %}<p class="rs-field-error rs-field-error--top" role="alert" data-testid="int-form-error">{{ row.field_error.message }}</p>{% endif %}
 
     <section class="rs-block" aria-labelledby="drawer-status-{{ code }}">
@@ -44,7 +45,7 @@
     <p class="au-note" data-testid="torob-note">ذخیرهٔ شناسهٔ ترب یک اتصال عملیاتی نیست: راستی‌سی فعلاً برای ترب فید یا API نمی‌سازد و چیزی به ترب نمی‌فرستد. ثبت‌نام و روش همکاری را از راهنمای رسمی ترب دنبال کنید.</p>
     {% endif %}
 
-    <form method="post" action="{% url 'dashboard:settings-integration-connect' code %}" id="int-form-{{ code }}" class="rs-form" novalidate data-rs-form>
+    <form method="post" action="{% url 'dashboard:settings-integration-connect' code %}" id="int-form-{{ code }}" class="rs-form" novalidate data-rs-form data-management-form>
       {% csrf_token %}
       {% for group in row.field_groups %}
       <fieldset class="int-fieldset"{% if group.title %} data-testid="int-stage-{{ forloop.counter }}" data-state="{{ group.state }}"{% endif %}>
@@ -94,7 +95,7 @@
     <a href="{{ row.provider.setup_guide }}" target="_blank" rel="noopener noreferrer" class="rs-link" data-testid="int-setup-link">{% if code == "torob" %}ثبت فروشگاه در ترب{% else %}راهنمای رسمی سرویس{% endif %} <span aria-hidden="true">↗</span></a>
   </div>
 
-  <div class="rs-drawer__foot">
+  <div class="au-modal__foot rs-drawer__foot">
     <button type="submit" form="int-form-{{ code }}" class="au-btn au-btn--primary" data-testid="int-save" data-busy-text="در حال ذخیره…">ذخیرهٔ شناسه</button>
     <button type="button" class="au-btn au-btn--ghost" data-drawer-close>بستن</button>
   </div>

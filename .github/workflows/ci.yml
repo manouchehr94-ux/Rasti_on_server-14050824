@@ -150,6 +150,20 @@ jobs:
               print("valid YAML:", f)
           PY
 
+      - name: Large management modal browser regressions (synthetic local app)
+        run: |
+          pip install -r tools/qa/requirements-management-browser.txt
+          python -m playwright install --with-deps chromium
+          python tools/qa/management_modal_browser.py --output "$RUNNER_TEMP/management-modal-evidence"
+      - name: Management modal screenshots and browser results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: management-modal-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/management-modal-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   tests-fast:
     needs: dependencies
     name: Tests (fast tier, SQLite)

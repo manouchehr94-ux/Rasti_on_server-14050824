@@ -15,11 +15,17 @@
 
   function openDialog(dlg, opener) {
     if (!dlg) return;
+    if (dlg.hasAttribute('data-management-modal')) {
+      return window.RastiManagementModal && window.RastiManagementModal.open(dlg, opener);
+    }
     lastOpener = opener || document.activeElement;
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
   }
   function closeDialog(dlg) {
     if (!dlg) return;
+    if (dlg.hasAttribute('data-management-modal')) {
+      return window.RastiManagementModal && window.RastiManagementModal.close(dlg);
+    }
     if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
     if (lastOpener && lastOpener.focus) { try { lastOpener.focus(); } catch (e) { /* detached */ } }
   }
@@ -70,7 +76,7 @@
     if (opener) { e.preventDefault(); openDialog(document.querySelector(opener.getAttribute('data-au-open')), opener); return; }
     var closer = t.closest && t.closest('[data-au-close]');
     if (closer) { e.preventDefault(); closeDialog(closer.closest('dialog')); return; }
-    if (t.tagName === 'DIALOG' && t.classList.contains('au-modal')) {  // backdrop
+    if (t.tagName === 'DIALOG' && t.classList.contains('au-modal') && !t.hasAttribute('data-management-modal')) {  // legacy backdrop
       var r = t.getBoundingClientRect();
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDialog(t);
       return;

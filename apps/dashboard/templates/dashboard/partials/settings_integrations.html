@@ -1,7 +1,7 @@
 {% load persian dashboard_extras %}
 {% comment %}«یکپارچه‌سازی‌ها» — شش دستهٔ افقی (نوار سطح ۳ که base_admin یک‌بار رندر می‌کند، با ?view=): نمای کلی · جست‌وجو و سئو · آمار و تبلیغات · ترب · اینماد · امکانات آینده.
    فقط دستهٔ انتخاب‌شده رندر می‌شود (لینک واقعی، بدون JS هم کار می‌کند). هر وضعیت از داده‌ی واقعی Backend می‌آید؛ هیچ اتصال یا تأییدِ نمایشی وجود ندارد.
-   «ذخیره‌شده» ≠ «استفاده روشن» ≠ «آماده» ≠ «همین حالا فعال». هر سرویس یک کارت خلاصه دارد و جزئیات/فرم در پنل کناری (Drawer) است.{% endcomment %}
+   «ذخیره‌شده» ≠ «استفاده روشن» ≠ «آماده» ≠ «همین حالا فعال». هر سرویس یک کارت خلاصه دارد و جزئیات/فرم در پنجرهٔ بزرگ و وسط‌چین مدیریت است.{% endcomment %}
 <div class="au-page int-page" data-testid="integrations-page" data-view="{{ integration_view }}">
   {% with ov=integration_overview sp=search_presence view=integration_view %}
 
@@ -213,48 +213,21 @@
 </div>
 <script>
 (function () {
-  var opener = null;
-  function lock(on) { document.documentElement.classList.toggle('rs-lock', on); }
-  function snapshot(d) { var f = d.querySelector('form[data-rs-form]'); return f ? new URLSearchParams(new FormData(f)).toString() : ''; }
-  function openDrawer(d, from) {
-    opener = from || document.activeElement;
-    d.__snap = snapshot(d);
-    if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else { d.setAttribute('open', ''); }
-    lock(true);
-    var first = d.querySelector('input:not([type=hidden]), button, a[href]');
-    var bad = d.querySelector('[aria-invalid="true"]');
-    (bad || first || d).focus();
-  }
-  function closeDrawer(d, force) {
-    if (!force && snapshot(d) !== d.__snap && !window.confirm('تغییرهای ذخیره‌نشده از بین می‌روند. بسته شود؟')) return false;
-    if (typeof d.close === 'function') d.close(); else d.removeAttribute('open');
-    return true;
-  }
-  document.addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest('[data-drawer-open]');
-    if (t) { var d = document.getElementById(t.getAttribute('data-drawer-open')); if (d) { e.preventDefault(); openDrawer(d, t); } return; }
-    var c = e.target.closest && e.target.closest('[data-drawer-close]');
-    if (c) { closeDrawer(c.closest('dialog')); return; }
-    if (e.target.tagName === 'DIALOG' && e.target.classList.contains('rs-drawer')) closeDrawer(e.target);        // backdrop click
+  var root = document.querySelector('.int-page');
+  if (root && !root.dataset.copyBound) { root.dataset.copyBound = '1'; root.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('[data-copy]');
     if (!b) return;
     var done = function () { var t0 = b.textContent; b.textContent = 'کپی شد'; setTimeout(function () { b.textContent = t0; }, 1500); };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(b.getAttribute('data-copy')).then(done, function () {});
-  });
-  document.querySelectorAll('dialog.rs-drawer').forEach(function (d) {
-    d.addEventListener('cancel', function (e) { if (snapshot(d) !== d.__snap && !window.confirm('تغییرهای ذخیره‌نشده از بین می‌روند. بسته شود؟')) e.preventDefault(); });   // Escape
-    d.addEventListener('close', function () { lock(false); if (opener && document.contains(opener)) opener.focus(); });
+  }); }
+  document.querySelectorAll('dialog[data-management-modal]').forEach(function (d) {
     var f = d.querySelector('form[data-rs-form]');
-    if (f) f.addEventListener('submit', function () {                                                                                         // loading state while the real POST runs
+    if (f && !f.dataset.busyBound) { f.dataset.busyBound = '1'; f.addEventListener('submit', function () {                                                                                         // loading state while the real POST runs
       var btns = d.querySelectorAll('button[type=submit][form="' + f.id + '"], form[data-rs-form] button[type=submit]');
       btns.forEach(function (b) { b.setAttribute('aria-busy', 'true'); b.textContent = b.getAttribute('data-busy-text') || b.textContent; setTimeout(function () { b.disabled = true; }, 0); });
-      d.__snap = snapshot(d);
-    });
-    if (d.hasAttribute('data-autoopen')) openDrawer(d, null);
+    }); }
   });
   var activeTab = document.querySelector('.admin-subtabs .admin-subtab.active');              // keep the selected category visible in the touch-scrolled bar
   if (activeTab && activeTab.scrollIntoView) activeTab.scrollIntoView({ inline: 'center', block: 'nearest' });
-  var m = new URLSearchParams(location.search).get('manage');
-  if (m) { var d = document.getElementById('drawer-' + m); if (d && !d.open) openDrawer(d, null); }
 })();
 </script>
