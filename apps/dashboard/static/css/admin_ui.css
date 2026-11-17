@@ -363,11 +363,26 @@
 .rs-field-error { margin: 6px 0 0; font-size: 12px; color: var(--red-ink, #9b1c1c); line-height: 1.8; }
 .rs-field-error--top { padding: 8px 12px; border-radius: 10px; background: var(--red-soft, #fde8e8); }
 .au-field--error .au-input { border-color: var(--red-ink, #9b1c1c); }
-/* Drawer: a native <dialog>; on the inline-start edge (the right in RTL), full width on phones */
-dialog.rs-drawer { position: fixed; inset-block: 0; inset-inline-start: 0; inset-inline-end: auto; margin: 0; height: 100dvh; max-height: 100dvh; width: min(520px, 100vw); max-width: none; padding: 0; border: 0; background: var(--card, #fff); color: inherit; box-shadow: 0 0 60px rgba(15, 24, 50, .25); }
-dialog.rs-drawer::backdrop { background: rgba(16, 25, 43, .47); }
-dialog.rs-drawer:not([open]) { display: none; }
-dialog.rs-drawer[open] { display: flex; flex-direction: column; }
+/* Opt-in large management dialog; no changes to unrelated au-modal/Studio dialogs. */
+dialog.au-modal--management { position: fixed; inset: 0; margin: auto; height: auto; width: min(88vw, 1180px); max-width: calc(100vw - 32px); max-height: calc(100dvh - 40px); padding: 0; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--text); box-shadow: 0 24px 70px rgba(10,16,32,.4); overflow: hidden; }
+dialog.au-modal--management::backdrop { background: rgba(10,16,32,.56); }
+dialog.au-modal--management:not([open]) { display: none; }
+dialog.au-modal--management[open] { display: flex; flex-direction: column; }
+.au-modal--management .au-modal__head, .au-modal--management .au-modal__foot { flex: 0 0 auto; }
+.au-modal--management .au-modal__body { min-height: 0; max-height: none; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
+.au-modal--management form, .au-modal--management fieldset { min-inline-size: 0; max-width: 100%; }
+.au-modal--management input, .au-modal--management select, .au-modal--management textarea { max-width: 100%; box-sizing: border-box; }
+.au-modal--management textarea[dir=ltr] { min-height: 160px; width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.au-modal--management button, .au-modal--management .au-btn { min-height: 44px; }
+.au-modal--management .rs-drawer__x { min-width: 44px; width: 44px; flex: 0 0 44px; color: inherit; }
+.au-modal--management input:not([type=checkbox]):not([type=radio]), .au-modal--management select { min-height: 44px; }
+.au-modal--management label:has(input[type=checkbox]), .au-modal--management label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.au-modal--management :focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+html.au-management-open, html.au-management-open body { overflow: hidden; }
+@media (max-width: 768px) {
+  dialog.au-modal--management { width: calc(100vw - 24px); max-width: calc(100vw - 24px); margin: auto; border-radius: 16px; max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) { dialog.au-modal--management { animation: none !important; transition: none !important; } }
 .rs-drawer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid var(--border); }
 .rs-drawer__head h2 { margin: 2px 0 0; font-size: 17px; line-height: 1.6; }
 .rs-drawer__kicker { margin: 0; font-size: 11.5px; color: var(--muted); }
@@ -375,9 +390,9 @@ dialog.rs-drawer[open] { display: flex; flex-direction: column; }
 .rs-drawer__body { padding: 16px 22px; overflow-y: auto; flex: 1; display: grid; gap: 12px; align-content: start; overscroll-behavior: contain; }
 .rs-drawer__foot { display: flex; gap: 9px; flex-wrap: wrap; padding: 12px 22px; border-top: 1px solid var(--border); background: var(--card, #fff); }
 .rs-drawer__foot .au-btn { min-height: 44px; }
-.rs-drawer :focus-visible, .rs-svc :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.rs-svc :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
 .rs-drawer .au-input--ltr, .rs-drawer bdi { direction: ltr; text-align: left; }
-html.rs-lock { overflow: hidden; }
+
 .int-page, .int-page * { min-width: 0; }
 @media (max-width: 640px) {
   .rs-svc { grid-template-columns: 36px minmax(0, 1fr); padding: 12px; gap: 9px; }
