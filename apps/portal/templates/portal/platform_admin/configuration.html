@@ -27,7 +27,7 @@
   </fieldset>
 
   <fieldset class="pa-fieldset"><legend>اینماد برای rastisi.ir</legend>
-    <p class="pa-help">چهار مرحله: متاتگِ احراز ← احرازِ اینماد ← شناسه و کدِ نماد ← فعال‌سازیِ نماد.</p>
+    <p class="pa-help">چهار مرحله: متاتگِ احراز ← احرازِ اینماد ← کد کامل رسمی نماد ← فعال‌سازیِ نماد.</p>
     <div class="pa-fields">
       <div class="pa-field pa-full{% if form.enamad_verification_meta_tag.errors %} has-error{% endif %}">
         <label for="{{ form.enamad_verification_meta_tag.id_for_label }}">۱. {{ form.enamad_verification_meta_tag.label }} (احرازِ فنی)</label>
@@ -35,12 +35,18 @@
         {% if form.enamad_verification_meta_tag.errors %}<div class="pa-error">{{ form.enamad_verification_meta_tag.errors.0 }}</div>{% endif %}
         <span class="pa-help">در پنلِ اینماد روشِ «افزودن متاتگ در صفحه اصلی» را انتخاب کنید و همان یک تگ <span class="pa-code">&lt;meta name="..." content="..."&gt;</span> را اینجا Paste کنید. RastiSi آن را اعتبارسنجی می‌کند و فقط روی صفحه‌یِ اصلیِ پلتفرم رندر می‌کند؛ script، http-equiv و HTML اضافی پذیرفته نمی‌شوند.</span>
       </div>
-      <p class="pa-help pa-full">۲. سپس در اینماد احراز شوید؛ پس از آن فیلدِ بالا را می‌توانید خالی کنید.</p>
+      <p class="pa-help pa-full">۲. سپس در اینماد احراز شوید؛ حذف متاتگ فقط با گزینهٔ حذف صریح انجام می‌شود.</p>
+      <div class="pa-field pa-full"><label for="{{ form.enamad_badge_snippet.id_for_label }}">{{ form.enamad_badge_snippet.label }}</label>{{ form.enamad_badge_snippet }}{% if form.enamad_badge_snippet.errors %}<p class="pa-error" role="alert">{{ form.enamad_badge_snippet.errors.0 }}</p>{% endif %}<p class="pa-help">کل کد رسمی پیوند و تصویر را بچسبانید؛ فقط شناسه و کد استخراج و ذخیره می‌شوند. خالی‌گذاشتن، اطلاعات قبلی را حذف نمی‌کند.</p></div>
+      <details class="pa-full"><summary>پیشرفته — ورود دستی شناسه و کد</summary>
       <div class="pa-field"><label for="{{ form.enamad_id.id_for_label }}">۳. {{ form.enamad_id.label }} (پس از صدور)</label>{{ form.enamad_id }}</div>
       <div class="pa-field{% if form.enamad_auth_code.errors %} has-error{% endif %}"><label for="{{ form.enamad_auth_code.id_for_label }}">{{ form.enamad_auth_code.label }} (پس از صدور)</label>{{ form.enamad_auth_code }}
         {% if form.enamad_auth_code.errors %}<div class="pa-error">{{ form.enamad_auth_code.errors.0 }}</div>{% endif %}</div>
+      </details>
+      <input type="hidden" name="enamad_visibility_submitted" value="1">
+      <label class="pa-check pa-full">{{ form.enamad_clear_badge }} {{ form.enamad_clear_badge.label }}</label>
+      <label class="pa-check pa-full">{{ form.enamad_clear_meta }} {{ form.enamad_clear_meta.label }}</label>
       <label class="pa-check pa-full">{{ form.enamad_badge_enabled }} ۴. {{ form.enamad_badge_enabled.label }}</label>
-      <p class="pa-help pa-full">شناسه/کدِ نمادِ نهایی را اینماد پس از صدور در پنلِ خودش نمایش می‌دهد؛ همین دو مقدار را (نه HTML) اینجا Paste کنید — RastiSi خودش تصویر/لینکِ امن را می‌سازد.</p>
+      <p class="pa-help pa-full">کد کامل رسمی را از پنل اینماد کپی کنید. ذخیره‌شدن اطلاعات به‌معنی تأیید رسمی یا موفقیت بارگیری تصویر نیست؛ وضعیت رسمی را در پنل اینماد بررسی کنید.</p>
     </div>
   </fieldset>
 

@@ -228,10 +228,13 @@ def configuration(request):
     پیکربندیِ درگاهِ پیامکِ مرکزی این‌جا نیست — نگاه کنید به ``sms_settings``."""
     config = get_platform_configuration()
     if request.method == "POST":
+        previous_enamad = {key: getattr(config, key) for key in ("enamad_id", "enamad_auth_code", "enamad_verification_meta_tag")}
         form = PlatformConfigurationForm(request.POST, request.FILES, instance=config)
         if form.is_valid():
-            changed = form.changed_data
-            before = {name: getattr(config, name) for name in changed}
+            # Transient pasted HTML/clear controls are never model fields or audit payloads.
+            changed = [name for name in form.changed_data if name in form.Meta.fields]
+            changed += [name for name, old in previous_enamad.items() if getattr(config, name) != old and name not in changed]
+            before = {name: previous_enamad.get(name, getattr(config, name)) for name in changed}
             form.save()
 
             from django.core.cache import cache

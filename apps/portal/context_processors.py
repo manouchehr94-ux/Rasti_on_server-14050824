@@ -48,6 +48,7 @@ def platform_enamad_verification(request):
         except EnamadBadgeError:
             badge = None
         if badge is not None:
+            context["PLATFORM_ENAMAD_BADGE"] = badge
             context["PLATFORM_ENAMAD_BADGE_PROFILE_URL"] = badge.profile_url
             context["PLATFORM_ENAMAD_BADGE_LOGO_URL"] = badge.logo_url
 

@@ -107,9 +107,7 @@
       </ul></div>
       <div>
         {% if PLATFORM_ENAMAD_BADGE_PROFILE_URL and PLATFORM_ENAMAD_BADGE_LOGO_URL %}
-        <a class="trust" referrerpolicy="origin" target="_blank" rel="noopener noreferrer" href="{{ PLATFORM_ENAMAD_BADGE_PROFILE_URL }}">
-          <img referrerpolicy="origin" src="{{ PLATFORM_ENAMAD_BADGE_LOGO_URL }}" alt="نماد اعتماد الکترونیکی راستی‌سی">
-        </a>
+        {% include "partials/enamad_badge.html" with badge=PLATFORM_ENAMAD_BADGE badge_class="trust" %}
         {% endif %}
       </div>
     </div>

@@ -399,6 +399,7 @@ def shop_settings(request):
         "SHOP_ENAMAD_VERIFICATION_META_CONTENT": (
             enamad_verification_meta.content if enamad_verification_meta else ""
         ),
+        "SHOP_ENAMAD_BADGE": enamad_badge,
         "SHOP_ENAMAD_BADGE_PROFILE_URL": enamad_badge.profile_url if enamad_badge else "",
         "SHOP_ENAMAD_BADGE_LOGO_URL": enamad_badge.logo_url if enamad_badge else "",
         # ساختارِ ظاهر (Template) — فقط برایِ مسیرهایِ Builder-aware از

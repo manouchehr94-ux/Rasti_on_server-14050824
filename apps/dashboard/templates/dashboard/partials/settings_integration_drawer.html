@@ -50,27 +50,24 @@
       <fieldset class="int-fieldset"{% if group.title %} data-testid="int-stage-{{ forloop.counter }}" data-state="{{ group.state }}"{% endif %}>
         {% if group.title %}<legend>{{ group.title }} <span class="int-chip int-chip--{% if group.state == 'ready' %}ok{% elif group.state == 'invalid' %}danger{% elif group.state == 'empty' %}off{% else %}info{% endif %}">{{ group.text }}</span></legend>
         <p class="au-hint">{{ group.hint }}</p>{% endif %}
-        {% for field in group.fields %}
-        {% if field.kind == "checkbox" %}
-        <div class="au-field au-field--check">
-          <label for="int-{{ code }}-{{ field.key }}"><input id="int-{{ code }}-{{ field.key }}" type="checkbox" name="{{ field.key }}" value="1" data-testid="int-{{ field.key }}" aria-describedby="int-{{ code }}-{{ field.key }}-real"{% if row.form_values|get_item:field.key != "0" %} checked{% endif %}> {{ field.label }}</label>
-          {% if code == "enamad" %}
-          <p class="rs-real-state rs-real-state--{% if row.enamad.badge_shown %}on{% else %}off{% endif %}" id="int-{{ code }}-{{ field.key }}-real" data-testid="enamad-real-display" data-shown="{% if row.enamad.badge_shown %}1{% else %}0{% endif %}">
-            <b>این فقط انتخاب شماست.</b> وضعیت واقعی: {% if row.enamad.badge_shown %}نماد همین حالا نمایش داده می‌شود.{% else %}نماد نمایش داده نمی‌شود — {{ row.enamad.badge_reason }}{% endif %}
-          </p>
-          {% endif %}
+        {% if group.key == "badge" %}
+        <div class="au-field{% if row.field_error.field == 'enamad_badge_snippet' %} au-field--error{% endif %}">
+          <label for="int-enamad-badge-snippet">کد کامل نماد اینماد</label>
+          <textarea id="int-enamad-badge-snippet" class="au-textarea au-input--ltr" name="enamad_badge_snippet" rows="5" maxlength="4096" dir="ltr" autocomplete="off" spellcheck="false" aria-describedby="int-enamad-snippet-hint{% if row.field_error.field == 'enamad_badge_snippet' %} int-enamad-snippet-error{% endif %}"{% if row.field_error.field == 'enamad_badge_snippet' %} aria-invalid="true"{% endif %}></textarea>
+          <p class="au-hint" id="int-enamad-snippet-hint">کل کد رسمی شامل پیوند و تصویر را از پنل اینماد کپی کنید. فقط شناسه و کد استخراج و ذخیره می‌شوند؛ HTML اجرا یا ذخیره نمی‌شود. کادر خالی اطلاعات قبلی را تغییر نمی‌دهد. دامنه باید هم در راستی‌سی تأیید شده و هم در پنل اینماد برای همین نماد ثبت شده باشد.</p>
+          {% if row.field_error.field == 'enamad_badge_snippet' %}<p class="rs-field-error" role="alert" id="int-enamad-snippet-error" data-testid="int-field-error">{{ row.field_error.message }} کد را دوباره بچسبانید.</p>{% endif %}
+          {% if row.enamad.identified_id %}<p data-testid="enamad-identified-id">شناسهٔ ذخیره‌شده: <b dir="ltr">{{ row.enamad.identified_id }}</b></p>{% endif %}
         </div>
-        {% else %}
-        {% with err=row.field_error %}
-        <div class="au-field{% if err.field == field.key %} au-field--error{% endif %}">
-          <label for="int-{{ code }}-{{ field.key }}">{{ field.label }}</label>
-          <input class="au-input au-input--ltr" id="int-{{ code }}-{{ field.key }}" type="{% if field.is_secret %}password{% else %}text{% endif %}" name="{{ field.key }}" dir="ltr" autocomplete="off" spellcheck="false" maxlength="600"
-                 value="{% if not field.is_secret %}{{ row.form_values|get_item:field.key }}{% endif %}" placeholder="{{ field.placeholder }}"
-                 {% if err.field == field.key %}aria-invalid="true" aria-describedby="int-{{ code }}-{{ field.key }}-err"{% endif %}>
-          {% if err.field == field.key %}<p class="rs-field-error" id="int-{{ code }}-{{ field.key }}-err" role="alert" data-testid="int-field-error">{{ err.message }}</p>{% endif %}
-        </div>
-        {% endwith %}
+        <details data-testid="enamad-advanced"><summary>تنظیمات پیشرفته — ورود دستی شناسه و کد</summary>
+          {% for field in group.advanced_fields %}{% include "dashboard/partials/settings_integration_field.html" %}{% endfor %}
+        </details>
+        <input type="hidden" name="enamad_visibility_submitted" value="1">
+        <label><input type="checkbox" name="enamad_clear_badge" value="1"> حذف صریح شناسه و کد ذخیره‌شدهٔ نماد</label>
+        {% elif group.key == "meta" %}
+        <label><input type="checkbox" name="enamad_clear_meta" value="1"> حذف صریح متاتگ احراز فنی ذخیره‌شده</label>
         {% endif %}
+        {% for field in group.fields %}
+        {% include "dashboard/partials/settings_integration_field.html" %}
         {% endfor %}
       </fieldset>
       {% endfor %}

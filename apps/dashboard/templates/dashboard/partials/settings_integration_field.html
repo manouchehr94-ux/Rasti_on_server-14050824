@@ -1,0 +1,21 @@
+{% load persian dashboard_extras %}
+        {% if field.kind == "checkbox" %}
+        <div class="au-field au-field--check">
+          <label for="int-{{ code }}-{{ field.key }}"><input id="int-{{ code }}-{{ field.key }}" type="checkbox" name="{{ field.key }}" value="1" data-testid="int-{{ field.key }}" aria-describedby="int-{{ code }}-{{ field.key }}-real"{% if row.form_values|get_item:field.key != "0" %} checked{% endif %}> {{ field.label }}</label>
+          {% if code == "enamad" %}
+          <p class="rs-real-state rs-real-state--{% if row.enamad.badge_shown %}on{% else %}off{% endif %}" id="int-{{ code }}-{{ field.key }}-real" data-testid="enamad-real-display" data-shown="{% if row.enamad.badge_shown %}1{% else %}0{% endif %}">
+            <b>این فقط انتخاب شماست.</b> وضعیت کد نماد: {% if row.enamad.badge_shown %}کد نماد روی دامنهٔ اختصاصیِ تأییدشده درج می‌شود؛ بارگیری تصویر و وضعیت رسمی در اختیار اینماد است.{% else %}نماد نمایش داده نمی‌شود — {{ row.enamad.badge_reason }}{% endif %}
+          </p>
+          {% endif %}
+        </div>
+        {% else %}
+        {% with err=row.field_error %}
+        <div class="au-field{% if err.field == field.key %} au-field--error{% endif %}">
+          <label for="int-{{ code }}-{{ field.key }}">{{ field.label }}</label>
+          <input class="au-input au-input--ltr" id="int-{{ code }}-{{ field.key }}" type="{% if field.is_secret %}password{% else %}text{% endif %}" name="{{ field.key }}" dir="ltr" autocomplete="off" spellcheck="false" maxlength="600"
+                 value="{% if not field.is_secret %}{{ row.form_values|get_item:field.key }}{% endif %}" placeholder="{{ field.placeholder }}"
+                 {% if err.field == field.key %}aria-invalid="true" aria-describedby="int-{{ code }}-{{ field.key }}-err"{% endif %}>
+          {% if err.field == field.key %}<p class="rs-field-error" id="int-{{ code }}-{{ field.key }}-err" role="alert" data-testid="int-field-error">{{ err.message }}</p>{% endif %}
+        </div>
+        {% endwith %}
+        {% endif %}

@@ -1,4 +1,3 @@
-import shutil
 import tempfile
 from decimal import Decimal
 from io import BytesIO
@@ -10,6 +9,7 @@ from django.urls import reverse
 from PIL import Image
 
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 
 from apps.catalog.models import Category, Product, ProductImage, ProductVariant, Vendor
 from apps.catalog.services.product_image_service import add_product_image
@@ -24,16 +24,14 @@ def _make_image_file(name="photo.jpg", color="#00ff00"):
     return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/jpeg")
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProductImageViewsTestCase(TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        from django.conf import settings
-
-        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
-        super().tearDownClass()
-
     def setUp(self):
+        # Subclasses run in separate Django parallel workers. An import-time
+        # MEDIA_ROOT is inherited by all of them, so one class's cleanup can
+        # delete another worker's upload directory mid-save.
+        media = tempfile.TemporaryDirectory(prefix="rastisi-product-image-test-")
+        self.addCleanup(media.cleanup)
+        self.enterContext(override_settings(MEDIA_ROOT=media.name))
         self.store = Store.objects.get(slug="akhlaghi")
         self.vendor = Vendor.objects.create(store=self.store, name="فروشگاه", slug="shop-piv")
         self.category = Category.objects.create(store=self.store, name="دسته", slug="cat-piv")
@@ -41,12 +39,13 @@ class ProductImageViewsTestCase(TestCase):
             store=self.store, vendor=self.vendor, category=self.category, name="کالای تصویری", slug="piv-product",
             sku="SKU-PIV1", price=Decimal("500000"), stock=5,
         )
-        self.staff = User.objects.create_user(username="09121133001", password="pass12345", is_staff=True)
+        self.password = get_random_string(32)
+        self.staff = User.objects.create_user(username="09121133001", password=self.password, is_staff=True)
         StoreMembership.objects.create(
             store=self.store, user=self.staff, role=StoreMembership.Role.OWNER,
             status=StoreMembership.MembershipStatus.ACTIVE, accepted_at=timezone.now(),
         )
-        self.client.login(username="09121133001", password="pass12345")
+        self.client.login(username="09121133001", password=self.password)
 
 
 class ProductImagesModalViewTests(ProductImageViewsTestCase):

@@ -1,4 +1,3 @@
-import shutil
 import tempfile
 from decimal import Decimal
 from io import BytesIO
@@ -37,16 +36,12 @@ def _make_image_file(name="photo.jpg", size=(800, 600), fmt="JPEG", color="#ff00
     return SimpleUploadedFile(name, buffer.getvalue(), content_type=content_type)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProductImageServiceTestCase(TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        from django.conf import settings
-
-        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
-        super().tearDownClass()
-
     def setUp(self):
+        # Parallel subclasses must not delete each other's active upload root.
+        media = tempfile.TemporaryDirectory(prefix="rastisi-image-service-test-")
+        self.addCleanup(media.cleanup)
+        self.enterContext(override_settings(MEDIA_ROOT=media.name))
         self.store = _akhlaghi()
         vendor = Vendor.objects.create(store=self.store, name="فروشگاه نمونه", slug="pi-shop")
         from apps.catalog.models import Category
