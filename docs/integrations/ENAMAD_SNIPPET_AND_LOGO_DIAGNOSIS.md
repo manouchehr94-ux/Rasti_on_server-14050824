@@ -14,6 +14,14 @@ uses HTTPS trustseal.enamad.ir `/`; the image uses HTTPS trustseal.enamad.ir
 `/logo.aspx`; both carry the same `id` and `Code` values. Manual identifier entry
 is therefore not the observed discrepancy.
 
+Subsequent owner-provided Chrome evidence establishes a separate profile-link
+case-sensitivity defect: the same token works with lowercase `code`, while
+uppercase `Code` returns 404 on the profile endpoint. Profile URLs now use
+`code` without changing any character of the authorization token. This is
+owner-browser evidence, distinct from the inspection proxy results below.
+The image endpoint remains independently assessed; its emitted `Code` spelling
+is unchanged.
+
 Both live elements declare `referrerpolicy="origin"`. The live image is missing
 the official `code` and `style="cursor:pointer"` attributes. The live anchor has
 `rel="noopener noreferrer"`; noreferrer suppresses the profile-navigation
@@ -49,6 +57,12 @@ The shared desktop/browser tool was unavailable; the project browser fallback
 was attempted. Owner-browser extension blocks and the owner's actual image
 response remain unverified.
 
+On 2026-11-17, separate controlled probes of BOTH parameter spellings on BOTH
+profile and image endpoints again returned the same 503/Envoy timeout signature
+with the origin Referer. This network cannot establish image-endpoint parameter
+semantics or successful image loading. The owner-proven profile correction does
+not establish that the separate broken image has been fixed.
+
 The owner explicitly states that current official badge/business status has NOT
 been independently confirmed. Do not label the account valid or invalid, and do
 not claim that this markup correction alone makes the external logo load.
@@ -73,7 +87,7 @@ The merchant integration drawer and platform configuration form now lead with
 one multiline field, «کد کامل نماد اینماد». The advanced manual ID/Code route
 remains available. The parser accepts the official single a/img shape, quoting,
 entity escaping, whitespace and safe presentation variations. It checks exact
-HTTPS origin and paths, exactly one id/Code pair in each URL, matching pairs and
+HTTPS origin and paths, exactly one id and one Code/code pair in each URL (mixed aliases and duplicates are rejected), matching pairs and
 any image code attribute, using the existing identifier validator. It rejects
 scripts, event handlers, extra elements, ambiguous parameters, unsafe styles,
 lookalike hosts, userinfo, incorrect paths and oversized/malformed input.
@@ -95,8 +109,10 @@ to submit this real marker, retaining every previous assertion.
 A shared static renderer generates the trusted HTTPS URLs, both origin referrer
 policies, escaped image code, cursor style, official empty alt, and an accessible
 anchor label. It retains noopener without the conflicting noreferrer. No pasted
-HTML is marked safe or executed. URL identifiers are unchanged and no unsolicited
-parameters are added.
+HTML is marked safe or executed. URL identifier values are unchanged. The profile query key is `code` per the
+owner-proven behavior; the image query key remains `Code`. No extra parameters
+are added, and both legacy uppercase and lowercase copied snippet keys are
+accepted only when the URL pair and any image code attribute agree.
 
 The official merchant badge is rendered once by the canonical storefront shell,
 independently of optional decorative footer badges or a disabled footer. Its own
@@ -122,6 +138,16 @@ fingerprints. Real desktop/mobile footer captures are regenerated with the
 existing `capture_global_region_previews --region footer` command against an
 isolated local synthetic store; the unchanged gallery tests verify freshness
 and declared visual twins. No Production media or issued badge is used.
+
+A subsequent full CI run exposed a pre-existing parallel media-fixture race:
+image-view test subclasses shared an import-time temporary MEDIA_ROOT, so one
+worker could remove another worker's upload path. A deterministic two-process
+FileSystemStorage probe reproduces the same FileNotFoundError with a shared
+root and succeeds with isolated roots. The fixture now owns a temporary root
+per test with registered cleanup. The same race was then reproduced in the
+related catalog image-service test base and corrected there as well. All
+assertions and production storage remain
+unchanged. No failure allowlist or CI gate is modified.
 
 Final SHA, exact test counts and full CI result are recorded in the PR after
 verification. No merging or deployment is part of this task.

@@ -142,7 +142,7 @@ class EnamadBadgeIdentifiers:
 
     @property
     def profile_url(self) -> str:
-        return f"{TRUSTSEAL_BASE_URL}?id={self.enamad_id}&Code={self.auth_code}"
+        return f"{TRUSTSEAL_BASE_URL}?id={self.enamad_id}&code={self.auth_code}"
 
     @property
     def logo_url(self) -> str:
@@ -252,12 +252,12 @@ def _badge_url_pair(raw, path):
                 or url.path != path or url.fragment or url.username or url.password):
             raise ValueError
         pairs = parse_qsl(url.query, keep_blank_values=True, strict_parsing=True, max_num_fields=2)
-        if len(pairs) != 2 or {k for k, _ in pairs} != {"id", "Code"}:
+        if len(pairs) != 2 or {k for k, _ in pairs} not in ({"id", "Code"}, {"id", "code"}):
             raise ValueError
         values = dict(pairs)
         if any(value != value.strip() for value in values.values()):
             raise ValueError
-        badge = parse_enamad_badge_identifiers(values["id"], values["Code"])
+        badge = parse_enamad_badge_identifiers(values["id"], values.get("Code", values.get("code")))
         if badge is None:
             raise ValueError
         return badge

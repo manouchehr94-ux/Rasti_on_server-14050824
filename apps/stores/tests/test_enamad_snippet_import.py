@@ -53,7 +53,7 @@ def assert_badge(case, html):
     case.assertEqual(image['style'], 'cursor:pointer')
     case.assertEqual(a['target'], '_blank')
     case.assertNotIn('noreferrer', a.get('rel', ''))
-    case.assertEqual(parse_qs(urlsplit(a['href']).query), {'id': [BADGE_ID], 'Code': [BADGE_CODE]})
+    case.assertEqual(parse_qs(urlsplit(a['href']).query), {'id': [BADGE_ID], 'code': [BADGE_CODE]})
     case.assertEqual(parse_qs(urlsplit(image['src']).query), {'id': [BADGE_ID], 'Code': [BADGE_CODE]})
 
 
@@ -67,6 +67,21 @@ class SnippetParserTests(SimpleTestCase):
     def test_attribute_order_and_inert_presentation_are_allowed(self):
         raw = snippet().replace("<a referrerpolicy=", "<a class='seal' title='نماد' referrerpolicy=").replace("<img referrerpolicy=", "<img width='125' height='136' border='0' referrerpolicy=")
         self.assertEqual(parse_enamad_badge_snippet(raw).auth_code, BADGE_CODE)
+
+    def test_lowercase_profile_code_and_legacy_snippets_preserve_token_case(self):
+        for raw in (snippet(), snippet().replace('&Code=', '&code=', 1), snippet().replace('&Code=', '&code=')):
+            with self.subTest(raw=raw):
+                badge = parse_enamad_badge_snippet(raw)
+                self.assertEqual(badge.auth_code, BADGE_CODE)
+                self.assertEqual(parse_qs(urlsplit(badge.profile_url).query), {'id': [BADGE_ID], 'code': [BADGE_CODE]})
+                self.assertEqual(parse_qs(urlsplit(badge.logo_url).query), {'id': [BADGE_ID], 'Code': [BADGE_CODE]})
+
+    def test_ambiguous_code_aliases_and_duplicates_are_rejected(self):
+        for extra in ('&code=' + BADGE_CODE, '&Code=' + BADGE_CODE, '&code=DifferentSyntheticCode'):
+            for position in (1, 2):
+                raw = snippet().replace('&Code=' + BADGE_CODE, '&Code=' + BADGE_CODE + extra, position)
+                with self.subTest(extra=extra, position=position), self.assertRaises(EnamadBadgeError):
+                    parse_enamad_badge_snippet(raw)
 
     def test_no_network_lookup(self):
         with mock.patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
@@ -98,7 +113,7 @@ class SnippetParserTests(SimpleTestCase):
                          ('https://trustseal.enamad.ir', 'https://evil.example@trustseal.enamad.ir'),
                          ('https://trustseal.enamad.ir', 'https://trustseal.enamad.ir:8443'),
                          ('logo.aspx', 'other.aspx'), ('?id=', '?id=999&id='), ('&Code=', '&other=x&Code='),
-                         ('&Code=', '&code='), (BADGE_ID, '1%0A'), (BADGE_CODE, 'bad%22code')]:
+                         ('&Code=', '&cOdE='), (BADGE_ID, '1%0A'), (BADGE_CODE, 'bad%22code')]:
             with self.subTest(new=new), self.assertRaises(EnamadBadgeError):
                 parse_enamad_badge_snippet(snippet().replace(old, new))
 

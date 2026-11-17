@@ -66,13 +66,13 @@ class PlatformEnamadBadgeRenderingTests(TestCase):
     def test_badge_renders_when_enabled_and_configured(self):
         self._enable_badge()
         response = self.client.get("/", HTTP_HOST="rastisi.localhost")
-        self.assertContains(response, "https://trustseal.enamad.ir/?id=998877&amp;Code=platformAuthCode123")
+        self.assertContains(response, "https://trustseal.enamad.ir/?id=998877&amp;code=platformAuthCode123")
 
     def test_badge_renders_sitewide_not_only_home(self):
         self._enable_badge()
         response = self.client.get("/features/", HTTP_HOST="rastisi.localhost")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "https://trustseal.enamad.ir/?id=998877&amp;Code=platformAuthCode123")
+        self.assertContains(response, "https://trustseal.enamad.ir/?id=998877&amp;code=platformAuthCode123")
 
     def test_configured_but_disabled_switch_does_not_render(self):
         config, _ = PlatformConfiguration.objects.get_or_create(pk=1)

@@ -150,16 +150,16 @@ class EnamadBadgeParserTests(TestCase):
     trustseal.enamad.ir origin."""
 
     def test_accepts_valid_id_and_code(self):
-        identifiers = parse_enamad_badge_identifiers("221617", "94MqMPJEnuahlSHjb9kP")
+        identifiers = parse_enamad_badge_identifiers("221617", "TestBadgeAaAaAaAa")
         self.assertEqual(identifiers.enamad_id, "221617")
-        self.assertEqual(identifiers.auth_code, "94MqMPJEnuahlSHjb9kP")
+        self.assertEqual(identifiers.auth_code, "TestBadgeAaAaAaAa")
         self.assertEqual(
             identifiers.profile_url,
-            "https://trustseal.enamad.ir/?id=221617&Code=94MqMPJEnuahlSHjb9kP",
+            "https://trustseal.enamad.ir/?id=221617&code=TestBadgeAaAaAaAa",
         )
         self.assertEqual(
             identifiers.logo_url,
-            "https://trustseal.enamad.ir/logo.aspx?id=221617&Code=94MqMPJEnuahlSHjb9kP",
+            "https://trustseal.enamad.ir/logo.aspx?id=221617&Code=TestBadgeAaAaAaAa",
         )
 
     def test_both_blank_is_not_configured_not_an_error(self):
@@ -171,11 +171,11 @@ class EnamadBadgeParserTests(TestCase):
 
     def test_only_code_present_is_rejected(self):
         with self.assertRaises(EnamadBadgeError):
-            parse_enamad_badge_identifiers("", "94MqMPJEnuahlSHjb9kP")
+            parse_enamad_badge_identifiers("", "TestBadgeAaAaAaAa")
 
     def test_non_numeric_id_rejected(self):
         with self.assertRaises(EnamadBadgeError):
-            parse_enamad_badge_identifiers("<script>", "94MqMPJEnuahlSHjb9kP")
+            parse_enamad_badge_identifiers("<script>", "TestBadgeAaAaAaAa")
 
     def test_id_with_html_injection_rejected(self):
         with self.assertRaises(EnamadBadgeError):
@@ -218,16 +218,16 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
     def test_badge_renders_on_verified_custom_domain(self):
         integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         context = shop_settings(self._request("merchant-badge.example"))
         self.assertEqual(
             context["SHOP_ENAMAD_BADGE_PROFILE_URL"],
-            "https://trustseal.enamad.ir/?id=221617&Code=94MqMPJEnuahlSHjb9kP",
+            "https://trustseal.enamad.ir/?id=221617&code=TestBadgeAaAaAaAa",
         )
         self.assertEqual(
             context["SHOP_ENAMAD_BADGE_LOGO_URL"],
-            "https://trustseal.enamad.ir/logo.aspx?id=221617&Code=94MqMPJEnuahlSHjb9kP",
+            "https://trustseal.enamad.ir/logo.aspx?id=221617&Code=TestBadgeAaAaAaAa",
         )
 
     def test_badge_renders_sitewide_not_only_home(self):
@@ -235,7 +235,7 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
         normal trust-badge display and is not restricted to the home page."""
         integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         context = shop_settings(self._request("merchant-badge.example", "/products/"))
         self.assertTrue(context["SHOP_ENAMAD_BADGE_PROFILE_URL"])
@@ -245,7 +245,7 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
         ever having stored a technical-verification meta tag."""
         integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         context = shop_settings(self._request("merchant-badge.example"))
         self.assertTrue(context["SHOP_ENAMAD_BADGE_PROFILE_URL"])
@@ -263,7 +263,7 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
     def test_no_badge_on_unverified_custom_domain(self):
         integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         StoreDomain.objects.filter(hostname="merchant-badge.example").update(
             verification_status=StoreDomain.VerificationStatus.UNVERIFIED, verified_at=None,
@@ -274,7 +274,7 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
     def test_no_badge_on_platform_owned_subdomain(self):
         integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         with override_settings(ALLOWED_HOSTS=["badge-merchant.rastisi.localhost", "testserver"]):
             context = shop_settings(self._request("badge-merchant.rastisi.localhost"))
@@ -283,7 +283,7 @@ class MerchantEnamadBadgeRenderingTests(TestCase):
     def test_corrupt_legacy_badge_value_fails_closed(self):
         connection = integration_service.connect(
             store=self.store, provider_code="enamad",
-            values={"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}, actor=None,
+            values={"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}, actor=None,
         )
         # Simulate a legacy/corrupted stored value (e.g. only one of the two
         # identifiers survives some future migration) bypassing validation.
@@ -326,7 +326,7 @@ class EnamadBadgeDisplayToggleTests(TestCase):
         ShopSettings.provision_for(self.store)
         StoreDomain.objects.create(store=self.store, hostname="toggle-badge.example", is_primary=True, domain_type=StoreDomain.DomainType.CUSTOM_DOMAIN,
                                    verification_status=StoreDomain.VerificationStatus.VERIFIED, verified_at=timezone.now())
-        self.values = {"enamad_id": "221617", "enamad_auth_code": "94MqMPJEnuahlSHjb9kP"}
+        self.values = {"enamad_id": "221617", "enamad_auth_code": "TestBadgeAaAaAaAa"}
 
     def _ctx(self):
         request = RequestFactory().get("/", HTTP_HOST="toggle-badge.example")
