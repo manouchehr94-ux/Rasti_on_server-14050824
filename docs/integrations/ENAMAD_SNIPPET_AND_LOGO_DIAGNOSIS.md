@@ -117,5 +117,11 @@ platform public layouts and platform-host isolation. A headless synthetic HTTP
 fake image, onerror handler or injected script. It is a QA simulation, not a
 Production workaround or proof of eNamad's real status.
 
+The footer renderer changes also invalidate the Vision Studio gallery preview
+fingerprints. Real desktop/mobile footer captures are regenerated with the
+existing `capture_global_region_previews --region footer` command against an
+isolated local synthetic store; the unchanged gallery tests verify freshness
+and declared visual twins. No Production media or issued badge is used.
+
 Final SHA, exact test counts and full CI result are recorded in the PR after
 verification. No merging or deployment is part of this task.
