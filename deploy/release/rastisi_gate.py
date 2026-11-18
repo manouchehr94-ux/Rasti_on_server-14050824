@@ -9,6 +9,9 @@ Verbs (the original command line arrives in SSH_ORIGINAL_COMMAND):
     version
     status
     stage    <sha40> <sha256>                 artifact (tar.gz) is read from STDIN, verified, unpacked, venv built
+    upload-offset <sha40> <sha256> <size>
+    upload-chunk  <sha40> <sha256> <size> <offset> <chunk_sha256>
+    stage-upload  <sha40> <sha256> <size>
     activate <release_id> <sha40> <from_sha40|-> [allow-migrations] [destructive-ack=<phrase>] [dry-run] [run=<run_id>]
     rollback [<release_id>|previous] [unsafe-ack=<phrase>] [run=<run_id>]
     follow   <run_id> <offset>                prints new log bytes, then a STATE line (reconnectable at any time)
@@ -22,6 +25,7 @@ one (a second ``rollback`` would flip the system back again).
 duplicate a deployment. The caller reconnects and keeps calling ``follow`` until STATE is 'done'.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -33,6 +37,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rastisi_common as C  # noqa: E402
+from release_upload import CHUNK_SIZE, Upload  # noqa: E402
+from rastisi_release import Lock  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RELEASE_TOOL = HERE / "rastisi_release.py"
@@ -59,7 +65,7 @@ def tool_version():
 
 
 def run_dir(cfg, run_id):
-    if not C.RUN_ID_RE.match(run_id or ""):
+    if not C.RUN_ID_RE.fullmatch(run_id or ""):
         raise ValueError("invalid run id")
     return cfg.state / "runs" / run_id
 
@@ -73,13 +79,13 @@ def spawn_detached(cfg, run_id, argv):
     tool is killed, so a follower can always tell 'running' from 'done' from 'died'."""
     rd = cfg.state / "runs" / run_id
     rd.mkdir(parents=True, exist_ok=True)
-    log = open(str(rd / "log"), "ab", buffering=0)
-    proc = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "--supervise", run_id] + argv,
-        stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, close_fds=True, start_new_session=True,
-        env=dict(os.environ),
-    )
-    (rd / "pid").write_text("%d\n" % proc.pid, encoding="utf-8")
+    with (rd / "log").open("ab", buffering=0) as log:
+        proc = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--supervise", run_id] + argv,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, close_fds=True, start_new_session=True,
+            env=dict(os.environ),
+        )
+    C.atomic_write_text(rd / "pid", "%d\n" % proc.pid)
     return proc.pid
 
 
@@ -87,11 +93,11 @@ def supervise(run_id, argv):
     cfg = C.Config()
     rd = run_dir(cfg, run_id)
     proc = subprocess.Popen(argv)
-    (rd / "child_pid").write_text("%d\n" % proc.pid, encoding="utf-8")
+    C.atomic_write_text(rd / "child_pid", "%d\n" % proc.pid)
     code = proc.wait()
     marker = rd / "exit_code"
     if not marker.exists():
-        marker.write_text("%d\n" % (code if code >= 0 else 128 - code), encoding="utf-8")
+        C.atomic_write_text(marker, "%d\n" % (code if code >= 0 else 128 - code))
     return 0
 
 
@@ -113,15 +119,22 @@ def pid_alive(pid):
 def v_stage(cfg, argv):
     if len(argv) != 2 or not C.SHA_RE.match(argv[0]) or not C.SHA256_RE.match(argv[1]):
         return fail(C.EXIT_POLICY, "usage: stage <sha40> <sha256>")
-    incoming = cfg.staging
-    incoming.mkdir(parents=True, exist_ok=True)
-    target = incoming / ("incoming-%s-%d.tar.gz" % (C.utc_stamp(), os.getpid()))
+    spool = Upload(cfg)
+    if not spool.lock.acquire():
+        return fail(C.EXIT_BUSY, "another upload command is in progress")
+    try:
+        return legacy_stage(cfg, argv)
+    finally:
+        spool.lock.release()
+
+
+def legacy_stage(cfg, argv):
+    target = cfg.staging / ("incoming-%s-%d.tar.gz" % (C.utc_stamp(), os.getpid()))
     limit = cfg.int("max_artifact_mb", 400) * 1024 * 1024
     size = 0
-    import hashlib
     h = hashlib.sha256()
     try:
-        with open(str(target), "wb") as fh:
+        with open(str(target), "xb") as fh:
             while True:
                 block = sys.stdin.buffer.read(1 << 20)
                 if not block:
@@ -143,15 +156,106 @@ def v_stage(cfg, argv):
             pass
 
 
+def staging_busy(cfg, run_id):
+    if not run_id:
+        return False
+    rd = run_dir(cfg, run_id)
+    if (rd / "exit_code").exists():
+        return False
+    # If a launcher died before recording a PID, require operator inspection.
+    for name in ("pid", "child_pid"):
+        path = rd / name
+        if path.exists() and pid_alive(int(path.read_text(encoding="ascii"))):
+            return True
+    return not (rd / "pid").exists()
+
+
+def upload_request(cfg, argv, action):
+    expected = 5 if action == "chunk" else 3
+    if len(argv) != expected:
+        raise ValueError("invalid upload request arguments")
+    sha, digest, size_arg = argv[:3]
+    if not C.SHA_RE.fullmatch(sha) or not C.SHA256_RE.fullmatch(digest):
+        raise ValueError("upload requires a full commit SHA and SHA256")
+    if not re.fullmatch(r"[0-9]{1,12}", size_arg):
+        raise ValueError("invalid artifact size")
+    size = int(size_arg)
+    if not 0 < size <= cfg.int("max_artifact_mb", 400) * 1024 * 1024:
+        raise ValueError("artifact exceeds configured size bounds")
+    if action == "chunk":
+        offset_arg, chunk_hash = argv[3:]
+        if not re.fullmatch(r"[0-9]{1,12}", offset_arg) or not C.SHA256_RE.fullmatch(chunk_hash):
+            raise ValueError("invalid chunk offset or checksum")
+        offset = int(offset_arg)
+        if offset >= size or offset % CHUNK_SIZE:
+            raise ValueError("invalid chunk boundary")
+        length = min(CHUNK_SIZE, size - offset)
+        data = sys.stdin.buffer.read(length + 1)
+        if len(data) != length:
+            return fail(C.EXIT_POLICY, "incomplete or oversized chunk; checkpoint unchanged")
+        if hashlib.sha256(data).hexdigest() != chunk_hash:
+            return fail(C.EXIT_POLICY, "chunk checksum mismatch; checkpoint unchanged")
+    spool = Upload(cfg)
+    if not spool.lock.acquire():
+        return fail(C.EXIT_BUSY, "another upload command is in progress")
+    try:
+        state = spool.session(sha, digest, size, lambda key: staging_busy(cfg, key))
+        if action == "stage":
+            if state.get("run") and (run_dir(cfg, state["run"]) / "exit_code").exists():
+                exit_code = (run_dir(cfg, state["run"]) / "exit_code").read_text().strip()
+                if exit_code == str(C.EXIT_BUSY):
+                    del state["run"]
+            if "run" not in state:
+                spool.finish(state)
+                state["run"] = "%s-%s" % (C.utc_stamp(), os.urandom(4).hex())
+                spool.save(state)
+            actor = os.environ.get("RASTISI_ACTOR", "")
+            return start_or_resume(cfg, state["run"], release_cmd(
+                "stage", "--artifact", str(spool.ready), "--sha", sha, "--sha256", digest, "--actor", actor,
+            ))
+        if action == "chunk":
+            spool.append(state, offset, data)
+        out(json.dumps({"offset": state["offset"], "chunk_size": CHUNK_SIZE}))
+        return 0
+    finally:
+        spool.lock.release()
+
+
+def v_upload_offset(cfg, argv):
+    return upload_request(cfg, argv, "offset")
+
+
+def v_upload_chunk(cfg, argv):
+    return upload_request(cfg, argv, "chunk")
+
+
+def v_stage_upload(cfg, argv):
+    return upload_request(cfg, argv, "stage")
+
+
 def start_or_resume(cfg, given_run_id, cmd):
-    """Start the run, or return the one already started under this id (idempotent)."""
+    """Serialize launch and bind each idempotency key to its original command."""
     run_id = given_run_id or "%s-%s" % (C.utc_stamp(), os.urandom(4).hex())
-    if (cfg.state / "runs" / run_id / "pid").exists():
+    rd = run_dir(cfg, run_id)
+    rd.mkdir(parents=True, exist_ok=True)
+    lock = Lock(rd / "launch.lock")
+    if not lock.acquire():
+        return fail(C.EXIT_BUSY, "run is being launched; retry the same id")
+    try:
+        fingerprint = hashlib.sha256(json.dumps(cmd).encode()).hexdigest()
+        request = rd / "request"
+        if request.exists():
+            if request.read_text(encoding="ascii").strip() != fingerprint:
+                return fail(C.EXIT_POLICY, "run id belongs to a different request")
+        else:
+            if any((rd / marker).exists() for marker in ("pid", "child_pid", "exit_code")):
+                return fail(C.EXIT_POLICY, "existing run predates request binding; inspect it with follow")
+            C.atomic_write_text(request, fingerprint + "\n")
+            spawn_detached(cfg, run_id, cmd + ["--run-id", run_id])
         out("RUN %s" % run_id)
         return 0
-    spawn_detached(cfg, run_id, cmd + ["--run-id", run_id])
-    out("RUN %s" % run_id)
-    return 0
+    finally:
+        lock.release()
 
 
 def split_run_flag(argv):
@@ -160,7 +264,7 @@ def split_run_flag(argv):
     for a in argv:
         if a.startswith("run="):
             given = a.split("=", 1)[1]
-            if not C.RUN_ID_RE.match(given):
+            if not C.RUN_ID_RE.fullmatch(given):
                 raise ValueError("invalid run id")
         else:
             rest.append(a)
@@ -273,7 +377,8 @@ def v_backup_receipt(cfg, argv):
 
 
 VERBS = {"backup-receipt": v_backup_receipt, "version": v_version, "status": v_status, "stage": v_stage, "activate": v_activate, "rollback": v_rollback,
-         "follow": v_follow, "result": v_result}
+         "follow": v_follow, "result": v_result, "upload-offset": v_upload_offset,
+         "upload-chunk": v_upload_chunk, "stage-upload": v_stage_upload}
 
 
 def main(argv=None):

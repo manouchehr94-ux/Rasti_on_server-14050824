@@ -182,12 +182,28 @@ def exercise_ssh_release(ssh):
         'proc_root':'/test/fake-service/proc', 'health_timeout':'6',
     })
     with conf.open('w') as fh: parser.write(fh)
-    def stage(**kwargs):
+    def stage(interrupt=False, **kwargs):
+        import hashlib
+        import shlex
+
         art, sha, digest = make_artifact(root, **kwargs)
-        with open(art,'rb') as src:
-            result = subprocess.run(ssh+['stage %s %s' % (sha,digest)],stdin=src,capture_output=True,text=True,timeout=120)
+        if interrupt:
+            identity = f'{sha} {digest} {art.stat().st_size}'
+            offset = json.loads(run(ssh + ['upload-offset ' + identity]).stdout)
+            with art.open('rb') as source:
+                chunk = source.read(offset['chunk_size'])
+            chunk_hash = hashlib.sha256(chunk).hexdigest()
+            aborted = subprocess.run(ssh + [f'upload-chunk {identity} 0 {chunk_hash}'],
+                                     input=chunk[:len(chunk) // 2], capture_output=True, timeout=30)
+            assert aborted.returncode == 4, aborted.stderr
+            assert json.loads(run(ssh + ['upload-offset ' + identity]).stdout)['offset'] == 0
+        result = subprocess.run([
+            sys.executable, '/repo/deploy/release/remote_client.py', 'stage',
+            '--sha', sha, '--sha256', digest, '--artifact', str(art),
+        ], env=dict(os.environ, RASTISI_SSH=shlex.join(ssh)), capture_output=True, text=True, timeout=180)
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout.strip().splitlines()[-1])['release'],sha
+        return result.stdout.strip(), sha
+
     def start(rid,sha):
         return run(ssh+['activate %s %s -' % (rid,sha)]).stdout.split()[1]
     def finish(run_id):
@@ -200,16 +216,16 @@ def exercise_ssh_release(ssh):
                 return code
             time.sleep(0.2)
         raise AssertionError('detached SSH deployment did not finish')
-    first,sha = stage()
+    first,sha = stage(interrupt=True)
     assert finish(start(first,sha)) == 0
     control.write_text(json.dumps({'smoke_delay':5}))
     second,sha2 = stage()
+    other,sha3 = stage()
     run_id = start(second,sha2)
     # Kill an actual SSH follower. The detached activation continues.
     follower = subprocess.Popen(ssh+['follow %s 0' % run_id],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     follower.kill()
     follower.communicate()
-    other,sha3 = stage()
     competing = start(other,sha3)
     assert finish(competing) == 75
     assert finish(run_id) == 0
@@ -217,7 +233,7 @@ def exercise_ssh_release(ssh):
     result = run(ssh+['rollback previous'])
     assert finish(result.stdout.split()[1]) == 0
     assert json.loads(db.read_text())['rows'] == ['order-canary']
-    print('PASS real SSH disconnect + concurrent activation rejection + rollback preserves synthetic data (service/app are stubs)',flush=True)
+    print('PASS real SSH truncated upload + resumable Stage + disconnect + concurrent activation rejection + rollback preserves synthetic data (service/app are stubs)',flush=True)
 
 
 if __name__ == '__main__':

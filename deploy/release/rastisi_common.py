@@ -21,7 +21,7 @@ DEFAULT_CONF = "/etc/rastisi/deploy.conf"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RELEASE_ID_RE = re.compile(r"^(?:\d{8}T\d{6}Z-[0-9a-f]{12}|legacy-[0-9a-f]{12})$")
-RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
+RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-(?:[0-9a-f]{8}|[0-9a-f]{32})$")
 
 # exit codes (stable: the workflow and the runbooks refer to them)
 EXIT_OK = 0

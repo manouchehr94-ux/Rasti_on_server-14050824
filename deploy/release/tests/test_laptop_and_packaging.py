@@ -101,10 +101,13 @@ class ReceiptTests(unittest.TestCase):
             rastisi_release.migration_policy(cfg, SimpleNamespace(dir=cfg.state), SimpleNamespace(say=lambda *_: None),
                 ["core.0002"], {"level": "ADDITIVE"}, {"sha": "b"*40}, args)
 
-    def test_code_only_deploy_does_not_require_a_laptop(self):
+    def test_code_only_laptop_activation_requires_a_fresh_receipt_but_dry_run_does_not(self):
         from types import SimpleNamespace
-        rastisi_release.migration_policy(self.cfg, SimpleNamespace(dir=self.cfg.state),
-            SimpleNamespace(say=lambda *_: None), [], {"level": "NONE"}, {"sha": "b"*40}, SimpleNamespace())
+        params = (self.cfg, SimpleNamespace(dir=self.cfg.state), SimpleNamespace(say=lambda *_: None),
+                  [], {"level": "NONE"}, {"sha": "b"*40})
+        rastisi_release.migration_policy(*params, SimpleNamespace(dry_run=True))
+        with self.assertRaisesRegex(rastisi_release.Abort, "backup is required"):
+            rastisi_release.migration_policy(*params, SimpleNamespace(dry_run=False))
 
     def test_migration_receipt_uses_actual_current_commit_not_caller_claim(self):
         from types import SimpleNamespace

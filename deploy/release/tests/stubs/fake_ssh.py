@@ -23,7 +23,7 @@ if faults.get("refuse", 0) > 0:
     sys.stderr.write("ssh: connect to host: Connection refused\n")
     sys.exit(255)
 
-data = sys.stdin.buffer.read() if verb == "stage" else b""
+data = sys.stdin.buffer.read() if verb in ("stage", "upload-chunk", "backup-receipt") else b""
 proc = subprocess.run([sys.executable, os.environ["GATE"]], input=data, capture_output=True, env=dict(os.environ, SSH_ORIGINAL_COMMAND=command))
 if faults.get("lose_response_for") == verb:
     del faults["lose_response_for"]

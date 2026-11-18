@@ -206,6 +206,26 @@ def previous_release_id(cfg):
 def cmd_stage(cfg, args):
     st = State(cfg)
     st.ensure()
+    lock = Lock(st.lock_file)
+    if not lock.acquire():
+        raise Abort(C.EXIT_BUSY, "another release operation holds the deployment lock")
+    try:
+        return stage_locked(cfg, st, args)
+    finally:
+        lock.release()
+
+
+def finish_stage(cfg, args, release_id):
+    result = {"ok": True, "release": release_id}
+    if args.run_id:
+        C.atomic_write_json(cfg.state / "runs" / args.run_id / "result.json", result)
+    print(json.dumps(result))
+    return C.EXIT_OK
+
+
+def stage_locked(cfg, st, args):
+    if args.run_id and not C.RUN_ID_RE.fullmatch(args.run_id):
+        raise Abort(C.EXIT_POLICY, "invalid staging run id")
     artifact = Path(args.artifact)
     if not artifact.is_file():
         raise Abort(C.EXIT_POLICY, "artifact not found: %s" % artifact)
@@ -216,8 +236,20 @@ def cmd_stage(cfg, args):
     actual = C.sha256_file(artifact)
     if actual != args.sha256:
         raise Abort(C.EXIT_POLICY, "artifact checksum mismatch (expected %s, got %s)" % (args.sha256, actual))
+    if args.run_id:
+        for candidate in cfg.releases.iterdir():
+            if not C.RELEASE_ID_RE.fullmatch(candidate.name):
+                continue
+            previous = C.read_json(candidate / "release.json", {})
+            if previous.get("sha") == args.sha and previous.get("artifact_sha256") == actual:
+                if candidate.name not in st.statuses():
+                    st.set_status(candidate.name, "staged", sha=args.sha)
+                return finish_stage(cfg, args, candidate.name)
+
     release_id = "%s-%s" % (C.utc_stamp(), args.sha[:12])
     final = cfg.releases / release_id
+    if final.exists():
+        raise Abort(C.EXIT_BUSY, "release id already exists; retry staging")
     work = cfg.releases / (".staging-" + release_id)
     if work.exists():
         shutil.rmtree(str(work))
@@ -257,21 +289,22 @@ def cmd_stage(cfg, args):
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         (work / "venv").symlink_to(os.path.relpath(str(venv), str(work)))
         meta = dict(manifest, id=release_id, staged_at=C.utc_stamp(), venv_key=lock_key, kind="release")
+        meta["artifact_sha256"] = actual
         meta.pop("files", None)
         C.atomic_write_json(work / "release.json", meta, mode=0o644)
         for sub in (work / "wheelhouse",):
             if sub.exists():
                 shutil.rmtree(str(sub))                      # only needed to build the venv
+        make_readonly(work)
         os.rename(str(work), str(final))
-        make_readonly(final)
+        C.fsync_directory(cfg.releases)
     except BaseException:
         shutil.rmtree(str(work), ignore_errors=True)
         raise
     st.set_status(release_id, "staged", sha=args.sha)
     st.history(event="staged", release=release_id, sha=args.sha, actor=args.actor or "")
     C.log("staged release %s (commit %s, migrations: %s)" % (release_id, args.sha[:12], (manifest.get("migration_report") or {}).get("level", "?")))
-    print(json.dumps({"ok": True, "release": release_id}))
-    return C.EXIT_OK
+    return finish_stage(cfg, args, release_id)
 
 
 def make_readonly(path):
@@ -445,14 +478,15 @@ def migration_policy(cfg, st, runner, plan, report, rel_meta, args):
         raise Abort(C.EXIT_POLICY, 'online migration level %s is unsafe: a separately reviewed offline migration procedure is required' % level)
     if not plan:
         runner.say("no pending migrations: the database schema is not touched")
-        return
-    level = report.get("level", "REVIEW")
-    runner.say("pending migrations (%d, level %s): %s" % (len(plan), level, ", ".join(plan[:10])))
+        if args.dry_run or cfg.get("backup_mode") != "laptop":
+            return
+    else:
+        runner.say("pending migrations (%d, level %s): %s" % (len(plan), level, ", ".join(plan[:10])))
     current_id = current_release_id(cfg)
     current_meta = C.read_json(cfg.releases / current_id / "release.json", {}) if current_id else {}
     fresh, why = backup_is_fresh(cfg, st, current_meta.get("sha"), rel_meta.get("sha"))
     if not fresh:
-        raise Abort(C.EXIT_POLICY, "a verified, recent backup is required before migrating: %s" % why)
+        raise Abort(C.EXIT_POLICY, "a verified, recent backup is required before applying this release: %s" % why)
     runner.say("backup gate: %s" % why)
 
 
@@ -870,6 +904,7 @@ def build_parser():
     p.add_argument("--sha", required=True)
     p.add_argument("--sha256", required=True)
     p.add_argument("--actor", default="")
+    p.add_argument("--run-id", default="")
     p = sub.add_parser("activate")
     p.add_argument("--id", required=True)
     p.add_argument("--expect-sha", default="")
