@@ -17,6 +17,23 @@ class EdgeProbeTests(unittest.TestCase):
         self.assertNotIn('-k',args)
         self.assertNotIn('--insecure',args)
 
+    def test_binary_static_asset_does_not_decode_as_utf8(self):
+        # Static files can contain arbitrary bytes, including invalid UTF-8.
+        png = b'\x89PNG\r\n\x1a\n\xff'
+        with patch.object(E.subprocess, 'run',
+                          return_value=types.SimpleNamespace(returncode=0, stdout=png)) as run:
+            self.assertEqual(E.fetch('example.test', 443, '/static/img/logo.png'), png)
+        self.assertIs(run.call_args.kwargs['text'], False)
+        self.assertIn('example.test:443:127.0.0.1', run.call_args.args[0])
+        self.assertNotIn('--insecure', run.call_args.args[0])
+        self.assertNotIn('-k', run.call_args.args[0])
+
+    def test_html_fetch_still_uses_text_mode(self):
+        with patch.object(E.subprocess, 'run',
+                          return_value=types.SimpleNamespace(returncode=0, stdout='<html>OK</html>')) as run:
+            self.assertEqual(E.fetch('example.test', 443, '/'), '<html>OK</html>')
+        self.assertIs(run.call_args.kwargs['text'], True)
+
     def test_invalid_certificate_or_missing_static_asset_blocks(self):
         with patch.object(E.subprocess,'run',return_value=types.SimpleNamespace(returncode=60,stdout='')):
             with self.assertRaises(ValueError): E.check('example.test',443)
