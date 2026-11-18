@@ -71,6 +71,8 @@ class Command(BaseCommand):
                 raise CommandError("Alias directory overlaps private media.")
         directory = os.open(alias_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
+            if stat.S_IMODE(os.fstat(directory).st_mode) & 0o027:
+                raise CommandError("Alias directory must restrict writing to its owner and deny all public access.")
             fcntl.flock(directory, fcntl.LOCK_EX)
             self.reconcile(directory, stores_root, apply, remove_managed)
         finally:

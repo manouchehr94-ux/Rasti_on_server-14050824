@@ -36,7 +36,9 @@ other tables. Check that the account can traverse the canonical media path and
 read the release, and has write access only to the alias directory. Do not grant
 write access to the web account, deploy SSH account, or WinSCP operators. Keep
 the parent root-controlled, the alias directory private, and grant traversal
-and listing only to approved administrators using ownership or ACLs. The job
+and listing only to approved administrators using a trusted group or ACLs.
+The reconciler rejects group write access and any permissions for other users.
+The job
 account is trusted to manage symlinks in that directory. Point WinSCP at it only
 for trusted administrators who are already allowed to access the public media.
 Never add it to an Nginx location or web-server document root. The filesystem
@@ -58,4 +60,6 @@ upload and after a label change in the trial environment.
 For rollback, stop and disable the timer, then run the same command under the
 dedicated account with `--remove-managed` to preview and with
 `--remove-managed --apply` to remove exact managed symlinks. Remove the example
-units after verifying the result. No media file is moved or deleted.
+units after verifying the result. Do this while the management command is still
+available, before rolling back to an app version without it. No media file is
+moved or deleted.

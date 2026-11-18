@@ -17,7 +17,7 @@ class MediaAliasTests(TestCase):
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.aliases = Path(temp.name) / "aliases"
-        self.aliases.mkdir()
+        self.aliases.mkdir(mode=0o700)
         self.media = Path(temp.name) / "media"
         settings = self.settings(
             MEDIA_ROOT=self.media, RASTISI_PLATFORM_PRIMARY_HOST="example.test",
@@ -117,3 +117,9 @@ class MediaAliasTests(TestCase):
         self.assertFalse((self.aliases / "friendly").is_symlink())
         self.assertTrue((self.aliases / "operator").is_symlink())
         self.assertTrue(self.target.is_dir())
+
+    def test_public_alias_directory_is_refused(self):
+        self.aliases.chmod(0o755)
+        with self.assertRaisesRegex(CommandError, "deny all public access"):
+            self.sync(apply=True)
+        self.assertEqual(list(self.aliases.iterdir()), [])
