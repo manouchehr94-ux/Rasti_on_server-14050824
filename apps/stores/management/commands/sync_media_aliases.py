@@ -129,8 +129,9 @@ class Command(BaseCommand):
             try:
                 mode = target.lstat().st_mode
             except FileNotFoundError:
-                continue
-            if not stat.S_ISDIR(mode):
+                # Reserve the canonical name even before the first upload.
+                mode = None
+            if mode is not None and not stat.S_ISDIR(mode):
                 issues.append(f"unsafe public media directory for {label}")
                 if managed.get(label) == store_id and current == str(target):
                     self.stdout.write(f"remove unsafe alias {label}")

@@ -6,19 +6,21 @@ non-retired storefront labels under the configured primary platform host.
 A cross-store collision is reported and the entry is left alone. A store may
 have several labels. Unicode slugs and external domains are ignored.
 
-Aliases appear on the next healthy reconciliation after the public UUID
-directory exists. The timer waits one minute after the previous invocation,
-with five seconds of scheduling accuracy and a 60-second task timeout. An
-empty store waits for its first public upload. Storage creates the namespace
-with its normal ownership and mode. Private-only uploads do not qualify.
+Aliases appear on the next healthy reconciliation after a store is created.
+The timer waits one minute after the previous invocation, with five seconds
+of scheduling accuracy and a 60-second task timeout. An alias for an empty
+store points to its expected UUID path and remains unresolved until the first
+public upload creates that directory with its usual owner and mode.
 
-Only absolute symlinks to real UUID directories under `MEDIA_ROOT/stores` are
-created. The account never creates media directories or opens media content.
+The job creates only absolute symlinks to exact UUID paths under
+`MEDIA_ROOT/stores`. A pre-existing target must be a real directory; symlink
+targets and regular files are rejected. The job never creates media directories
+or opens media content.
 Suspension, closure, deletion requests, deletion and hostname changes make
 obsolete managed links eligible for removal. Removal requires an exact match
 to the ledger. Existing manually managed links, including the four Production
-aliases, are preserved and may need administrator maintenance. The job records ownership before creating a link, so an interrupted creation
-can be retried on the next run.
+aliases, are preserved and may need administrator maintenance. The job records ownership before creating a link,
+so an interrupted creation can be retried on the next run.
 A name claimed by another store is held for manual resolution while the old
 managed link still exists.
 
