@@ -57,9 +57,10 @@ first. A Production dry run writes staging and state and needs separate approval
 A local transport test sent 67 MiB (70,254,592 bytes) to the real gate over
 subprocess pipes in 2.193 seconds, with three deliberately truncated requests
 and a checkpoint query after each interruption. The saved bytes had the
-expected SHA256. These timings exclude SSH, WAN latency, extraction and
-virtualenv setup. Measure all four on the isolated SSH rehearsal before setting
-an operational SLA. The chunk retry timeout is 90 seconds and the deploy-job
+expected SHA256. The same 67 MiB test through real OpenSSH on container
+loopback took 12.545 seconds (5.34 MiB/s) with the same three interruptions.
+Both measurements exclude WAN latency, extraction and virtualenv setup.
+Measure those on the isolated remote SSH rehearsal before setting an SLA. The chunk retry timeout is 90 seconds and the deploy-job
 budget is 90 minutes.
 
 ## Backup and approval

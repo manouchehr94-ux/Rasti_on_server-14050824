@@ -248,6 +248,8 @@ def start_or_resume(cfg, given_run_id, cmd):
             if request.read_text(encoding="ascii").strip() != fingerprint:
                 return fail(C.EXIT_POLICY, "run id belongs to a different request")
         else:
+            if any((rd / marker).exists() for marker in ("pid", "child_pid", "exit_code")):
+                return fail(C.EXIT_POLICY, "existing run predates request binding; inspect it with follow")
             C.atomic_write_text(request, fingerprint + "\n")
             spawn_detached(cfg, run_id, cmd + ["--run-id", run_id])
         out("RUN %s" % run_id)

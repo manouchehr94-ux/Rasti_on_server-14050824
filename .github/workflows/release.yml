@@ -275,6 +275,7 @@ jobs:
         if: always()
         run: python deploy/release/remote_client.py status | tee status-after.json || true
       - name: Confirm the approved release is still active
+        id: final_status
         if: success() && !inputs.dry_run
         env:
           SHA: ${{ needs.plan.outputs.sha }}
@@ -291,6 +292,7 @@ jobs:
         if: always()
         env:
           DRY: ${{ inputs.dry_run }}
+          FINAL_STATUS: ${{ steps.final_status.outcome }}
         run: |
           {
             echo "## Deployment result"
@@ -301,8 +303,10 @@ jobs:
             case "${exit_code:-unknown}" in
               0)  if [ "$DRY" = true ]; then
                     echo "| Outcome | **staged and checked in dry-run mode** |"
-                  else
+                  elif [ "$FINAL_STATUS" = success ]; then
                     echo "| Outcome | **deployed and verified** |"
+                  else
+                    echo "| Outcome | activation finished; final active release could not be confirmed |"
                   fi ;;
               1)  echo "| Outcome | **rolled back automatically**; the previous release is serving |" ;;
               2)  echo "| Outcome | **NEEDS A HUMAN**: see the log and the server's INCIDENT file; do not re-run blindly |" ;;
