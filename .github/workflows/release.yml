@@ -22,8 +22,12 @@ on:
         description: "Full 40-character commit that production runs NOW (the plan is made against it; the server refuses if it differs)"
         required: true
         type: string
+      restore_drill_ref:
+        description: "Opaque reference to successful isolated restore evidence for this backup (required for activation)"
+        required: false
+        type: string
       dry_run:
-        description: "Plan on the server (checks, migration plan) but change nothing"
+        description: "Stage and check the release without activating it"
         required: false
         type: boolean
         default: false
@@ -54,10 +58,19 @@ jobs:
         env:
           SHA: ${{ inputs.sha }}
           FROM_SHA: ${{ inputs.from_sha }}
+          RESTORE_DRILL_REF: ${{ inputs.restore_drill_ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 lowercase hex characters"; exit 1; }
           [[ "$FROM_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::from_sha must be 40 lowercase hex characters"; exit 1; }
+          if [ "$DRY_RUN" != true ] && [[ ! "$RESTORE_DRILL_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+            echo "::error::supply the opaque reference to a successful restore drill before requesting activation"
+            exit 1
+          fi
+          if [ "$DRY_RUN" != true ]; then
+            printf 'Restore evidence for the owner to verify before approval: `%s`\n' "$RESTORE_DRILL_REF" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "from_sha=$FROM_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,7 +199,7 @@ jobs:
     name: Deploy (waits for the owner's approval)
     needs: [plan, build, ci]
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     # The repository setting 'Required reviewers' on this environment IS the owner's approval. Nothing below runs before it is given.
     environment:
       name: production
@@ -251,7 +264,8 @@ jobs:
           DRY: ${{ inputs.dry_run }}
         run: |
           set -uo pipefail
-          args=(--release "$RELEASE" --sha "$SHA" --from-sha "$FROM_SHA")
+          run_key="$(printf '%s/%s' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" | sha256sum | cut -c1-32)"
+          args=(--release "$RELEASE" --sha "$SHA" --from-sha "$FROM_SHA" --run "19700101T000000Z-$run_key")
           [ "$DRY" = "true" ] && args+=(--dry-run)
           python deploy/release/remote_client.py activate "${args[@]}" 2>&1 | tee deploy.log
           code="${PIPESTATUS[0]}"
@@ -260,8 +274,23 @@ jobs:
       - name: Server status after
         if: always()
         run: python deploy/release/remote_client.py status | tee status-after.json || true
+      - name: Confirm the approved release is still active
+        if: success() && !inputs.dry_run
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+          RELEASE: ${{ steps.stage.outputs.release }}
+        run: |
+          python - <<'PY'
+          import json, os
+          with open("status-after.json") as status:
+              current = json.load(status)
+          if current.get("current") != os.environ["RELEASE"] or current.get("current_sha") != os.environ["SHA"]:
+              raise SystemExit("::error::final server status does not match the approved release")
+          PY
       - name: Summary
         if: always()
+        env:
+          DRY: ${{ inputs.dry_run }}
         run: |
           {
             echo "## Deployment result"
@@ -270,7 +299,11 @@ jobs:
             echo "| Requested by | ${{ github.actor }} |"
             echo "| Exit code | ${exit_code:-unknown} |"
             case "${exit_code:-unknown}" in
-              0)  echo "| Outcome | **deployed and verified** |" ;;
+              0)  if [ "$DRY" = true ]; then
+                    echo "| Outcome | **staged and checked in dry-run mode** |"
+                  else
+                    echo "| Outcome | **deployed and verified** |"
+                  fi ;;
               1)  echo "| Outcome | **rolled back automatically**; the previous release is serving |" ;;
               2)  echo "| Outcome | **NEEDS A HUMAN**: see the log and the server's INCIDENT file; do not re-run blindly |" ;;
               3)  echo "| Outcome | **migration failed**; the previous release is still serving |" ;;

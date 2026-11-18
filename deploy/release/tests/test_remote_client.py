@@ -1,5 +1,6 @@
 """The runner-side client against the real gate, over a fake ssh that drops connections."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -47,6 +48,57 @@ class ClientTests(SandboxTestCase):
         self.assertIn("DONE", proc.stdout)
         self.assertServing(rid)
 
+    def test_checkpoint_survives_truncated_chunks_and_a_replacement_runner(self):
+        from release_upload import CHUNK_SIZE
+
+        content = os.urandom(CHUNK_SIZE * 3)
+        artifact, sha, digest = make_artifact(self.sbx.root, extra_files={"payload": content.hex()})
+        self.sbx._seed_venv()
+        data = artifact.read_bytes()
+        identity = f"{sha} {digest} {len(data)}"
+
+        def gate(command, chunk=None):
+            return subprocess.run([PY, str(STUBS / "fake_ssh.py"), str(self.faults), command],
+                                  input=chunk, capture_output=True, env=self.client_env)
+
+        self.assertGreater(len(data), 2 * CHUNK_SIZE)
+        for offset in (0, CHUNK_SIZE):
+            chunk = data[offset:offset + CHUNK_SIZE]
+            command = f"upload-chunk {identity} {offset} {hashlib.sha256(chunk).hexdigest()}"
+            self.assertEqual(gate(command, chunk[:len(chunk) // 2]).returncode, C.EXIT_POLICY)
+            self.assertEqual(gate(command, b"x" * len(chunk)).returncode, C.EXIT_POLICY)
+            self.assertEqual(json.loads(gate("upload-offset " + identity).stdout)["offset"], offset)
+            self.assertEqual(gate("stage-upload " + identity).returncode, C.EXIT_POLICY)
+            self.assertEqual(gate(command, chunk).returncode, 0)
+            self.assertEqual(gate(command, chunk).returncode, 0)
+
+        self.set_faults(lose_response_for="stage-upload")
+        staged = self.client("stage", "--sha", sha, "--sha256", digest, "--artifact", artifact)
+        self.assertEqual(staged.returncode, 0, staged.stdout + staged.stderr)
+        self.assertIn(f"artifact checkpoint: {2 * CHUNK_SIZE}/", staged.stderr)
+        repeat = self.client("stage", "--sha", sha, "--sha256", digest, "--artifact", artifact)
+        self.assertEqual(repeat.returncode, 0, repeat.stdout + repeat.stderr)
+        self.assertEqual(staged.stdout, repeat.stdout)
+        self.assertEqual(sum(h["event"] == "staged" for h in self.sbx.history()), 1)
+
+    def test_whole_file_hash_and_competing_artifact(self):
+        data = b"complete chunk with wrong artifact hash"
+        sha = "a" * 40
+        identity = f"{sha} {'b' * 64} {len(data)}"
+        def gate(command, payload=None):
+            return subprocess.run([PY, str(STUBS / "fake_ssh.py"), str(self.faults), command],
+                                  input=payload, capture_output=True, env=self.client_env)
+
+        self.assertEqual(gate("upload-offset " + identity).returncode, 0)
+        other = f"{'c' * 40} {'d' * 64} {len(data)}"
+        self.assertEqual(gate("upload-offset " + other).returncode, C.EXIT_POLICY)
+        chunk_hash = hashlib.sha256(data).hexdigest()
+        self.assertEqual(gate(f"upload-chunk {identity} 0 {chunk_hash}", data).returncode, 0)
+        rejected = gate("stage-upload " + identity)
+        self.assertEqual(rejected.returncode, C.EXIT_POLICY)
+        self.assertIn(b"whole-artifact checksum mismatch", rejected.stderr)
+        self.assertTrue(self.current().startswith("legacy-"))
+
     def test_exit_codes_and_messages_follow_the_server(self):
         rid, sha = self.stage(broken=True)
         proc = self.client("activate", "--release", rid, "--sha", sha, "--from-sha", self.legacy_sha)
@@ -67,11 +119,15 @@ class ClientTests(SandboxTestCase):
     def test_a_lost_response_to_activate_does_not_start_a_second_deployment(self):
         rid, sha = self.stage()
         self.set_faults(lose_response_for="activate")
-        proc = self.client("activate", "--release", rid, "--sha", sha, "--from-sha", self.legacy_sha)
+        run = "19700101T000000Z-" + "a" * 32
+        args = ("activate", "--release", rid, "--sha", sha, "--from-sha", self.legacy_sha, "--run", run)
+        proc = self.client(*args)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(self.client(*args).returncode, 0)
+        self.assertEqual(self.client(*args, "--dry-run").returncode, C.EXIT_POLICY)
         self.assertEqual(len([h for h in self.sbx.history() if h.get("event") == "activate"]), 1, "exactly one deployment")
         runs = [p for p in (self.sbx.base / "state" / "runs").iterdir() if p.is_dir()]
-        self.assertEqual(len(runs), 1)
+        self.assertEqual(len(runs), 2)
 
     def test_a_lost_response_to_rollback_does_not_roll_back_twice(self):
         rid, sha = self.stage()

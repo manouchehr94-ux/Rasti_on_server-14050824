@@ -44,12 +44,12 @@ def ssh_base():
     return shlex.split(raw)
 
 
-def call(command, stdin_path=None, timeout=900):
+def call(command, stdin_path=None, timeout=900, data=None):
     """One SSH call. Returns (returncode, stdout, stderr). 255 = the connection itself failed."""
     cmd = ssh_base() + [command]
-    stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
+    stdin = open(stdin_path, "rb") if stdin_path else (subprocess.DEVNULL if data is None else None)
     try:
-        proc = subprocess.run(cmd, stdin=stdin, capture_output=True, timeout=timeout)
+        proc = subprocess.run(cmd, stdin=stdin, input=data, capture_output=True, timeout=timeout)
         return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
         return 255, "", "ssh timed out"
@@ -58,11 +58,11 @@ def call(command, stdin_path=None, timeout=900):
             stdin.close()
 
 
-def call_retry(command, stdin_path=None, attempts=6, delay=None, timeout=900):
+def call_retry(command, stdin_path=None, attempts=6, delay=None, timeout=900, data=None):
     delay = float(os.environ.get("RASTISI_RETRY_DELAY", "10")) if delay is None else delay
     last = (255, "", "")
     for n in range(attempts):
-        last = call(command, stdin_path, timeout)
+        last = call(command, stdin_path, timeout, data=data)
         if last[0] != 255:
             return last
         sys.stderr.write("connection problem (attempt %d/%d): %s\n" % (n + 1, attempts, last[2].strip()[-200:]))
@@ -74,7 +74,9 @@ def new_run_id():
     return "%s-%s" % (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), os.urandom(4).hex())
 
 
-def follow(run_id, give_up_after=1800, poll=3.0):
+def follow(run_id, give_up_after=1800, poll=3.0, log=None):
+    if log is None:
+        log = sys.stdout
     """Print the run's log until it is done. Reconnects as often as needed; gives up only after ``give_up_after`` s without contact."""
     offset = 0
     last_contact = time.time()
@@ -94,13 +96,12 @@ def follow(run_id, give_up_after=1800, poll=3.0):
         new_offset = next((int(l.split()[1]) for l in reversed(lines) if l.startswith("OFFSET ")), offset)
         text = "\n".join(l for l in lines if not l.startswith(("OFFSET ", "STATE ")))
         if text.strip():
-            print(text)
-            sys.stdout.flush()
+            print(text, file=log, flush=True)
         offset = new_offset
         if state.startswith("STATE done"):
             return int(state.split()[2])
         if state == "STATE died":
-            print("the deployment process on the server died without reporting a result")
+            print("the deployment process on the server died without reporting a result", file=log)
             return 2
         time.sleep(poll)
 
@@ -117,20 +118,59 @@ def cmd_version(args):
     return rc
 
 
+def stage_error(rc, out, err):
+    print((err or out).strip()[-800:], file=sys.stderr)
+    return EXIT_LOST if rc == 255 else rc
+
+
 def cmd_stage(args):
-    digest = hashlib.sha256(open(args.artifact, "rb").read()).hexdigest() if not args.sha256 else args.sha256
-    rc, out, err = call_retry("stage %s %s" % (args.sha, digest), stdin_path=args.artifact, attempts=4, timeout=3600)
-    if rc != 0:
-        sys.stderr.write(err.strip()[-800:] + "\n")
-        sys.stdout.write(out)
-        return rc if rc != 255 else EXIT_LOST
-    release = json.loads(out.strip().splitlines()[-1])["release"]
-    print(release)
+    with open(args.artifact, "rb") as artifact:
+        digest = hashlib.file_digest(artifact, "sha256").hexdigest()
+        if args.sha256 and digest != args.sha256:
+            print("local artifact checksum does not match the build", file=sys.stderr)
+            return 4
+        size = os.fstat(artifact.fileno()).st_size
+        identity = "%s %s %d" % (args.sha, digest, size)
+        rc, response, err = call_retry("upload-offset " + identity, timeout=30)
+        if rc:
+            return stage_error(rc, response, err)
+        checkpoint = json.loads(response)
+        offset, chunk_size = checkpoint["offset"], checkpoint["chunk_size"]
+        if not 0 <= offset <= size or not 0 < chunk_size <= 2 * 1024 * 1024:
+            print("invalid server checkpoint", file=sys.stderr)
+            return 4
+        print("artifact checkpoint: %d/%d bytes" % (offset, size), file=sys.stderr)
+        while offset < size:
+            artifact.seek(offset)
+            data = artifact.read(min(chunk_size, size - offset))
+            command = "upload-chunk %s %d %s" % (identity, offset, hashlib.sha256(data).hexdigest())
+            rc, response, err = call_retry(command, timeout=90, data=data)
+            if rc:
+                return stage_error(rc, response, err)
+            committed = json.loads(response)["offset"]
+            if not offset + len(data) <= committed <= size or committed <= offset:
+                print("invalid committed offset", file=sys.stderr)
+                return 4
+            offset = committed
+            print("uploaded %d/%d bytes" % (offset, size), file=sys.stderr)
+    rc, response, err = call_retry("stage-upload " + identity, timeout=120)
+    if rc:
+        return stage_error(rc, response, err)
+    run_id = response.strip().removeprefix("RUN ")
+    print("staging run %s; use follow to inspect it after disconnect" % run_id, file=sys.stderr)
+    result = follow(run_id, log=sys.stderr)
+    if result:
+        return result
+    rc, response, err = call_retry("result " + run_id, timeout=30)
+    if rc:
+        return stage_error(rc, response, err)
+    print(json.loads(response)["release"])
     return 0
 
 
-def start_and_follow(command):
-    run_id = new_run_id()
+def start_and_follow(command, run_id=None):
+    run_id = run_id or new_run_id()
+    print("requesting run %s; keep this id to reconnect" % run_id, flush=True)
     rc, out, err = call_retry("%s run=%s" % (command, run_id))
     if rc == 255:
         return EXIT_LOST
@@ -155,7 +195,7 @@ def cmd_activate(args):
         parts.append("destructive-ack=" + args.destructive_ack)
     if args.dry_run:
         parts.append("dry-run")
-    return start_and_follow(" ".join(parts))
+    return start_and_follow(" ".join(parts), args.run)
 
 
 def cmd_rollback(args):
@@ -195,6 +235,7 @@ def main(argv=None):
     p.add_argument("--allow-migrations", action="store_true")
     p.add_argument("--destructive-ack", default="")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--run", default="")
     p = sub.add_parser("rollback")
     p.add_argument("--to", default="previous")
     p.add_argument("--unsafe-ack", default="")
