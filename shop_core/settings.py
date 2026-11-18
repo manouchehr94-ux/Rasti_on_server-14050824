@@ -339,6 +339,23 @@ STATIC_ROOT = Path(env_str("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 MEDIA_URL = "media/"
 MEDIA_ROOT = Path(env_str("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
 
+# Public uploads are read by Nginx (www-data). The public media tree is
+# group-owned by www-data and its parent directory carries the setgid bit.
+# Explicit modes prevent a restrictive Gunicorn/systemd umask (e.g. 0077)
+# from creating non-traversable store/product directories. Private file fields
+# use PrivateFileSystemStorage independently and MUST NOT inherit these modes.
+# Static files keep Django's standard storage backend.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "file_permissions_mode": 0o640,
+            "directory_permissions_mode": 0o750,
+        },
+    },
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
 # Private storage for generated export files and uploaded import source
 # files (Admin Panel Completion Program checkpoint 4, ADR-52) â€” deliberately
 # NOT under MEDIA_ROOT/MEDIA_URL, so nothing here is ever reachable through
