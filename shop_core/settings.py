@@ -339,6 +339,25 @@ STATIC_ROOT = Path(env_str("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 MEDIA_URL = "media/"
 MEDIA_ROOT = Path(env_str("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
 
+# Public uploads are served by Nginx. In Production the existing store UUID
+# directory and its descendants may inherit the app's "rastisi" group rather
+# than "www-data". Group-only access (0750/0640) therefore causes HTTP 403.
+# Give *public* media directories traversal, but not listing, to other users;
+# give *public* files read access. The explicit modes override the app's umask.
+# Existing directories are NOT chmod'ed by FileSystemStorage: repair any
+# previously blocked public paths separately, with a scoped operations audit.
+# PrivateFileSystemStorage and its private path remain unchanged.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "file_permissions_mode": 0o644,
+            "directory_permissions_mode": 0o751,
+        },
+    },
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
 # Private storage for generated export files and uploaded import source
 # files (Admin Panel Completion Program checkpoint 4, ADR-52) â€” deliberately
 # NOT under MEDIA_ROOT/MEDIA_URL, so nothing here is ever reachable through
