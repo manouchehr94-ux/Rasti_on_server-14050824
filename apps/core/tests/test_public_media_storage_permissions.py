@@ -11,10 +11,13 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from django.apps import apps
 from django.core.files.base import ContentFile
-from django.core.files.storage import storages
+from django.core.files.storage import default_storage, storages
+from django.db import models
 from django.test import SimpleTestCase, override_settings
 
+from apps.core.media_paths import StoreMediaPath
 from apps.core.storage import PrivateFileSystemStorage
 
 
@@ -29,11 +32,18 @@ class PublicMediaStoragePermissionsTests(SimpleTestCase):
                 store_id = uuid4().hex
                 old_umask = os.umask(0o077)
                 try:
-                    for kind in ("gallery", "thumbnails"):
-                        name = storage.save(
-                            f"stores/{store_id}/products/{kind}/image.webp",
-                            ContentFile(b"isolated public image bytes"),
-                        )
+                    public_keys = (
+                        f"stores/{store_id}/products/gallery/item.webp",
+                        f"stores/{store_id}/products/thumbnails/thumb.webp",
+                        f"stores/{store_id}/categories/images/category.png",
+                        f"stores/{store_id}/brands/logos/brand.png",
+                        f"stores/{store_id}/shop/branding/logo.webp",
+                        f"stores/{store_id}/content/media/hero.webp",
+                        "platform/blog/covers/platform.png",
+                        "products/gallery/historical.jpg",
+                    )
+                    for key in public_keys:
+                        name = storage.save(key, ContentFile(b"isolated public image bytes"))
                         file_path = Path(root, name)
                         self.assertEqual(file_path.read_bytes(), b"isolated public image bytes")
                         file_mode = stat.S_IMODE(file_path.stat().st_mode)
@@ -51,6 +61,28 @@ class PublicMediaStoragePermissionsTests(SimpleTestCase):
                             path = path.parent
                 finally:
                     os.umask(old_umask)
+
+    def test_all_store_owned_public_media_fields_share_default_storage(self):
+        # Django's default storage settings govern all public model FileFields,
+        # not only product images. Private imports/exports retain their own storage.
+        public_fields = []
+        private_fields = []
+        for model in apps.get_models():
+            for field in model._meta.fields:
+                if not isinstance(field, models.FileField):
+                    continue
+                if isinstance(field.storage, PrivateFileSystemStorage):
+                    private_fields.append(field)
+                    continue
+                if isinstance(field.upload_to, StoreMediaPath):
+                    public_fields.append(field)
+                    self.assertIs(
+                        field.storage,
+                        default_storage,
+                        f"{model._meta.label}.{field.name} must use default public storage",
+                    )
+        self.assertGreaterEqual(len(public_fields), 15)
+        self.assertGreaterEqual(len(private_fields), 4)
 
     def test_private_storage_not_changed_by_public_storage_config(self):
         with tempfile.TemporaryDirectory() as private:
