@@ -48,7 +48,7 @@ are also trusted.
 Use the same Python and environment as the timer and run this dry-run first.
 
 ```sh
-python manage.py sync_media_aliases --alias-root /srv/rastisi/media-by-name
+python manage.py sync_media_aliases --alias-root /srv/rastisi-operator/media-by-name
 ```
 
 Review actions and conflicts privately in the service journal, then run the
@@ -63,3 +63,7 @@ dedicated account with `--remove-managed` to preview and with
 units after verifying the result. Do this while the management command is still
 available, before rolling back to an app version without it. No media file is
 moved or deleted.
+
+For the adopted Production layout, follow the [operator preflight and rollback
+procedure](../deployment/ISSUE_12_PRODUCTION_PREFLIGHT_FA.md). It specifies the
+root-controlled sibling directory, dedicated PostgreSQL login and per-release ACLs.
