@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 def fetch(host, port, path):
     proc = subprocess.run(['curl', '--silent', '--show-error', '--fail', '--max-time', '15',
                            '--noproxy', host, '--resolve', '%s:%d:127.0.0.1' % (host, port),
-                           'https://%s:%d%s' % (host, port, path)], capture_output=True, text=True, timeout=20)
+                           'https://%s:%d%s' % (host, port, path)], capture_output=True,
+                           text=not path.startswith('/static/'), timeout=20)
     if proc.returncode:
         raise ValueError('local Nginx/TLS request failed for %s' % path.split('?')[0])
     return proc.stdout
