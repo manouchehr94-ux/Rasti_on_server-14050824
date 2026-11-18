@@ -78,9 +78,10 @@ fi
 
 echo "== tooling -> $(dest "$LIB")"
 as_root install -d -m 0755 "$(dest "$LIB")" "$(dest "$LIB")/smoke.d"
-for f in rastisi_common.py rastisi_release.py rastisi_app_task.py rastisi_gate.py release_upload.py rastisi_probe.py rastisi_smoke.py rastisi_edge_probe.py migration_guard.py make_dropin.py runtime_check.py laptop_receipt.py laptop_backup_source.py TOOLING_VERSION; do
+while IFS= read -r f; do
+  [ "$f" = run_current_job.sh ] && continue
   as_root install -m 0644 "$SRC/$f" "$(dest "$LIB")/$f"
-done
+done < "$SRC/tooling-files.txt"
 as_root install -m 0644 "$SRC"/smoke.d/*.py "$(dest "$LIB")/smoke.d/"
 as_root install -m 0755 "$SRC/run_current_job.sh" "$(dest "$LIB")/run_current_job.sh"
 chown_safe -R root:root "$LIB"

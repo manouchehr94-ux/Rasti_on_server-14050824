@@ -25,7 +25,7 @@ def desired_aliases():
     )
     claims = defaultdict(set)
     platform_suffix = "." + settings.RASTISI_PLATFORM_PRIMARY_HOST
-    rows = stores.values_list("public_id", "admin_subdomain", "platform_code")
+    rows = stores.order_by().values_list("public_id", "admin_subdomain", "platform_code")
     for store_id, admin_label, code in rows:
         for label in (admin_label, code):
             if LABEL.fullmatch(label):
@@ -36,7 +36,7 @@ def desired_aliases():
         verification_status=StoreDomain.VerificationStatus.VERIFIED,
         retired_at__isnull=True,
         hostname__endswith=platform_suffix,
-    ).values_list("store__public_id", "hostname")
+    ).order_by().values_list("store__public_id", "hostname")
     for store_id, hostname in public_names:
         label = hostname.removesuffix(platform_suffix)
         if LABEL.fullmatch(label):
