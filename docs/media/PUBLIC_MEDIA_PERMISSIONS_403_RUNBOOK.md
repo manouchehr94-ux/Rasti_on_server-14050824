@@ -79,3 +79,32 @@ Do not attempt to treat the pending production rollout or root-owned tooling
 replacement (PR #13) as an image-permission fix. In Production, image
 permission repair and application deployment require **separate approvals**.
 Merged code and green PR CI do not themselves authorize either change.
+
+## Coordinated release with the operator alias rollout
+
+Review the image fix and the tooling/alias preflight independently. For a
+combined release, approve and merge the image fix first, then the preflight
+changes. Require green CI on the final integrated commit. A historical repair
+can be approved independently before the app release once its exact scope,
+backup, and rollback manifest have been reviewed.
+
+For the combined installation, follow the operator preflight gates in
+`docs/deployment/ISSUE_12_PRODUCTION_PREFLIGHT_FA.md`. After the
+separately approved tooling exchange, stage and activate the integrated app
+with a fresh signed receipt bound to the current and target SHAs and verified
+restore evidence. Check actual public gallery and thumbnail URLs for at
+least two stores, including a new upload. Confirm private import, export and
+receipt downloads still require their authorized routes. Enable the operator
+alias timer last, with its dedicated account and canonical public UUID paths.
+The operator directory and private root must stay outside the Nginx media alias.
+
+For a rollback affecting all three components, stop the alias timer and
+remove only ledger-managed links while the management command is still
+available. Roll back the application with the **new** tooling after verifying
+the previous release and schema compatibility. Once every deployment run has
+ended, the root tooling exchange can be reversed under its own approval. A
+rollback of the application does not reset existing file modes. Revert a
+historical repair separately, using the captured original mode only if
+device/inode, type, owner/group and current repaired mode still match. The old
+403 can recur if the original mode blocked traversal. Analyze newly created
+files separately; they are outside the historical rollback manifest.

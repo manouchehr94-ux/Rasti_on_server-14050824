@@ -29,23 +29,28 @@ class PublicMediaStoragePermissionsTests(SimpleTestCase):
                 storage = storages["default"]
                 self.assertEqual(storage.directory_permissions_mode, 0o751)
                 self.assertEqual(storage.file_permissions_mode, 0o644)
-                store_id = uuid4().hex
+                store_ids = (uuid4().hex, uuid4().hex)
                 old_umask = os.umask(0o077)
                 try:
-                    public_keys = (
-                        f"stores/{store_id}/products/gallery/item.webp",
-                        f"stores/{store_id}/products/thumbnails/thumb.webp",
-                        f"stores/{store_id}/categories/images/category.png",
-                        f"stores/{store_id}/brands/logos/brand.png",
-                        f"stores/{store_id}/shop/branding/logo.webp",
-                        f"stores/{store_id}/content/media/hero.webp",
+                    store_keys = (
+                        "stores/{store_id}/products/gallery/item.webp",
+                        "stores/{store_id}/products/thumbnails/thumb.webp",
+                        "stores/{store_id}/categories/images/category.png",
+                        "stores/{store_id}/brands/logos/brand.png",
+                        "stores/{store_id}/shop/branding/logo.webp",
+                        "stores/{store_id}/content/media/hero.webp",
+                    )
+                    public_keys = store_keys + (
                         "platform/blog/covers/platform.png",
                         "products/gallery/historical.jpg",
                     )
-                    for key in public_keys:
-                        name = storage.save(key, ContentFile(b"isolated public image bytes"))
+                    uploads = {key.format(store_id=store_ids[0]): b"first store" for key in public_keys}
+                    uploads.update({key.format(store_id=store_ids[1]): b"second store" for key in store_keys})
+                    for key, payload in uploads.items():
+                        name = storage.save(key, ContentFile(payload))
+                        self.assertEqual(name, key)
                         file_path = Path(root, name)
-                        self.assertEqual(file_path.read_bytes(), b"isolated public image bytes")
+                        self.assertEqual(file_path.read_bytes(), payload)
                         file_mode = stat.S_IMODE(file_path.stat().st_mode)
                         self.assertEqual(file_mode, 0o644)
                         # A different-group web worker can read this public file.
@@ -85,16 +90,23 @@ class PublicMediaStoragePermissionsTests(SimpleTestCase):
         self.assertGreaterEqual(len(private_fields), 4)
 
     def test_private_storage_not_changed_by_public_storage_config(self):
-        with tempfile.TemporaryDirectory() as private:
-            with override_settings(PRIVATE_MEDIA_ROOT=private):
+        with tempfile.TemporaryDirectory() as root:
+            public = Path(root, "media")
+            private = Path(root, "private")
+            with override_settings(MEDIA_ROOT=public, PRIVATE_MEDIA_ROOT=private):
                 storage = PrivateFileSystemStorage()
                 old_umask = os.umask(0o077)
                 try:
-                    name = storage.save("stores/test/private/test.csv", ContentFile(b"private"))
+                    names = [
+                        storage.save(f"stores/{uuid4().hex}/private/test.csv", ContentFile(payload))
+                        for payload in (b"first private", b"second private")
+                    ]
                 finally:
                     os.umask(old_umask)
-                parent_mode = stat.S_IMODE(Path(private, name).parent.stat().st_mode)
-                self.assertEqual(parent_mode & 0o070, 0)
-                self.assertEqual(parent_mode & 0o007, 0)
-                with self.assertRaises(ValueError):
-                    storage.url(name)
+                for name, payload in zip(names, (b"first private", b"second private"), strict=True):
+                    path = private / name
+                    self.assertEqual(path.read_bytes(), payload)
+                    self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode) & 0o077, 0)
+                    self.assertFalse((public / name).exists())
+                    with self.assertRaises(ValueError):
+                        storage.url(name)
