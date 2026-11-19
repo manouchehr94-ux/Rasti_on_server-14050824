@@ -83,3 +83,22 @@ class ReadOnlyDiagnosticTests(unittest.TestCase):
                          {"named:release_port": 1, "dynamic_unresolved": 1})
         self.assertEqual(result["proxy_pass_candidates"]["legacy_socket"], 1)
         self.assertNotIn("other.example", json.dumps(result))
+
+    def test_external_outage_correlation_excludes_unrelated_observations(self):
+        from tempfile import TemporaryDirectory
+
+        timeout = int(diagnostic.INCIDENT_TIMEOUT.timestamp() * 1_000_000)
+        rows = [
+            {"at": "2026-11-19T08:25:00+00:00", "route": "home", "ok": False},
+            {"at": "2026-11-19T08:26:00+00:00", "route": "login", "ok": True},
+            {"at": "2026-11-19T08:28:00+00:00", "route": "tenant", "ok": False},
+            {"at": "2026-11-19T08:26:00+00:00", "route": "unknown-private-route", "ok": False},
+        ]
+        with TemporaryDirectory() as temp:
+            path = Path(temp, "availability.jsonl")
+            path.write_text("\n".join(map(json.dumps, rows)))
+            report = diagnostic.external_correlation(path, [{"unix_us": timeout, "worker_pid": 42}])
+        self.assertEqual(report["observations"], 3)
+        self.assertEqual(report["within_120s_of_worker_timeout"][0]["external_counts"],
+                         {"home.failed": 1, "login.ok": 1})
+        self.assertNotIn("unknown-private-route", json.dumps(report))

@@ -44,7 +44,12 @@ def sample(url, timeout):
 
 
 def alert(failures, webhook):
-    payload = {"message": "RastiSi external HTTPS check failed twice", "routes": sorted(failures)}
+    payload = {
+        "message": "RastiSi external HTTPS check failed twice",
+        "routes": sorted(failures),
+        "observations": [sample for label in sorted(failures) for sample in failures[label]],
+        "correlation": "compare UTC observations with WORKER TIMEOUT journal evidence",
+    }
     print("::error::" + payload["message"] + ": " + ", ".join(payload["routes"]), file=sys.stderr)
     if webhook:
         # Do not follow webhook redirects or log transport errors containing its URL.
@@ -63,21 +68,25 @@ def alert(failures, webhook):
 
 
 def monitor(targets, duration, interval, timeout, output, webhook=""):
-    streaks = dict.fromkeys(targets, 0)
+    failures = {label: [] for label in targets}
     deadline = time.monotonic() + duration
     while True:
         started = time.monotonic()
         for label, url in targets.items():
+            at = datetime.now(timezone.utc).isoformat()
             result = sample(url, timeout)
-            print(json.dumps({"at": datetime.now(timezone.utc).isoformat(), "route": label, **result}),
-                  file=output, flush=True)
-            streaks[label] = 0 if result["ok"] else streaks[label] + 1
-        failed = [label for label, streak in streaks.items() if streak >= 2]
-        if failed:
-            alert(failed, webhook)
+            observation = {"at": at, "route": label, **result}
+            print(json.dumps(observation), file=output, flush=True)
+            if result["ok"]:
+                failures[label].clear()
+            else:
+                failures[label].append(observation)
+        consecutive = {label: samples for label, samples in failures.items() if len(samples) >= 2}
+        if consecutive:
+            alert(consecutive, webhook)
             return 1
         if started >= deadline:
-            return int(any(streaks.values()))
+            return int(any(failures.values()))
         time.sleep(max(0, min(started + interval, deadline) - time.monotonic()))
 
 

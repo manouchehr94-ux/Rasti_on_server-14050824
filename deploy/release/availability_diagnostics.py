@@ -234,7 +234,7 @@ def nginx_logs(paths, kind, start, end, anchors):
                         delta = at - anchor["unix_us"] / 1_000_000
                         if abs(delta) <= 120:
                             bucket.update(metrics)
-                            if kind == "error" or status in (502, 504):
+                            if kind == "error" or status in (499, 502, 504):
                                 phase = "before" if delta < 0 else "at_or_after"
                                 signal = f"client_status.{status}" if kind == "access" else f"{event}.{route}"
                                 bucket[f"{phase}.{signal}"] += 1
@@ -330,6 +330,49 @@ def nginx_config(path, prefix, host):
             "exact_server_name_candidates": dict(host_routes)}
 
 
+def external_correlation(path, anchors):
+    """Correlate sanitized external artifacts without contacting either host."""
+    summaries = [Counter() for _ in anchors]
+    observations = 0
+    readable = False
+    truncated = False
+    try:
+        with open_log(path) as stream:
+            readable = True
+            for _ in range(10000):
+                line = stream.readline(4097)
+                if not line:
+                    break
+                if len(line) == 4097:
+                    truncated = True
+                    break
+                try:
+                    row = json.loads(line)
+                    route = row["route"]
+                    healthy = row["ok"]
+                    stamp = datetime.fromisoformat(row["at"])
+                    if (route not in ("home", "login", "register", "tenant")
+                            or type(healthy) is not bool or stamp.utcoffset() is None):
+                        continue
+                    instant = stamp.timestamp()
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    continue
+                observations += 1
+                for anchor, counts in zip(anchors, summaries):
+                    if abs(instant - anchor["unix_us"] / 1_000_000) <= 120:
+                        counts[f"{route}.{'ok' if healthy else 'failed'}"] += 1
+            else:
+                truncated = True
+    except OSError:
+        readable = False
+    return {
+        "readable": readable, "limit_reached": truncated, "observations": observations,
+        "within_120s_of_worker_timeout": [
+            {**anchor, "external_counts": dict(counts)} for anchor, counts in zip(anchors, summaries)
+        ],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--since", required=True, help="ISO timestamp with timezone")
@@ -341,6 +384,8 @@ def main():
     parser.add_argument("--nginx-config", type=Path, default=Path("/etc/nginx/nginx.conf"))
     parser.add_argument("--nginx-host", default="rastisi.ir", help="exact server_name to inspect")
     parser.add_argument("--nginx-prefix", type=Path, default=Path("/etc/nginx"))
+    parser.add_argument("--external-observations", type=Path,
+                        help="optional sanitized availability.jsonl from the external monitor")
     args = parser.parse_args()
     if len(args.nginx_access) + len(args.nginx_error) > 16:
         parser.error("provide at most 16 log files")
@@ -364,6 +409,8 @@ def main():
     access = args.nginx_access or sorted(Path("/var/log/nginx").glob("access.log*"))[:8]
     errors = args.nginx_error or sorted(Path("/var/log/nginx").glob("error.log*"))[:8]
     print(json.dumps({
+        "external_correlation": (external_correlation(args.external_observations, anchors)
+                                 if args.external_observations else None),
         "worker_timeout_anchors_truncated": anchors_truncated,
         "nginx_access_files": nginx_logs(access, "access", start, end, anchors),
         "nginx_error_files": nginx_logs(errors, "error", start, end, anchors),
