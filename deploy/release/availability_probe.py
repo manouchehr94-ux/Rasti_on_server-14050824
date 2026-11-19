@@ -90,6 +90,7 @@ def alert(failures, webhook):
 def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=""):
     failures = {label: [] for label in targets}
     deadline = time.monotonic() + duration
+    heartbeat_degraded = False
     while True:
         started = time.monotonic()
         for label, url in targets.items():
@@ -103,15 +104,14 @@ def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=
                 failures[label].append(observation)
         heartbeat_failed = heartbeat and not post(heartbeat, {"event": "probe_round_completed"})
         if heartbeat_failed:
+            heartbeat_degraded = True
             print("::error::Availability heartbeat delivery failed", file=sys.stderr)
         consecutive = {label: samples for label, samples in failures.items() if len(samples) >= 2}
         if consecutive:
             alert(consecutive, webhook)
             return 1
-        if heartbeat_failed:
-            return 1
         if started >= deadline:
-            return int(any(failures.values()))
+            return int(heartbeat_degraded or any(failures.values()))
         time.sleep(max(0, min(started + interval, deadline) - time.monotonic()))
 
 

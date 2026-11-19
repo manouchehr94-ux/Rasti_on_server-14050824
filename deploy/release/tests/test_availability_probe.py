@@ -44,6 +44,17 @@ class AvailabilityTests(unittest.TestCase):
         self.assertTrue(all("at" in item and item["status"] == 0 for item in payload["observations"]))
         self.assertEqual([json.loads(line)["status"] for line in output.getvalue().splitlines()], [0, 0])
 
+    def test_failed_heartbeat_does_not_hide_site_outage(self):
+        failure = {"status": 503, "ok": False, "ms": 5}
+        with patch.object(probe, "sample", return_value=failure), \
+                patch.object(probe.time, "sleep"), \
+                patch.object(probe, "post", side_effect=[False, False, True]) as post:
+            code = probe.monitor({"home": "https://platform.example"}, 60, 60, 8, io.StringIO(),
+                                 "https://alerts.example/outage", "https://heartbeat.example/private")
+        self.assertEqual(code, 1)
+        self.assertEqual([call.args[0] for call in post.call_args_list],
+                         ["https://heartbeat.example/private"] * 2 + ["https://alerts.example/outage"])
+
     def test_success_resets_outage_streak(self):
         results = [{"status": status, "ok": status == 200, "ms": 10} for status in (503, 200, 503, 200)]
         with patch.object(probe, "sample", side_effect=results), patch.object(probe, "alert") as alert, \
