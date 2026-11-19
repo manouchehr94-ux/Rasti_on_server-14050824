@@ -173,6 +173,10 @@ MIDDLEWARE = [
     "apps.dashboard.middleware.AdminEmbedFrameOptionsMiddleware",
 ]
 
+RASTISI_AVAILABILITY_EVIDENCE = env_bool("RASTISI_AVAILABILITY_EVIDENCE", default=False)
+if RASTISI_AVAILABILITY_EVIDENCE:
+    MIDDLEWARE.insert(0, "apps.core.availability_evidence.AvailabilityEvidenceMiddleware")
+
 ROOT_URLCONF = "shop_core.urls"
 
 TEMPLATES = [
@@ -422,6 +426,13 @@ LOGGING = {
         },
     },
 }
+
+if RASTISI_AVAILABILITY_EVIDENCE:
+    LOGGING["loggers"]["rastisi.availability"] = {
+        "handlers": ["console"],
+        "level": "WARNING",
+        "propagate": False,
+    }
 
 # Business defaults (Stage 2 will read these in the pricing service)
 SHOP_FREE_SHIPPING_THRESHOLD = 500_000

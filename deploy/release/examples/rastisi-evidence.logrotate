@@ -1,0 +1,25 @@
+/var/log/rastisi-evidence/edge.jsonl {
+    hourly
+    maxsize 32M
+    rotate 48
+    maxage 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 root rastisi-evidence
+    sharedscripts
+    postrotate
+        /usr/sbin/nginx -s reopen
+    endscript
+}
+/var/log/rastisi-evidence/resources.jsonl {
+    daily
+    maxsize 8M
+    rotate 7
+    maxage 7
+    missingok
+    notifempty
+    compress
+    create 0640 root rastisi-evidence
+}

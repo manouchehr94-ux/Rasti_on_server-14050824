@@ -38,9 +38,41 @@ def sample(url, timeout):
         code, _, mime = result.stdout.partition(" ")
         status = int(code) if code.isdecimal() else 0
         healthy = result.returncode == 0 and status == 200 and mime.lower().startswith("text/html")
+        reason = {6: "dns", 7: "connect", 28: "timeout", 35: "tls", 60: "tls"}.get(result.returncode)
+        if not healthy and reason is None:
+            reason = "transport" if result.returncode else "http_or_content"
     except subprocess.TimeoutExpired:
-        status, healthy = 0, False
-    return {"status": status, "ok": healthy, "ms": round((time.monotonic() - started) * 1000)}
+        status, healthy, reason = 0, False, "timeout"
+    except OSError:
+        status, healthy, reason = 0, False, "probe_unavailable"
+    return {"status": status, "ok": healthy,
+            "ms": round((time.monotonic() - started) * 1000), "reason": reason}
+
+
+def valid_notification_url(url):
+    try:
+        parsed = urlsplit(url)
+        return bool(parsed.scheme == "https" and parsed.hostname and parsed.username is None
+                    and not parsed.fragment and all(33 <= ord(char) <= 126 for char in url))
+    except ValueError:
+        return False
+
+
+def post(url, payload):
+    # curl config on stdin keeps the URL and payload out of process arguments.
+    if not valid_notification_url(url):
+        return False
+    try:
+        config = f"url = {json.dumps(url)}\ndata-binary = {json.dumps(json.dumps(payload))}\n"
+        result = subprocess.run(
+            ["curl", "-q", "--silent", "--fail", "--proto", "=https", "--max-time", "10",
+             "--output", os.devnull, "--write-out", "%{http_code}", "--header",
+             "Content-Type: application/json", "--config", "-"],
+            input=config, text=True, capture_output=True, timeout=12,
+        )
+        return result.returncode == 0 and result.stdout.startswith("2")
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def alert(failures, webhook):
@@ -51,23 +83,11 @@ def alert(failures, webhook):
         "correlation": "compare UTC observations with WORKER TIMEOUT journal evidence",
     }
     print("::error::" + payload["message"] + ": " + ", ".join(payload["routes"]), file=sys.stderr)
-    if webhook:
-        # Do not follow webhook redirects or log transport errors containing its URL.
-        try:
-            result = subprocess.run(
-                ["curl", "-q", "--silent", "--fail", "--proto", "=https", "--max-time", "10",
-                 "--output", os.devnull, "--write-out", "%{http_code}", "--header", "Content-Type: application/json",
-                 "--data-binary", "@-", "--", webhook],
-                input=json.dumps(payload), text=True, capture_output=True, timeout=12,
-            )
-            delivered = result.returncode == 0 and result.stdout.startswith("2")
-        except subprocess.TimeoutExpired:
-            delivered = False
-        if not delivered:
-            print("::error::Availability webhook delivery failed", file=sys.stderr)
+    if webhook and not post(webhook, payload):
+        print("::error::Availability webhook delivery failed", file=sys.stderr)
 
 
-def monitor(targets, duration, interval, timeout, output, webhook=""):
+def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=""):
     failures = {label: [] for label in targets}
     deadline = time.monotonic() + duration
     while True:
@@ -81,9 +101,14 @@ def monitor(targets, duration, interval, timeout, output, webhook=""):
                 failures[label].clear()
             else:
                 failures[label].append(observation)
+        heartbeat_failed = heartbeat and not post(heartbeat, {"event": "probe_round_completed"})
+        if heartbeat_failed:
+            print("::error::Availability heartbeat delivery failed", file=sys.stderr)
         consecutive = {label: samples for label, samples in failures.items() if len(samples) >= 2}
         if consecutive:
             alert(consecutive, webhook)
+            return 1
+        if heartbeat_failed:
             return 1
         if started >= deadline:
             return int(any(failures.values()))
@@ -97,6 +122,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--output", default="availability.jsonl")
     parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--require-notifications", action="store_true")
     args = parser.parse_args()
     if min(args.duration, args.interval, args.timeout) <= 0:
         parser.error("timings must be positive")
@@ -104,11 +130,14 @@ def main():
         targets = routes(os.environ.get("RASTISI_PUBLIC_URL", ""), os.environ.get("RASTISI_TENANT_URL", ""))
     except ValueError as exc:
         parser.error(str(exc))
+    webhook = os.environ.get("RASTISI_AVAILABILITY_WEBHOOK", "")
+    heartbeat = os.environ.get("RASTISI_AVAILABILITY_HEARTBEAT", "")
+    if args.require_notifications and (webhook == heartbeat or not all(map(valid_notification_url, (webhook, heartbeat)))):
+        parser.error("configure separate HTTPS outage and heartbeat endpoints")
     if args.validate:
         return 0
     with open(args.output, "w", encoding="utf-8") as output:
-        return monitor(targets, args.duration, args.interval, args.timeout, output,
-                       os.environ.get("RASTISI_AVAILABILITY_WEBHOOK", ""))
+        return monitor(targets, args.duration, args.interval, args.timeout, output, webhook, heartbeat)
 
 
 if __name__ == "__main__":

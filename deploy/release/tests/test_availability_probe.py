@@ -36,8 +36,10 @@ class AvailabilityTests(unittest.TestCase):
                 patch.object(probe.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="204")) as run:
             self.assertEqual(probe.monitor({"home": "https://platform.example"}, 60, 60, 8, output,
                                            "https://alerts.example/owner"), 1)
-        self.assertEqual(json.loads(run.call_args.kwargs["input"])["routes"], ["home"])
-        payload = json.loads(run.call_args.kwargs["input"])
+        config = dict(line.split(" = ", 1) for line in run.call_args.kwargs["input"].splitlines())
+        payload = json.loads(json.loads(config["data-binary"]))
+        self.assertEqual(payload["routes"], ["home"])
+        self.assertNotIn("https://alerts.example/owner", run.call_args.args[0])
         self.assertEqual(len(payload["observations"]), 2)
         self.assertTrue(all("at" in item and item["status"] == 0 for item in payload["observations"]))
         self.assertEqual([json.loads(line)["status"] for line in output.getvalue().splitlines()], [0, 0])

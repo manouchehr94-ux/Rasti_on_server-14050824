@@ -13,12 +13,13 @@ jobs:
     env:
       RASTISI_PUBLIC_URL: ${{ vars.PRODUCTION_URL }}
       RASTISI_TENANT_URL: ${{ vars.RASTISI_TENANT_URL }}
+      RASTISI_AVAILABILITY_HEARTBEAT: ${{ secrets.RASTISI_AVAILABILITY_HEARTBEAT }}
       RASTISI_AVAILABILITY_WEBHOOK: ${{ secrets.RASTISI_AVAILABILITY_WEBHOOK }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - run: python3 deploy/release/availability_probe.py
+      - run: python3 deploy/release/availability_probe.py --require-notifications
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
