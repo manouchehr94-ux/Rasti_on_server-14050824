@@ -23,9 +23,16 @@ jobs:
       - run: bash stage.sh up --approve-local
       - name: Verify the laptop loopback entry point
         run: |
-          test "$(curl --noproxy '*' --silent --max-time 10 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/)" = 200
+          code="$(curl --noproxy '*' --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/)"
+          echo "Loopback HTTP $code"
+          test "$code" = 200
       - name: Stop one entire Gunicorn instance, verify health, recover a stopped worker and confirm telemetry
         run: bash stage.sh test
+      - name: Capture fixture status on failure
+        if: failure()
+        run: |
+          bash stage.sh status
+          docker compose --env-file compose.empty.env -f compose.yml logs --tail=25 nginx app-a app-b || true
       - name: Stop the disposable staging stack
         if: always()
         run: bash stage.sh stop
