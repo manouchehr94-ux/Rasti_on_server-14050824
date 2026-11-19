@@ -22,3 +22,9 @@ for fail in 0 1; do
     -e RASTISI_TEST_BOOTSTRAP_FAIL="$fail" "$image" \
     python3 /repo/deploy/release/selftest/bootstrap_layout_test.py
 done
+
+# Real upstream routing and worker replacement, with a fresh PostgreSQL fixture.
+docker run --rm --network none -w /repo \
+  --mount "type=bind,src=$repo,dst=/repo,readonly" \
+  --mount "type=bind,src=$deps,dst=/deps,readonly" \
+  "$image" bash deploy/release/selftest/p0_availability.sh

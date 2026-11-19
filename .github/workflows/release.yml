@@ -199,7 +199,7 @@ jobs:
     name: Deploy (waits for the owner's approval)
     needs: [plan, build, ci]
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 165
     # The repository setting 'Required reviewers' on this environment IS the owner's approval. Nothing below runs before it is given.
     environment:
       name: production
@@ -256,6 +256,12 @@ jobs:
           release="$(python deploy/release/remote_client.py stage --sha "$SHA" --sha256 "$SHA256" --artifact "dist/$NAME" | tail -n 1)"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "Staged as $release"
+      - name: Validate external probe targets before activation
+        if: ${{ !inputs.dry_run }}
+        env:
+          RASTISI_PUBLIC_URL: ${{ vars.PRODUCTION_URL }}
+          RASTISI_TENANT_URL: ${{ vars.RASTISI_TENANT_URL }}
+        run: python deploy/release/availability_probe.py --validate
       - name: Activate and verify (detached on the server, resumable)
         env:
           SHA: ${{ needs.plan.outputs.sha }}
@@ -271,6 +277,14 @@ jobs:
           code="${PIPESTATUS[0]}"
           echo "exit_code=$code" >> "$GITHUB_ENV"
           exit "$code"
+      - name: Observe external availability for 65 minutes
+        id: external_soak
+        if: success() && !inputs.dry_run
+        env:
+          RASTISI_PUBLIC_URL: ${{ vars.PRODUCTION_URL }}
+          RASTISI_TENANT_URL: ${{ vars.RASTISI_TENANT_URL }}
+          RASTISI_AVAILABILITY_WEBHOOK: ${{ secrets.RASTISI_AVAILABILITY_WEBHOOK }}
+        run: python deploy/release/availability_probe.py --duration 3900
       - name: Server status after
         if: always()
         run: python deploy/release/remote_client.py status | tee status-after.json || true
@@ -292,6 +306,7 @@ jobs:
         if: always()
         env:
           DRY: ${{ inputs.dry_run }}
+          EXTERNAL_SOAK: ${{ steps.external_soak.outcome }}
           FINAL_STATUS: ${{ steps.final_status.outcome }}
         run: |
           {
@@ -303,6 +318,8 @@ jobs:
             case "${exit_code:-unknown}" in
               0)  if [ "$DRY" = true ]; then
                     echo "| Outcome | **staged and checked in dry-run mode** |"
+                  elif [ "$EXTERNAL_SOAK" != success ]; then
+                    echo "| Outcome | activation finished; sustained public health unverified. Inspect external probe evidence and server status. |"
                   elif [ "$FINAL_STATUS" = success ]; then
                     echo "| Outcome | **deployed and verified** |"
                   else
@@ -323,6 +340,7 @@ jobs:
           name: deploy-log-${{ github.run_id }}
           path: |
             deploy.log
+            availability.jsonl
             status-before.json
             status-after.json
           if-no-files-found: ignore
