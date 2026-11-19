@@ -46,3 +46,31 @@ class AvailabilityTests(unittest.TestCase):
                 patch.object(probe.time, "sleep"):
             self.assertEqual(probe.monitor({"home": "https://platform.example"}, 60, 20, 8, io.StringIO()), 0)
         alert.assert_not_called()
+
+    def test_exact_soak_window_and_late_failure(self):
+        class Clock:
+            now = 0
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, delay):
+                self.now += delay
+
+        for late_failure in (False, True):
+            with self.subTest(late_failure=late_failure):
+                clock = Clock()
+                observations = []
+
+                def sample(_, timeout):
+                    observations.append(clock.now)
+                    healthy = not late_failure or clock.now < 3840
+                    return {"ok": healthy, "status": 200 if healthy else 503, "ms": 50}
+
+                with patch.object(probe.time, "monotonic", clock.monotonic), \
+                        patch.object(probe.time, "sleep", clock.sleep), \
+                        patch.object(probe, "sample", sample), patch.object(probe, "alert") as alert:
+                    result = probe.monitor({"tenant": "https://tenant.example"}, 3900, 60, 8, io.StringIO())
+                self.assertEqual(observations, list(range(0, 3901, 60)))
+                self.assertEqual(result, int(late_failure))
+                self.assertEqual(alert.call_count, int(late_failure))
