@@ -10,7 +10,6 @@ ExecStart=/usr/bin/python3 -I /opt/rastisi-observability/availability_resources.
 StandardOutput=append:/var/log/rastisi-evidence/resources.jsonl
 StandardError=null
 UMask=0027
-RuntimeMaxSec=12
 TimeoutStartSec=12
 NoNewPrivileges=yes
 ProtectSystem=strict
