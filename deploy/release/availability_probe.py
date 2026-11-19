@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -58,6 +59,13 @@ def valid_notification_url(url):
         return False
 
 
+def healthchecks_pair(website, heartbeat):
+    pattern = r"https://hc-ping\.com/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}"
+    return website.lower() != heartbeat.lower() and all(
+        re.fullmatch(pattern, endpoint) for endpoint in (website, heartbeat)
+    )
+
+
 def post(url, payload):
     # curl config on stdin keeps the URL and payload out of process arguments.
     if not valid_notification_url(url):
@@ -87,12 +95,14 @@ def alert(failures, webhook):
         print("::error::Availability webhook delivery failed", file=sys.stderr)
 
 
-def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=""):
+def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat="", *, website=""):
     failures = {label: [] for label in targets}
     deadline = time.monotonic() + duration
-    heartbeat_degraded = False
+    notification_degraded = False
+    previous_failed_round = {}
     while True:
         started = time.monotonic()
+        failed_round = {}
         for label, url in targets.items():
             at = datetime.now(timezone.utc).isoformat()
             result = sample(url, timeout)
@@ -102,17 +112,54 @@ def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=
                 failures[label].clear()
             else:
                 failures[label].append(observation)
+                failed_round[label] = observation
         heartbeat_failed = heartbeat and not post(heartbeat, {"event": "probe_round_completed"})
         if heartbeat_failed:
-            heartbeat_degraded = True
+            notification_degraded = True
             print("::error::Availability heartbeat delivery failed", file=sys.stderr)
         consecutive = {label: samples for label, samples in failures.items() if len(samples) >= 2}
+        if website:
+            consecutive = {
+                label: [round_failures[label] for round_failures in (previous_failed_round, failed_round)
+                        if label in round_failures]
+                for label in previous_failed_round.keys() | failed_round.keys()
+            } if previous_failed_round and failed_round else {}
+            previous_failed_round = failed_round
+        if website and (consecutive or not failed_round):
+            endpoint = website + "/fail" if consecutive else website
+            payload = {"event": "website_down" if consecutive else "website_up",
+                       "routes": sorted(consecutive)}
+            if not post(endpoint, payload):
+                notification_degraded = True
+                print("::error::Website Healthchecks delivery failed", file=sys.stderr)
         if consecutive:
             alert(consecutive, webhook)
             return 1
         if started >= deadline:
-            return int(heartbeat_degraded or any(failures.values()))
+            return int(notification_degraded or any(failures.values()))
         time.sleep(max(0, min(started + interval, deadline) - time.monotonic()))
+
+
+def drill(website, heartbeat):
+    """Exercise real ping transports with synthetic states and then stop heartbeats."""
+    delivery = [
+        (website, "website_up"),
+        (heartbeat, "probe_round_completed"),
+        (heartbeat, "probe_round_completed"),
+        (heartbeat, "probe_round_completed"),
+        (website + "/fail", "website_down"),
+        (heartbeat, "probe_round_completed"),
+        (website, "website_up"),
+    ]
+    for endpoint, event in delivery:
+        if not post(endpoint, {"event": event, "synthetic": True}):
+            print("::error::Healthchecks synthetic delivery failed", file=sys.stderr)
+            return 1
+        print("Accepted synthetic event:", event, flush=True)
+        # Leave time for the provider to dispatch the outage before the recovery.
+        if event == "website_down":
+            time.sleep(60)
+    return 0
 
 
 def main():
@@ -122,22 +169,33 @@ def main():
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--output", default="availability.jsonl")
     parser.add_argument("--validate", action="store_true")
-    parser.add_argument("--require-notifications", action="store_true")
+    parser.add_argument("--healthchecks", action="store_true")
+    parser.add_argument("--healthchecks-drill", action="store_true",
+                        help="send synthetic healthy, down and recovery rounds without checking any site")
     args = parser.parse_args()
     if min(args.duration, args.interval, args.timeout) <= 0:
         parser.error("timings must be positive")
+    website = os.environ.get("RASTISI_HEALTHCHECKS_WEBSITE", "")
+    healthchecks_heartbeat = os.environ.get("RASTISI_HEALTHCHECKS_HEARTBEAT", "")
+    if args.healthchecks or args.healthchecks_drill:
+        if not healthchecks_pair(website, healthchecks_heartbeat):
+            parser.error("configure two distinct default Healthchecks UUID Ping URLs")
+    if args.healthchecks_drill:
+        return drill(website, healthchecks_heartbeat)
     try:
         targets = routes(os.environ.get("RASTISI_PUBLIC_URL", ""), os.environ.get("RASTISI_TENANT_URL", ""))
     except ValueError as exc:
         parser.error(str(exc))
     webhook = os.environ.get("RASTISI_AVAILABILITY_WEBHOOK", "")
     heartbeat = os.environ.get("RASTISI_AVAILABILITY_HEARTBEAT", "")
-    if args.require_notifications and (webhook == heartbeat or not all(map(valid_notification_url, (webhook, heartbeat)))):
-        parser.error("configure separate HTTPS outage and heartbeat endpoints")
+    if args.healthchecks:
+        webhook, heartbeat = "", healthchecks_heartbeat
+    else:
+        website = ""
     if args.validate:
         return 0
     with open(args.output, "w", encoding="utf-8") as output:
-        return monitor(targets, args.duration, args.interval, args.timeout, output, webhook, heartbeat)
+        return monitor(targets, args.duration, args.interval, args.timeout, output, webhook, heartbeat, website=website)
 
 
 if __name__ == "__main__":

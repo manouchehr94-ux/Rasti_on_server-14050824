@@ -90,3 +90,50 @@ class AvailabilityTests(unittest.TestCase):
                 self.assertEqual(observations, list(range(0, 3901, 60)))
                 self.assertEqual(result, int(late_failure))
                 self.assertEqual(alert.call_count, int(late_failure))
+
+    def test_healthchecks_separate_down_and_recovery(self):
+        website = "https://hc-ping.com/10000000-0000-0000-0000-000000000001"
+        heartbeat = "https://hc-ping.com/10000000-0000-0000-0000-000000000002"
+        self.assertTrue(probe.healthchecks_pair(website, heartbeat))
+        for invalid in (website, website + "/fail", "https://other.example/private"):
+            self.assertFalse(probe.healthchecks_pair(website, invalid))
+
+        good = {"status": 200, "ok": True, "ms": 1}
+        bad = {"status": 503, "ok": False, "ms": 1}
+        statuses = [good, good, good, bad, bad, good, good, good, good, good]
+        destinations = {"home": "https://fixture.example", "tenant": "https://tenant.example"}
+        with patch.object(probe, "sample", side_effect=statuses), \
+                patch.object(probe.time, "monotonic", side_effect=[0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]), \
+                patch.object(probe.time, "sleep"), patch.object(probe, "post", return_value=True) as post:
+            self.assertEqual(probe.monitor(destinations, 1, 1, 8, io.StringIO(),
+                                           heartbeat=heartbeat, website=website), 1)
+            self.assertEqual(probe.monitor(destinations, 1, 1, 8, io.StringIO(),
+                                           heartbeat=heartbeat, website=website), 0)
+        self.assertEqual(post.call_args_list[4].args[1]["routes"], ["home", "tenant"])
+        self.assertEqual([call.args[0] for call in post.call_args_list],
+                         [heartbeat, website, heartbeat, heartbeat, website + "/fail",
+                          heartbeat, website, heartbeat, website])
+
+    def test_heartbeat_window_handles_delayed_and_missing_runner(self):
+        # A provider model independent of the runner. Explicit website failures
+        # take effect immediately. Missed-ping deadlines differ by check.
+        last = {"/heartbeat": 0, "/website": 0}
+        deadlines = {"/heartbeat": 20, "/website": 24 * 60 + 60}
+        def expired(minute):
+            return {check for check in last if minute - last[check] >= deadlines[check]}
+
+        self.assertEqual(expired(17), set())  # periodic run queued or skipped
+        last.update({"/heartbeat": 17, "/website": 17})
+        self.assertEqual(expired(36), set())
+        self.assertEqual(expired(37), {"/heartbeat"})  # runner stopped
+        last["/heartbeat"] = 38
+        self.assertEqual(expired(38), set())
+
+    def test_live_drill_exercises_distinct_transports_then_stops(self):
+        with patch.object(probe, "post", return_value=True) as post, patch.object(probe.time, "sleep"):
+            self.assertEqual(probe.drill("https://fixture.example/site", "https://fixture.example/beat"), 0)
+        posted = [call.args[0] for call in post.call_args_list]
+        self.assertEqual(posted.count("https://fixture.example/beat"), 4)
+        self.assertEqual([url for url in posted if "/site" in url],
+                         ["https://fixture.example/site", "https://fixture.example/site/fail",
+                          "https://fixture.example/site"])

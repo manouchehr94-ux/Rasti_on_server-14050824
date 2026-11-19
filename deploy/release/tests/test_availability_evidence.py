@@ -163,6 +163,16 @@ class IsolatedAvailabilityTest(unittest.TestCase):
                                                webhook.replace("/alert", "/heartbeat")), 1)
                 self.assertEqual([path for path, _ in received], ["/heartbeat", "/heartbeat", "/alert"])
                 self.assertEqual(len(received[-1][1]["observations"]), 2)
+                received.clear()
+                website = webhook.replace("/alert", "/website")
+                heartbeat = webhook.replace("/alert", "/heartbeat")
+                self.assertEqual(probe.monitor({"home": wrong_host}, 1, 1, 2, io.StringIO(),
+                                               heartbeat=heartbeat, website=website), 1)
+                self.assertEqual(probe.monitor({"home": origin}, 1, 1, 2, io.StringIO(),
+                                               heartbeat=heartbeat, website=website), 0)
+                self.assertEqual([path for path, _ in received],
+                                 ["/heartbeat", "/heartbeat", "/website/fail",
+                                  "/heartbeat", "/website", "/heartbeat", "/website"])
                 self.assertNotIn("PRIVATE_MARKER", fixture["edge_log"].read_text()
                                  + fixture["worker_log"].read_text() + report.getvalue())
 
