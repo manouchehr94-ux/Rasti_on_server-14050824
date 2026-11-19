@@ -14,6 +14,8 @@ docker run -d --name "$name" --mount "type=bind,src=$repo,dst=/repo,readonly" --
 docker exec "$name" /opt/test-venv/bin/pip install --no-index --find-links /deps/wheelhouse --require-hashes --no-deps -r /deps/requirements.lock
 docker exec "$name" /opt/test-venv/bin/pip check
 docker exec "$name" python3 /repo/deploy/release/selftest/installed_layout_test.py
+# Release the first container's writable layer before starting another fixture.
+docker rm -f "$name" >/dev/null
 
 # Separate fresh containers: adopting an existing flat layout must not reuse the
 # installed-layout test's deployment account/configuration.
