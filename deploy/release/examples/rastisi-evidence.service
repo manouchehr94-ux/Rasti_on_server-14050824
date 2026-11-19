@@ -1,0 +1,17 @@
+[Unit]
+Description=RastiSi private resource evidence sample
+
+[Service]
+Type=oneshot
+User=rastisi-evidence
+Group=rastisi-evidence
+EnvironmentFile=-/etc/rastisi/evidence.env
+ExecStart=/usr/bin/python3 -I /opt/rastisi-observability/availability_resources.py
+StandardOutput=append:/var/log/rastisi-evidence/resources.jsonl
+StandardError=null
+UMask=0027
+TimeoutStartSec=12
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=no
