@@ -1,0 +1,9 @@
+# Read-only worker capacity probe
+
+Phase 1 collects one systemd/procfs/cgroup v2 snapshot and optionally one aggregate from an existing, explicitly selected libpq service. It starts no continuous sampler. The SSH runner uses a regular account and an already verified host key. Probe bytes enter through stdin and no remote script is written. The runner expects the existing libpq profile in the SSH user's normal service file or the system service file. Use an existing monitoring account with sufficient visibility of global statistics. Omit PgService for a host-only snapshot.
+
+Only numeric data, allowlisted labels and sanitized errors are emitted by the probes. SSH banners, if configured, are separate from probe JSON. The host collector never loads the Gunicorn application or configuration. Direct children are a proxy for live workers under the current master. The operator can privately verify effective worker count, worker class, threads and timeout and report those four values separately. Missing cgroup v2 or inaccessible memory fields are unavailable. A single sample provides no peak-capacity guarantee.
+
+The shell guard accepts only the pinned SQL. The connection is noninteractive with a 12-second client deadline. It uses a connection-local read-only default and statement and lock timeouts, and the SQL explicitly opens a read-only transaction. It reads aggregate pg_catalog counters and rolls back. Ordinary metadata access-share locks and one monitoring connection are expected. No explicit locks, application-table reads, writes, migrations or persistent settings changes are requested.
+
+Review the exact draft commit and verify the four published SHA-256 digests before running. The PowerShell launcher rechecks all three remote probe hashes before opening SSH. The Windows prerequisites are Git, tar and OpenSSH. No longer sampling or changes to Gunicorn are authorized by this probe.
