@@ -100,7 +100,7 @@ class AvailabilityTests(unittest.TestCase):
 
         good = {"status": 200, "ok": True, "ms": 1}
         bad = {"status": 503, "ok": False, "ms": 1}
-        statuses = [good, good, good, bad, bad, good, good, good, good, good]
+        statuses = [good, good, good, bad, good, bad, good, good, good, good]
         destinations = {"home": "https://fixture.example", "tenant": "https://tenant.example"}
         with patch.object(probe, "sample", side_effect=statuses), \
                 patch.object(probe.time, "monotonic", side_effect=[0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]), \
@@ -109,7 +109,7 @@ class AvailabilityTests(unittest.TestCase):
                                            heartbeat=heartbeat, website=website), 1)
             self.assertEqual(probe.monitor(destinations, 1, 1, 8, io.StringIO(),
                                            heartbeat=heartbeat, website=website), 0)
-        self.assertEqual(post.call_args_list[4].args[1]["routes"], ["home", "tenant"])
+        self.assertEqual(post.call_args_list[4].args[1]["routes"], ["tenant"])
         self.assertEqual([call.args[0] for call in post.call_args_list],
                          [heartbeat, website, heartbeat, heartbeat, website + "/fail",
                           heartbeat, website, heartbeat, website])
@@ -129,11 +129,17 @@ class AvailabilityTests(unittest.TestCase):
         last["/heartbeat"] = 38
         self.assertEqual(expired(38), set())
 
-    def test_live_drill_exercises_distinct_transports_then_stops(self):
-        with patch.object(probe, "post", return_value=True) as post, patch.object(probe.time, "sleep"):
-            self.assertEqual(probe.drill("https://fixture.example/site", "https://fixture.example/beat"), 0)
-        posted = [call.args[0] for call in post.call_args_list]
-        self.assertEqual(posted.count("https://fixture.example/beat"), 4)
-        self.assertEqual([url for url in posted if "/site" in url],
-                         ["https://fixture.example/site", "https://fixture.example/site/fail",
-                          "https://fixture.example/site"])
+    def test_rotating_failed_routes_never_send_website_down_or_up(self):
+        website = "https://website.example/check"
+        heartbeat = "https://heartbeat.example/check"
+        good = {"status": 200, "ok": True, "ms": 1}
+        bad = {"status": 503, "ok": False, "ms": 1}
+        targets = {"home": "https://fixture.example", "login": "https://fixture.example/login/"}
+        with patch.object(probe, "sample", side_effect=[bad, good, good, bad]), \
+                patch.object(probe.time, "monotonic", side_effect=[0, 0, 0, 1]), \
+                patch.object(probe.time, "sleep"), patch.object(probe, "post", return_value=True) as post, \
+                patch.object(probe, "alert") as alert:
+            self.assertEqual(probe.monitor(targets, 1, 1, 8, io.StringIO(),
+                                           heartbeat=heartbeat, website=website), 1)
+        alert.assert_not_called()
+        self.assertEqual([call.args[0] for call in post.call_args_list], [heartbeat, heartbeat])

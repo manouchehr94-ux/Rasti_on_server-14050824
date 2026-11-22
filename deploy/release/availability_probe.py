@@ -99,10 +99,8 @@ def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=
     failures = {label: [] for label in targets}
     deadline = time.monotonic() + duration
     notification_degraded = False
-    previous_failed_round = {}
     while True:
         started = time.monotonic()
-        failed_round = {}
         for label, url in targets.items():
             at = datetime.now(timezone.utc).isoformat()
             result = sample(url, timeout)
@@ -112,20 +110,12 @@ def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=
                 failures[label].clear()
             else:
                 failures[label].append(observation)
-                failed_round[label] = observation
         heartbeat_failed = heartbeat and not post(heartbeat, {"event": "probe_round_completed"})
         if heartbeat_failed:
             notification_degraded = True
             print("::error::Availability heartbeat delivery failed", file=sys.stderr)
         consecutive = {label: samples for label, samples in failures.items() if len(samples) >= 2}
-        if website:
-            consecutive = {
-                label: [round_failures[label] for round_failures in (previous_failed_round, failed_round)
-                        if label in round_failures]
-                for label in previous_failed_round.keys() | failed_round.keys()
-            } if previous_failed_round and failed_round else {}
-            previous_failed_round = failed_round
-        if website and (consecutive or not failed_round):
+        if website and (consecutive or not any(failures.values())):
             endpoint = website + "/fail" if consecutive else website
             payload = {"event": "website_down" if consecutive else "website_up",
                        "routes": sorted(consecutive)}
@@ -140,28 +130,6 @@ def monitor(targets, duration, interval, timeout, output, webhook="", heartbeat=
         time.sleep(max(0, min(started + interval, deadline) - time.monotonic()))
 
 
-def drill(website, heartbeat):
-    """Exercise real ping transports with synthetic states and then stop heartbeats."""
-    delivery = [
-        (website, "website_up"),
-        (heartbeat, "probe_round_completed"),
-        (heartbeat, "probe_round_completed"),
-        (heartbeat, "probe_round_completed"),
-        (website + "/fail", "website_down"),
-        (heartbeat, "probe_round_completed"),
-        (website, "website_up"),
-    ]
-    for endpoint, event in delivery:
-        if not post(endpoint, {"event": event, "synthetic": True}):
-            print("::error::Healthchecks synthetic delivery failed", file=sys.stderr)
-            return 1
-        print("Accepted synthetic event:", event, flush=True)
-        # Leave time for the provider to dispatch the outage before the recovery.
-        if event == "website_down":
-            time.sleep(60)
-    return 0
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=int, default=60)
@@ -170,18 +138,13 @@ def main():
     parser.add_argument("--output", default="availability.jsonl")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--healthchecks", action="store_true")
-    parser.add_argument("--healthchecks-drill", action="store_true",
-                        help="send synthetic healthy, down and recovery rounds without checking any site")
     args = parser.parse_args()
     if min(args.duration, args.interval, args.timeout) <= 0:
         parser.error("timings must be positive")
     website = os.environ.get("RASTISI_HEALTHCHECKS_WEBSITE", "")
     healthchecks_heartbeat = os.environ.get("RASTISI_HEALTHCHECKS_HEARTBEAT", "")
-    if args.healthchecks or args.healthchecks_drill:
-        if not healthchecks_pair(website, healthchecks_heartbeat):
-            parser.error("configure two distinct default Healthchecks UUID Ping URLs")
-    if args.healthchecks_drill:
-        return drill(website, healthchecks_heartbeat)
+    if args.healthchecks and not healthchecks_pair(website, healthchecks_heartbeat):
+        parser.error("configure two distinct default Healthchecks UUID Ping URLs")
     try:
         targets = routes(os.environ.get("RASTISI_PUBLIC_URL", ""), os.environ.get("RASTISI_TENANT_URL", ""))
     except ValueError as exc:
