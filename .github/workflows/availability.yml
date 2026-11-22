@@ -13,7 +13,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && vars.RASTISI_AVAILABILITY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    environment: healthchecks-live
+    environment:
+      name: healthchecks-live
+      deployment: false
     env:
       RASTISI_PUBLIC_URL: ${{ vars.PRODUCTION_URL }}
       RASTISI_TENANT_URL: ${{ vars.RASTISI_TENANT_URL }}
