@@ -19,10 +19,12 @@ from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from apps.catalog.models import StoreIndustryInstallation
+from apps.catalog.models import Category, StoreIndustryInstallation
 from apps.portal.services import provisioning_service
 from apps.portal.tests._industry import ensure_other_template
+from apps.portal.tests._ready_template import select_template
 from apps.portal.tests.test_onboarding_journey import make_rich_template
+from apps.stores.models import Store
 from apps.subscriptions.models import Plan, PlanVersion, StoreSubscription
 
 try:  # pragma: no cover - environment dependent
@@ -66,13 +68,15 @@ class CustomIndustryBrowserTests(StaticLiveServerTestCase):
     def setUp(self):
         owner = get_user_model().objects.create_user(username="cib@example.com", email="cib@example.com", password="a-very-strong-pass-1")
         self.store = provisioning_service.provision_trial_store(owner=owner, name="فروشگاهِ مرورگر")
-        plan = Plan.objects.create(code="cib-plan", name="CIB")
-        version = PlanVersion.objects.create(plan=plan, version_number=1, status=PlanVersion.Status.PUBLISHED)
-        StoreSubscription.objects.create(store=self.store, plan_version=version, status=StoreSubscription.Status.TRIALING, is_current=True, trial_end_at=timezone.now())
+        if not StoreSubscription.objects.filter(store=self.store, is_current=True).exists():
+            plan = Plan.objects.create(code="cib-plan", name="CIB")
+            version = PlanVersion.objects.create(plan=plan, version_number=1, status=PlanVersion.Status.PUBLISHED)
+            StoreSubscription.objects.create(store=self.store, plan_version=version, status=StoreSubscription.Status.TRIALING, is_current=True, trial_end_at=timezone.now())
         self.other = ensure_other_template()
         self.rich = make_rich_template()
         client = Client(HTTP_HOST=HOST)
         client.force_login(owner)
+        self.owner_client = client
         self.base = f"http://{HOST}:{self.live_server_url.rsplit(':', 1)[1]}"
         self.ctx = self.browser.new_context(viewport={"width": 1280, "height": 900}, locale="fa-IR")
         self.ctx.add_cookies([{"name": "sessionid", "value": client.cookies["sessionid"].value, "domain": HOST, "path": "/"}])
@@ -146,3 +150,54 @@ class CustomIndustryBrowserTests(StaticLiveServerTestCase):
         self.assertTrue(page.locator("[data-ob-custom-industry]").is_visible())
         self.assertFalse(StoreIndustryInstallation.objects.filter(store=self.store).exists())
         self.assertEqual(page.locator("b", has_text="x").count(), 0)                        # not injected as markup
+
+    def test_other_accepts_an_underscore_in_a_business_name(self):
+        self._pick(self.other)
+        self._confirm()
+        self.page.fill("#ob-custom-industry-name", "صنایع_دستی")
+        with self.page.expect_response(lambda reply: "/onboarding/industry/" in reply.url and reply.request.method == "POST") as posted:
+            self.page.locator("[data-ob-install-submit]").click()
+        reply = posted.value
+        self.assertEqual(reply.status, 302, self.page.locator("#ob-custom-industry-error").all_text_contents())
+        self.page.wait_for_url("**/onboarding/template/**", timeout=4000)
+        self.assertEqual(StoreIndustryInstallation.objects.get(store=self.store).custom_industry_name, "صنایع_دستی")
+
+    def test_review_can_correct_industry_in_both_directions_without_duplicate_store(self):
+        account_count, store_count = get_user_model().objects.count(), Store.objects.count()
+        self._pick(self.other)
+        self._confirm()
+        self.page.fill("#ob-custom-industry-name", "صنایع دستی")
+        self.page.locator("[data-ob-install-submit]").click()
+        self.page.wait_for_url("**/onboarding/template/**")
+        pk = StoreIndustryInstallation.objects.get(store=self.store).pk
+        prefix = f"/app/stores/{self.store.public_id}/onboarding/"
+        self.assertEqual(select_template(self.owner_client, prefix + "template/").status_code, 302)
+        self.assertEqual(self.owner_client.post(prefix + "branding/", {"action": "skip"}).status_code, 302)
+        review_url = self.base + prefix + "review/"
+        for template, name in ((self.rich, ""), (self.other, "کارگاه سفال"), (self.rich, "")):
+            self.page.goto(review_url)
+            self.page.locator('a.ob-summary-edit[href*="/onboarding/industry/"]').click()
+            self.page.wait_for_selector("[data-ob-card]", timeout=4000)
+            self._pick(template)
+            if name:
+                self.page.fill("#ob-custom-industry-name", name)
+            self._confirm()
+            self.page.locator("[data-ob-install-submit]").click()
+            self.page.wait_for_url("**/onboarding/review/**", timeout=4000)
+            installation = StoreIndustryInstallation.objects.get(store=self.store)
+            self.assertEqual((installation.pk, installation.industry_template_id, installation.custom_industry_name),
+                             (pk, template.pk, name))
+        self.assertEqual((get_user_model().objects.count(), Store.objects.count()), (account_count, store_count))
+        self.store.refresh_from_db()
+        self.assertIsNone(self.store.onboarding_completed_at)
+        self.assertEqual(Category.objects.filter(
+            store=self.store, source_template_category__industry_template=self.rich,
+        ).count(), self.rich.categories.count())
+        self.assertEqual(self.owner_client.post(prefix + "review/").status_code, 302)
+        self.store.refresh_from_db()
+        completed = self.store.onboarding_completed_at
+        self.assertIsNotNone(completed)
+        self.assertEqual(self.owner_client.post(prefix + "review/").status_code, 302)
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.onboarding_completed_at, completed)
+        self.assertEqual((get_user_model().objects.count(), Store.objects.count()), (account_count, store_count))

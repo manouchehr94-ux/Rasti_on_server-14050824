@@ -28,9 +28,9 @@
       <div class="ob-summary-row">
         <dt class="ob-summary-label">قالبِ صنف</dt>
         <dd class="ob-summary-value{% if not installation %} is-empty{% endif %}">
-          {% if installation %}{{ installation.industry_template.name }} <span class="ob-tag">{{ installation.categories_created }} دسته · {{ installation.attributes_created }} ویژگی</span>{% else %}نصب نشده — فروشگاه با دسته‌بندیِ خالی شروع می‌شود{% endif %}
+          {% if installation %}{{ installation.custom_industry_name|default:installation.industry_template.name }} <span class="ob-tag">{{ installation.categories_created }} دسته · {{ installation.attributes_created }} ویژگی</span>{% else %}نصب نشده — فروشگاه با دسته‌بندیِ خالی شروع می‌شود{% endif %}
         </dd>
-        <dd><a class="ob-summary-edit" href="{% url 'portal:onboarding-industry' store.public_id %}">{% if installation %}مشاهده{% else %}انتخاب{% endif %}</a></dd>
+        <dd><a class="ob-summary-edit" href="{% url 'portal:onboarding-industry' store.public_id %}{% if can_edit_industry %}?edit=1{% endif %}">{% if not installation %}انتخاب{% elif can_edit_industry %}ویرایش صنف{% else %}مشاهده{% endif %}</a></dd>
       </div>
     </dl>
   </div>

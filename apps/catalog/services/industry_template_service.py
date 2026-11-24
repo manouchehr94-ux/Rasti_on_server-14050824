@@ -1,4 +1,4 @@
-"""نصب یک قالب صنف پلتفرم روی یک Store — deep copy، اتمیک، حداکثر یک نصب در طول عمر Store.
+"""نصب یک قالب صنف پلتفرم روی یک Store — deep copy اتمیک. اصلاح صریح در بازبینیِ پیش از انتشار، همان رکورد نصب را به‌روز می‌کند.
 
 ADR-22 (استراتژی کپی) و ADR-25 (نسخه‌بندی و سیاست تغییر صنف) را در
 ``docs/docs/product/architecture/SAAS_DOMAIN_DECISIONS.md`` نگاه کنید.
@@ -74,7 +74,7 @@ def validate_custom_industry_name(raw) -> str:
         raise IndustryInstallationError(CUSTOM_INDUSTRY_NAME_TOO_SHORT_MESSAGE)
     if len(text) > CUSTOM_INDUSTRY_NAME_MAX_LENGTH:
         raise IndustryInstallationError(CUSTOM_INDUSTRY_NAME_TOO_LONG_MESSAGE)
-    allowed_punctuation = " \u200c()-.,،&/"
+    allowed_punctuation = " \u200c()-_.,،&/"
     # حروف/ارقامِ هر زبان + اعراب (Mn/Mc، مثل کسره‌ی «ِ» که در «لوازم‌التحریرِ» می‌آید)؛ `\w` اعراب را نمی‌پذیرد، پس دستی بررسی می‌شود
     if not all(ch.isalnum() or ch in allowed_punctuation or unicodedata.category(ch) in {"Mn", "Mc"} for ch in text):
         raise IndustryInstallationError(CUSTOM_INDUSTRY_NAME_INVALID_MESSAGE)
@@ -84,14 +84,31 @@ def validate_custom_industry_name(raw) -> str:
 
 
 @transaction.atomic
-def install_industry_template(store, industry_template: IndustryTemplate, *, custom_name=None) -> InstallationResult:
+def install_industry_template(
+    store, industry_template: IndustryTemplate, *, custom_name=None, correct_onboarding=False,
+) -> InstallationResult:
     """قالب صنف را روی Store نصب می‌کند — کاملاً اتمیک؛ در خطا هیچ تغییری ثبت نمی‌شود.
 
     برایِ قالبِ «سایر (صنف آزاد)» نامِ واقعیِ صنف (``custom_name``) الزامی و اعتبارسنجی‌شده است؛ برایِ هر قالبِ دیگری
     نادیده/خالی ذخیره می‌شود (فروشنده‌ی صنفِ مشخص نمی‌تواند نامِ آزاد را جعل کند). ``custom_name=None`` برایِ فراخوانی‌هایِ
     قدیمی (seed/مهاجرت/تست) فقط در «other» خطا نمی‌دهد: آن‌جا خالی ذخیره می‌شود تا نصب‌هایِ برنامه‌ریزی‌شده نشکنند —
-    ولی دو نقطه‌ی ورودیِ فروشنده (آنبوردینگ و تنظیماتِ داشبورد) همیشه ``custom_name`` را (حتی خالی) می‌فرستند."""
-    can_install_industry_template(store)
+    ولی دو نقطه‌ی ورودیِ فروشنده (آنبوردینگ و تنظیماتِ داشبورد) همیشه ``custom_name`` را (حتی خالی) می‌فرستند.
+
+    اصلاح پیش از انتشار فقط از راه آنبوردینگ مجاز است. همان رکورد نصب
+    به‌روزرسانی می‌شود و داده‌های کاتالوگ موجود حفظ می‌شوند.
+    """
+    from apps.stores.models import Store
+
+    store = Store.objects.select_for_update().get(pk=store.pk)
+    previous = None
+    if correct_onboarding:
+        if store.onboarding_completed_at is not None or store.onboarding_stage != Store.OnboardingStage.REVIEW:
+            raise IndustryInstallationError("پس از انتشار، تغییر صنف در راه‌اندازی مجاز نیست.")
+        previous = StoreIndustryInstallation.objects.filter(store=store).first()
+        if previous is None:
+            raise IndustryInstallationError("ابتدا صنف فروشگاه را در مرحله انتخاب صنف تأیید کنید.")
+    else:
+        can_install_industry_template(store)
     stored_custom_name = ""
     if is_other_industry(industry_template) and custom_name is not None:
         stored_custom_name = validate_custom_industry_name(custom_name)
@@ -100,6 +117,21 @@ def install_industry_template(store, industry_template: IndustryTemplate, *, cus
             f"قالب صنف «{industry_template.name}» در وضعیت «{industry_template.readiness}» است و برای نصب در "
             "دسترس نیست (نگاه کنید به ADR-26)."
         )
+
+    if previous and previous.industry_template_id == industry_template.pk:
+        if previous.custom_industry_name != stored_custom_name:
+            previous.custom_industry_name = stored_custom_name
+            previous.save(update_fields=["custom_industry_name", "updated_at"])
+        return InstallationResult(installation=previous)
+
+    # Revisiting a previously selected template must not duplicate its categories.
+    # Preserve existing store catalog data and reuse only exact template sources.
+    existing_categories = {}
+    if previous:
+        for category in Category.objects.filter(
+            store=store, source_template_category__industry_template=industry_template,
+        ).order_by("pk"):
+            existing_categories.setdefault(category.source_template_category_id, category)
 
     category_map: dict[int, Category] = {}
     categories_created: list[Category] = []
@@ -117,6 +149,10 @@ def install_industry_template(store, industry_template: IndustryTemplate, *, cus
                 still_remaining.append(template_category)
                 continue
             parent = category_map.get(template_category.parent_id) if template_category.parent_id else None
+            if template_category.pk in existing_categories:
+                category_map[template_category.pk] = existing_categories[template_category.pk]
+                progressed.append(template_category)
+                continue
             category = Category(
                 store=store, name=template_category.name, icon=template_category.icon,
                 parent=parent, order=template_category.display_order,
@@ -201,11 +237,21 @@ def install_industry_template(store, industry_template: IndustryTemplate, *, cus
             category=category, attribute=attribute, defaults={"display_order": tro.display_order},
         )
 
-    installation = StoreIndustryInstallation.objects.create(
-        store=store, industry_template=industry_template, installed_version=industry_template.version,
-        status=StoreIndustryInstallation.Status.COMPLETED, custom_industry_name=stored_custom_name,
-        categories_created=len(categories_created), attributes_created=len(attributes_created),
-    )
+    settings = {
+        "industry_template": industry_template,
+        "installed_version": industry_template.version,
+        "status": StoreIndustryInstallation.Status.COMPLETED,
+        "custom_industry_name": stored_custom_name,
+        "categories_created": len(categories_created),
+        "attributes_created": len(attributes_created),
+    }
+    if previous is None:
+        installation = StoreIndustryInstallation.objects.create(store=store, **settings)
+    else:
+        installation = previous
+        for field_name, value in settings.items():
+            setattr(installation, field_name, value)
+        installation.save(update_fields=[*settings, "updated_at"])
 
     return InstallationResult(
         installation=installation, categories_created=categories_created, attributes_created=attributes_created,
