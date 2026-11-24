@@ -15,6 +15,7 @@ import sys
 
 from django.core.exceptions import ImproperlyConfigured
 
+from apps.core.availability_gate import evidence_enabled
 from shop_core.env_config import (
     RATE_LIMIT_CACHE_ALIAS,
     build_cache_config,
@@ -173,7 +174,7 @@ MIDDLEWARE = [
     "apps.dashboard.middleware.AdminEmbedFrameOptionsMiddleware",
 ]
 
-RASTISI_AVAILABILITY_EVIDENCE = env_bool("RASTISI_AVAILABILITY_EVIDENCE", default=False)
+RASTISI_AVAILABILITY_EVIDENCE = evidence_enabled()
 if RASTISI_AVAILABILITY_EVIDENCE:
     MIDDLEWARE.insert(0, "apps.core.availability_evidence.AvailabilityEvidenceMiddleware")
 

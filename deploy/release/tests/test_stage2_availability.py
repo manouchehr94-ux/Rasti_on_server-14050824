@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import stat
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from apps.core import gunicorn_availability as hooks
+from apps.core import availability_gate, gunicorn_availability as hooks
 
 
 class StageTwoTests(unittest.TestCase):
@@ -23,6 +24,25 @@ class StageTwoTests(unittest.TestCase):
             hooks.install_hooks(namespace)
         self.assertEqual(namespace, {"worker_abort": old})
 
+    def test_requires_flag_and_a_protected_root_owned_marker(self):
+        marker = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=0)
+        with patch.object(availability_gate, "ACTIVATION_MARKER") as path:
+            path.lstat.return_value = marker
+            with patch.dict(os.environ, {"RASTISI_AVAILABILITY_EVIDENCE": "0"}):
+                self.assertFalse(availability_gate.evidence_enabled())
+                path.lstat.assert_not_called()
+            with patch.dict(os.environ, {"RASTISI_AVAILABILITY_EVIDENCE": "1"}):
+                self.assertTrue(availability_gate.evidence_enabled())
+                marker.st_mode |= 0o020
+                self.assertFalse(availability_gate.evidence_enabled())
+                marker.st_mode = stat.S_IFLNK | 0o644
+                self.assertFalse(availability_gate.evidence_enabled())
+                marker.st_mode = stat.S_IFREG | 0o644
+                marker.st_uid = 1000
+                self.assertFalse(availability_gate.evidence_enabled())
+                path.lstat.side_effect = FileNotFoundError
+                self.assertFalse(availability_gate.evidence_enabled())
+
     def test_chains_all_existing_hooks_including_legacy_post_request(self):
         calls = []
         namespace = {
@@ -32,7 +52,7 @@ class StageTwoTests(unittest.TestCase):
             "post_worker_init": lambda worker: calls.append("ready"),
             "child_exit": lambda server, worker: calls.append("exit"),
         }
-        with patch.dict(os.environ, {"RASTISI_AVAILABILITY_EVIDENCE": "1"}):
+        with patch.object(hooks, "evidence_enabled", return_value=True):
             hooks.install_hooks(namespace)
         stream = io.StringIO()
         logger = logging.Logger("stage2")
@@ -57,6 +77,8 @@ class StageTwoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "existing-gunicorn.conf.py"
             config.write_text(
+                'import os\nfrom apps.core import gunicorn_availability\n'
+                'gunicorn_availability.evidence_enabled = lambda: os.environ["RASTISI_AVAILABILITY_EVIDENCE"] == "1"\n'
                 'bind = "127.0.0.1:18082"\nworkers = 1\nthreads = 2\ntimeout = 40\n'
                 'def post_request(worker, req): pass\n'
                 'from apps.core.gunicorn_availability import install_hooks\ninstall_hooks(globals())\n'

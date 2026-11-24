@@ -1,8 +1,9 @@
 """Review and compose these hooks with the effective Gunicorn configuration."""
 import json
-import os
 import re
 import time
+
+from apps.core.availability_gate import evidence_enabled
 
 _REQUEST_ID = re.compile(r"[a-f0-9]{32}")
 
@@ -44,7 +45,7 @@ def child_exit(server, worker):
 
 def install_hooks(namespace):
     """At the end of the effective Python config, chain existing hooks once."""
-    if os.environ.get("RASTISI_AVAILABILITY_EVIDENCE") != "1":
+    if not evidence_enabled():
         return
 
     from gunicorn.config import Config
