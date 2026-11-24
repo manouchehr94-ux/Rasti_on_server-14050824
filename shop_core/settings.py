@@ -15,6 +15,7 @@ import sys
 
 from django.core.exceptions import ImproperlyConfigured
 
+from apps.core.availability_gate import evidence_enabled
 from shop_core.env_config import (
     RATE_LIMIT_CACHE_ALIAS,
     build_cache_config,
@@ -172,6 +173,10 @@ MIDDLEWARE = [
     # are SAMEORIGIN-only; the global default remains DENY everywhere else.
     "apps.dashboard.middleware.AdminEmbedFrameOptionsMiddleware",
 ]
+
+RASTISI_AVAILABILITY_EVIDENCE = evidence_enabled()
+if RASTISI_AVAILABILITY_EVIDENCE:
+    MIDDLEWARE.insert(0, "apps.core.availability_evidence.AvailabilityEvidenceMiddleware")
 
 ROOT_URLCONF = "shop_core.urls"
 
@@ -422,6 +427,13 @@ LOGGING = {
         },
     },
 }
+
+if RASTISI_AVAILABILITY_EVIDENCE:
+    LOGGING["loggers"]["rastisi.availability"] = {
+        "handlers": ["console"],
+        "level": "WARNING",
+        "propagate": False,
+    }
 
 # Business defaults (Stage 2 will read these in the pricing service)
 SHOP_FREE_SHIPPING_THRESHOLD = 500_000
