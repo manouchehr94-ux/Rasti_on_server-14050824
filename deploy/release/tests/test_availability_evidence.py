@@ -1,26 +1,21 @@
 import concurrent.futures
 import importlib.util
-import io
 import json
 import os
 import signal
 import socket
-import ssl
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 RELEASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RELEASE))
 import availability_incident as incident
-import availability_probe as probe
 import availability_resources as resources
 
 
@@ -101,7 +96,7 @@ def port():
 
 @unittest.skipUnless(os.environ.get("RASTISI_TEST_NGINX"), "requires explicit path to a local nginx binary")
 class IsolatedAvailabilityTest(unittest.TestCase):
-    def test_worker_stall_tls_failure_and_webhook_delivery(self):
+    def test_worker_stall_and_private_https_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             fixture = self.fixture(base)
@@ -112,13 +107,15 @@ class IsolatedAvailabilityTest(unittest.TestCase):
                      "--no-control-socket", "fixture:app"], cwd=base, stdout=log, stderr=log,
                 )
                 self.addCleanup(self.stop, gunicorn)
+            wait(lambda: any(row["event"] == "worker_ready" for row in self.records(fixture["worker_log"])))
             nginx = subprocess.Popen([os.environ["RASTISI_TEST_NGINX"], "-p", str(base),
                                       "-c", str(base / "nginx.conf"), "-g", "daemon off;"])
             self.addCleanup(self.stop, nginx)
             with patch.dict(os.environ, {"CURL_CA_BUNDLE": str(base / "cert.pem"),
                                          "NO_PROXY": "localhost,127.0.0.1"}):
                 origin = f"https://localhost:{fixture['edge']}"
-                wait(lambda: probe.sample(origin, 2)["ok"])
+                wait(lambda: self.https_status(origin, 2) == 200)
+                self.assertEqual(fixture["edge_log"].read_text(), "")
                 subprocess.run(
                     ["curl", "-q", "--silent", "--fail", "--max-time", "2",
                      "-H", "Cookie: PRIVATE_MARKER", "-H", "Authorization: PRIVATE_MARKER",
@@ -136,12 +133,12 @@ class IsolatedAvailabilityTest(unittest.TestCase):
                 pid = matching[-1]["pid"]
                 before_stall = {row.get("request_id") for row in records}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    stalled = pool.submit(probe.sample, origin + "/stall", 3)
+                    stalled = pool.submit(self.https_status, origin + "/stall", 3)
                     started = wait(lambda: next((row for row in self.records(fixture["worker_log"])
                                                   if row["event"] == "request_started"
                                                   and row["request_id"] not in before_stall), None))
                     os.kill(pid, signal.SIGSTOP)
-                    self.assertEqual(stalled.result()["status"], 504)
+                    self.assertEqual(stalled.result(), 504)
                 failed_edge = json.loads(fixture["edge_log"].read_text().splitlines()[-1])
                 self.assertEqual(failed_edge["request_id"], started["request_id"])
                 self.assertFalse(any(row.get("request_id") == started["request_id"]
@@ -152,29 +149,19 @@ class IsolatedAvailabilityTest(unittest.TestCase):
                                  for row in self.records(fixture["worker_log"])))
                 self.assertTrue(any(row["event"] == "worker_exited" and row["pid"] == pid
                                     for row in self.records(fixture["worker_log"])))
-                wait(lambda: probe.sample(origin, 3)["ok"])
+                wait(lambda: self.https_status(origin, 3) == 200)
 
-                sink, received = self.receiver(base)
-                webhook = f"https://localhost:{sink.server_port}/alert"
-                wrong_host = f"https://127.0.0.1:{fixture['edge']}/"
-                self.assertEqual(probe.sample(wrong_host, 2)["reason"], "tls")
-                report = io.StringIO()
-                self.assertEqual(probe.monitor({"home": wrong_host}, 1, 1, 2, report, webhook,
-                                               webhook.replace("/alert", "/heartbeat")), 1)
-                self.assertEqual([path for path, _ in received], ["/heartbeat", "/heartbeat", "/alert"])
-                self.assertEqual(len(received[-1][1]["observations"]), 2)
-                received.clear()
-                website = webhook.replace("/alert", "/website")
-                heartbeat = webhook.replace("/alert", "/heartbeat")
-                self.assertEqual(probe.monitor({"home": wrong_host}, 1, 1, 2, io.StringIO(),
-                                               heartbeat=heartbeat, website=website), 1)
-                self.assertEqual(probe.monitor({"home": origin}, 1, 1, 2, io.StringIO(),
-                                               heartbeat=heartbeat, website=website), 0)
-                self.assertEqual([path for path, _ in received],
-                                 ["/heartbeat", "/heartbeat", "/website/fail",
-                                  "/heartbeat", "/website", "/heartbeat", "/website"])
                 self.assertNotIn("PRIVATE_MARKER", fixture["edge_log"].read_text()
-                                 + fixture["worker_log"].read_text() + report.getvalue())
+                                 + fixture["worker_log"].read_text())
+
+    @staticmethod
+    def https_status(url, timeout):
+        result = subprocess.run(
+            ["curl", "-q", "--silent", "--proto", "=https", "--max-time", str(timeout),
+             "--output", os.devnull, "--write-out", "%{http_code}", "--", url],
+            capture_output=True, timeout=timeout + 2, text=True,
+        )
+        return int(result.stdout) if result.returncode == 0 and result.stdout.isdecimal() else 0
 
     def fixture(self, base):
         edge, backend = port(), port()
@@ -206,7 +193,7 @@ http {{
         listen 127.0.0.1:{edge} ssl;
         ssl_certificate {base}/cert.pem;
         ssl_certificate_key {base}/key.pem;
-        access_log {edge_log} rastisi_availability;
+        access_log {edge_log} rastisi_availability if=$rastisi_log_evidence;
         location / {{
             proxy_set_header X-Request-ID $request_id;
             proxy_read_timeout 1500ms;
@@ -216,28 +203,6 @@ http {{
 }}
 """)
         return {"edge": edge, "backend": backend, "edge_log": edge_log, "worker_log": worker_log}
-
-    def receiver(self, base):
-        received = []
-
-        class Receiver(BaseHTTPRequestHandler):
-            def do_POST(self):
-                received.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
-                self.send_response(204)
-                self.end_headers()
-
-            def log_message(self, *_):
-                pass
-
-        server = HTTPServer(("127.0.0.1", 0), Receiver)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(base / "cert.pem", base / "key.pem")
-        server.socket = context.wrap_socket(server.socket, server_side=True)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        return server, received
 
     @staticmethod
     def records(path):

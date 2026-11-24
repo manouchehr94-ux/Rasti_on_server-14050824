@@ -1,8 +1,8 @@
 /var/log/rastisi-evidence/edge.jsonl {
     hourly
-    maxsize 32M
-    rotate 48
-    maxage 7
+    maxsize 8M
+    rotate 24
+    maxage 2
     missingok
     notifempty
     compress

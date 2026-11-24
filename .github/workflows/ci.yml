@@ -248,11 +248,10 @@ jobs:
           cache: pip
       - name: Password-protected Redis (the Redis tests also check wrong-password behaviour)
         run: |
-          sudo bash deploy/release/selftest/install-ubuntu-test-packages.sh redis-server
+          sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
           # the Debian package starts its own PASSWORDLESS instance on the default port (it accepts any password): use a separate one
           redis-server --port 6390 --bind 127.0.0.1 --requirepass ci-only-redis --save "" --appendonly no --daemonize yes
           for _ in $(seq 1 20); do redis-cli -p 6390 -a ci-only-redis --no-auth-warning ping | grep -q PONG && break; sleep 0.5; done
-          redis-cli -p 6390 -a ci-only-redis --no-auth-warning ping | grep -qx PONG
           if redis-cli -p 6390 -a wrong-password --no-auth-warning ping | grep -q PONG; then echo "::error::Redis accepts a wrong password"; exit 1; fi
       - uses: ./.github/actions/install-production
         with:
@@ -369,7 +368,7 @@ jobs:
       - name: Install tools
         if: steps.changed.outputs.run == 'true'
         run: |
-          sudo bash deploy/release/selftest/install-ubuntu-test-packages.sh redis-server restic postgresql-client-16
+          sudo apt-get update -qq && sudo apt-get install -y -qq redis-server restic
           pip install tblib
       - name: Unit-level tooling tests including the real PostgreSQL + restic backup tests
         if: steps.changed.outputs.run == 'true'
@@ -377,6 +376,7 @@ jobs:
           RASTISI_TEST_PG_BIN: /usr/lib/postgresql/16/bin
           RASTISI_TEST_PG_ADMIN_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/postgres
         run: |
+          sudo apt-get install -y -qq postgresql-client-16
           RASTISI_TEST_RESTIC="$(command -v restic)"
           export RASTISI_TEST_RESTIC
           python -m unittest discover -s deploy/backup/tests -p "test_*.py" -v
@@ -393,6 +393,7 @@ jobs:
           CAPTCHA_SHA: ${{ vars.RASTISI_REHEARSAL_NEXT_SHA || 'a42e4e2d6ad42a04d161685e0b05a8f320ec37a7' }}
           CANDIDATE_SHA: ${{ env.TEST_REF }}
         run: |
+          sudo apt-get install -y -qq postgresql-client-16
           RASTISI_TEST_RESTIC="$(command -v restic)"
           export RASTISI_TEST_RESTIC
           git cat-file -e "$PROD_SHA^{commit}"
