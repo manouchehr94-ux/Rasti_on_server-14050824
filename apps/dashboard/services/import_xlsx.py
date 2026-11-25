@@ -436,7 +436,17 @@ def parse_xlsx_import(fileobj, import_type: str, store) -> ParsedFile:
     می‌کند): ``__row_number__`` (شماره‌ی ردیف در اکسل)، ``__errors__`` (ردیفِ
     رد‌شده پیش از اعتبارسنجی)، ``__warnings__``، ``__raw__`` (مقدارهایِ اصلیِ
     فایل برایِ گزارشِ خطا)."""
-    headers, xrows = xlsx_utils.read_xlsx_table(fileobj)
+    from apps.dashboard.services import import_v33
+
+    headers, xrows, sheet = xlsx_utils.read_xlsx_table(fileobj, sheet_names=(
+        import_v33.SHEET, "داده‌ها", "داده ها", "Data",
+    ), include_sheet_name=True)
+    if sheet == import_v33.SHEET or any(header_key(h) == header_key("کد گروه کالا *") for h in headers):
+        if sheet != import_v33.SHEET:
+            raise xlsx_utils.XlsxReadError("ردیف‌های قالب ۳.۳ باید در شیت «ورود محصولات» باشند.")
+        if import_type != ImportJob.ImportType.PRODUCTS:
+            raise xlsx_utils.XlsxReadError("قالب ۳.۳ برای نوع ورود «کالاها» است.")
+        return ParsedFile(list(import_v33.parse(headers, xrows)), [], headers)
     aliases = alias_map(import_type)
     columns = column_by_key(import_type)
     mapper = ValueMapper(store)
@@ -581,6 +591,10 @@ def describe_errors(import_type: str, messages) -> list:
     results = []
     for raw in messages or []:
         text = str(raw)
+        letter = re.fullmatch(r"([A-Y]): (.*)", text, re.DOTALL)
+        if letter:
+            results.append({"column": letter[1], "message": letter[2]})
+            continue
         key = None
         for match in re.finditer(r"«([a-z0-9_]+)»", text):
             if match.group(1) in columns:

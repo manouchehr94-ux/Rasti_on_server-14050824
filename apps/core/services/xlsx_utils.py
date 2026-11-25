@@ -504,7 +504,7 @@ def cell_to_text(value) -> str:
 
 
 def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داده ها", "Data"),
-                    max_rows: int = MAX_IMPORT_ROWS):
+                    max_rows: int = MAX_IMPORT_ROWS, include_sheet_name: bool = False):
     """جدولِ اصلیِ یک XLSX را می‌خواند: ``(headers, rows)``. شیتِ «داده‌ها» اگر
     باشد، وگرنه نخستین شیتِ غیرِ راهنما. فرمول‌ها اجرا نمی‌شوند (``data_only``
     روشن نیست و سلولِ فرمولی فقط علامت‌گذاری می‌شود). حداکثرِ ردیف رعایت
@@ -564,6 +564,6 @@ def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داد
                 raise XlsxRowLimitExceededError(f"تعدادِ ردیف‌ها از حداکثرِ مجاز ({max_rows}) بیشتر است.")
             texts += [""] * (len(headers) - len(texts))
             rows.append(XlsxRow(number=row_index, cells=texts, formula_columns=formulas))
-        return headers, rows
+        return (headers, rows, sheet.title) if include_sheet_name else (headers, rows)
     finally:
         workbook.close()

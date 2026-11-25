@@ -6975,10 +6975,13 @@ def import_upload(request):
             return redirect("dashboard:import-upload")
         return redirect("dashboard:import-detail", pk=job.pk)
 
+    from apps.dashboard.services.import_v33 import template_columns
+
     import_type_specs = [
         {
             "value": value, "label": label, **IMPORT_TYPE_UI[value],
-            "columns": [c for c in import_xlsx.IMPORT_SPECS[value] if c.in_template],
+            "columns": (template_columns() if value == ImportJob.ImportType.PRODUCTS
+                        else [c for c in import_xlsx.IMPORT_SPECS[value] if c.in_template]),
         }
         for value, label in ImportJob.ImportType.choices
     ]
@@ -7213,7 +7216,12 @@ def import_template(request, import_type):
         response["Content-Disposition"] = f'attachment; filename="{import_type}-template.csv"'
         return response
     try:
-        content = import_service.build_template_xlsx(store, import_type)
+        if import_type == ImportJob.ImportType.PRODUCTS and request.GET.get("format") != "legacy":
+            from apps.dashboard.services.import_v33 import workbook
+
+            content = workbook(store)
+        else:
+            content = import_service.build_template_xlsx(store, import_type)
     except ImportServiceError:
         raise Http404
     record_audit_event(
