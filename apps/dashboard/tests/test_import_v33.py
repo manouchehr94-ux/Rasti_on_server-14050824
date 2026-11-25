@@ -102,6 +102,11 @@ class UnifiedImportFlow(ImportViewTestCase):
             name = rules[f"{column}2:{column}400"]
             self.assertLess(len(name), 255)
             self.assertIn(source, wb.defined_names[name].attr_text)
+        contract = wb["قرارداد فنی"]
+        self.assertEqual(contract["R5"].value, "=1+$AA$5")
+        self.assertIn("فهرست‌ها", contract["Y20"].value)
+        self.assertIn("$Y$5", contract["Z20"].value)
+        self.assertIn("$S$5", wb.defined_names["V33_Choices_F"].attr_text)
         if destination := os.getenv("RASTISI_V33_SYNTHETIC_SAMPLE"):
             wb.save(Path(destination))
 
@@ -234,3 +239,23 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertFalse(Category.objects.filter(store=self.store, name="دسته ساخته‌شده").exists())
         self.assertFalse(Attribute.objects.filter(store=self.store, label="رنگ").exists())
         self.assertFalse(Product.objects.filter(store=self.store, sku="TEST33").exists())
+
+    def test_all_definition_errors_report_original_sheet_row_and_excel_column(self):
+        kinds = ("category", "child", "brand", "axis1", "value1")
+        job = self.upload(
+            [dict(group="TRACE33", name="ساده", category=self.category.name, price=99, stock=4)],
+            [{kind: "=1+1"} for kind in kinds],
+        )
+        self.assertEqual(job.invalid_rows, len(kinds))
+        for number, column in enumerate("CDEFG", 20):
+            result = job.row_results.get(row_number=import_v33.LIST_ROW_OFFSET + number)
+            self.assertEqual(result.normalized_data_summary["sheet_row"], number)
+            self.assertTrue(result.errors[0].startswith(column + ":"), result.errors)
+        response = self.client.get(reverse("dashboard:import-download-errors", args=[job.pk]))
+        report = load_workbook(BytesIO(b"".join(response.streaming_content)))
+        for row, number, column in zip(report.active.iter_rows(min_row=2), range(20, 25), "CDEFG", strict=True):
+            self.assertEqual(row[0].value, number)
+            self.assertIn("فهرست‌ها", row[1].value)
+            self.assertIn(column + ":", row[3].value)
+        self.confirm(job)
+        self.assertFalse(Product.objects.filter(store=self.store, sku="TRACE33").exists())

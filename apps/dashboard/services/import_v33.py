@@ -87,6 +87,11 @@ class References:
         self.tax_labels = _display(self.taxes, "name")
 
 
+def _excel_literal(expression):
+    # MATCH(..., 0) still interprets Excel wildcard characters.
+    return f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({expression},"~","~~"),"*","~*"),"?","~?")'
+
+
 def workbook(store):
     wb = _template()
     ref = References(store)
@@ -142,7 +147,7 @@ def workbook(store):
         if note:
             xlsx_utils.set_value(lists.cell(index, 1), note)
             lists.merge_cells(start_row=index, start_column=1, end_row=index, end_column=8)
-    helper_end = max(64, limit - 20)
+    helper_end = limit
     for source, detail, label, start, count, packed, packed_start in (
         ("C", "D", "H", "I", "J", "T", "V"),
         ("F", "G", "L", "M", "N", "U", "W"),
@@ -153,13 +158,13 @@ def workbook(store):
                 f'=IFERROR(INDEX({children},_xlfn.AGGREGATE(15,6,(ROW({children})-4)/'
                 f'({children}<>""),ROWS(${packed}$5:{packed}{row}))),"")'
             )
-        for row in range(5, helper_end + 1):
+        for row in range(5, helper_end + 2):
             span = f"'فهرست‌ها'!${source}$5:${source}${limit}"
             contract[f"{label}{row}"] = (
                 f'=IFERROR(INDEX({span},_xlfn.AGGREGATE(15,6,(ROW({span})-4)/({span}<>""),'
                 f'ROWS(${label}$5:{label}{row}))),"")'
             )
-            contract[f"{start}{row}"] = f'=IF({label}{row}="","",MATCH({label}{row},{span},0))'
+            contract[f"{start}{row}"] = f'=IF({label}{row}="","",MATCH({_excel_literal(f"{label}{row}")},{span},0))'
             contract[f"{packed_start}{row}"] = (
                 f'=IF({label}{row}="","",IF({start}{row}=1,1,1+'
                 f'COUNTIF(INDEX({children},1):INDEX({children},{start}{row}-1),"?*")))'
@@ -178,8 +183,7 @@ def workbook(store):
             f'IF({size}>0,{offset},0),0,MAX(1,{size}),1)'
         )
 
-    # A flat index in the technical sheet serves an exact axis list for each
-    # category. Existing category restrictions are also checked server-side.
+    # Existing category restrictions are also checked server-side.
     next_value = 5
     contexts = [("", "", set())]
     for root in roots:
@@ -187,19 +191,43 @@ def workbook(store):
         contexts.append((root_label, "", {root.pk}))
         contexts.extend((root_label, ref.child_labels[child.pk], {root.pk, child.pk})
                         for child in ref.children[root.pk] if child.is_active)
+    # Detect axis names first entered in this workbook. An existing axis
+    # retains its store category restriction even if its row is moved.
+    for row, axis in enumerate(axes, 5):
+        xlsx_utils.set_text(contract[f"X{row}"], ref.axis_labels[axis.pk])
+    known_axes = f"$X$5:$X${max(5, len(axes) + 4)}"
+    candidates = f"$Y$5:$Y${limit}"
+    for row in range(5, limit + 1):
+        source = f"'فهرست‌ها'!F{row}"
+        contract[f"Y{row}"] = f'=IF({source}="","",IF(ISNUMBER(MATCH({_excel_literal(source)},{known_axes},0)),"",{source}))'
+        contract[f"Z{row}"] = (
+            f'=IFERROR(INDEX({candidates},_xlfn.AGGREGATE(15,6,(ROW({candidates})-4)/'
+            f'({candidates}<>""),ROWS($Z$5:Z{row}))),"")'
+        )
+    contract["AA5"] = f'=COUNTIF({candidates},"?*")'
+
+    # Share a contiguous range for contexts with identical allowed axes.
+    # Room for new axes covers the editable list range in this workbook.
+    slots = limit - 4
+    profiles = {}
     for row, (root, child, allowed) in enumerate(contexts, 5):
-        allowed_axes = [ref.axis_labels[a.pk] for a in axes if not a.category_id or a.category_id in allowed]
-        for column, value in (("P", f"{len(root)}:{root}{child}"), ("Q", next_value - 4), ("R", len(allowed_axes))):
-            if isinstance(value, int):
-                contract[f"{column}{row}"] = value
-            else:
-                xlsx_utils.set_value(contract[f"{column}{row}"], value)
-        for label in allowed_axes:
-            xlsx_utils.set_value(contract[f"S{next_value}"], label)
-            next_value += 1
+        labels = tuple(ref.axis_labels[a.pk] for a in axes if not a.category_id or a.category_id in allowed)
+        if labels not in profiles:
+            profiles[labels] = next_value - 4
+            for label in labels:
+                xlsx_utils.set_text(contract[f"S{next_value}"], label)
+                next_value += 1
+            start = next_value
+            for index in range(slots):
+                contract[f"S{start + index}"] = f'=IF(Z{5 + index}="","",Z{5 + index})'
+            next_value += slots
+        xlsx_utils.set_text(contract[f"P{row}"], f"{len(root)}:{root}{child}")
+        contract[f"Q{row}"] = profiles[labels]
+        contract[f"R{row}"] = f'={len(labels)}+$AA$5'
     end = len(contexts) + 4
-    for col in "HIJKLMNOPQRSTUVW":
+    for col in "HIJKLMNOPQRSTUVWXYZ":
         contract.column_dimensions[col].hidden = True
+    contract.column_dimensions["AA"].hidden = True
 
     def input_column(column, first=1):
         return f"'{SHEET}'!${column}${first}:${column}$400"
@@ -208,15 +236,19 @@ def workbook(store):
         return f"INDEX({input_column(column)},ROW())"
 
     def picked(column):
-        position = f"MATCH({current('A')},{input_column('A', 2)},0)"
+        position = f"MATCH({_excel_literal(current("A"))},{input_column('A', 2)},0)"
         return f'IF({current(column)}<>"",{current(column)},IFERROR(INDEX({input_column(column, 2)},{position}),""))'
 
     def technical(column, last):
         address = f"'قرارداد فنی'!${column}$5:${column}${last}"
         return 'INDIRECT("' + address + '")'
 
-    match_category = f'MATCH({picked("C")},{technical("H", helper_end)},0)'
-    match_axis = f'IFERROR(MATCH(LEN({picked("C")})&":"&{picked("C")}&{picked("D")},{technical("P", end)},0),1)'
+    match_category = f'MATCH({_excel_literal(picked("C"))},{technical("H", helper_end)},0)'
+    root_key = f'LEN({picked("C")})&":"&{picked("C")}'
+    context_keys = technical("P", end)
+    root_match = f'MATCH({_excel_literal(root_key)},{context_keys},0)'
+    full_match = f'MATCH({_excel_literal(root_key + "&" + picked("D"))},{context_keys},0)'
+    match_axis = f'IFERROR({full_match},IFERROR({root_match},1))'
     category_rule = dependent("'قرارداد فنی'!$T$5", match_category, technical("V", helper_end), technical("J", helper_end))
     axis_rule = dependent("'قرارداد فنی'!$S$5", match_axis, technical("Q", end), technical("R", end))
     for dv in product.data_validations.dataValidation:
@@ -231,7 +263,7 @@ def workbook(store):
             formula = axis_rule
         elif column in {"G", "I", "K"}:
             axis_column = {"G": "F", "I": "H", "K": "J"}[column]
-            match = f'MATCH({current(axis_column)},{technical("L", helper_end)},0)'
+            match = f'MATCH({_excel_literal(current(axis_column))},{technical("L", helper_end)},0)'
             formula = dependent("'قرارداد فنی'!$U$5", match, technical("W", helper_end), technical("N", helper_end))
 
         if named:
