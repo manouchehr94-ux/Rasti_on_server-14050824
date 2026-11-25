@@ -1426,14 +1426,22 @@ def _finalize_rollback(job, rows, executed, *, actor, detail: str):
         if number in executed_by_number:
             final.append(executed_by_number[number])
             continue
+        summary = {}
+        if row.get("__v33_list__"):
+            from apps.dashboard.services import import_v33
+
+            summary = {"sheet_row": number - import_v33.LIST_ROW_OFFSET, "product_name": import_v33.LIST_SHEET}
         final.append(RowOutcome(
             row_number=number, source_identifier=_row_identifier(row, number), status=RS.VALID,
+            normalized_data_summary=summary,
             warnings=list(row.get("__warnings__", [])) + ["این ردیف اعمال نشد؛ چون کلِ ورودِ اطلاعات بازگردانده شد."],
         ))
     _store_outcomes(job, final)
     first = next((o for o in sorted(final, key=lambda o: o.row_number) if o.status in _PROBLEM_STATUSES), None)
     if first is not None and first.errors:
-        detail = f"ردیف {first.row_number}: {first.errors[0]}"
+        sheet_row = first.normalized_data_summary.get("sheet_row")
+        location = f"فهرست‌ها، ردیف {sheet_row}" if sheet_row else f"ردیف {first.row_number}"
+        detail = f"{location}: {first.errors[0]}"
     job.dry_run = False
     job.status = ImportJob.Status.FAILED
     job.error_summary = f"اجرا متوقف شد و هیچ تغییری روی فروشگاه اعمال نشد. {detail}"

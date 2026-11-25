@@ -59,6 +59,7 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
             for col, value in {1: "BROWSER33", 2: "کالای مرورگر", 3: "دسته مرورگر", 5: "برند جدید مرورگر",
                                12: 120001, 13: 3}.items():
                 sheet.cell(2, col, value)
+            wb["فهرست‌ها"]["E20"] = "برند جدید مرورگر"
             binary = BytesIO()
             wb.save(binary)
             upload = page.locator('input[name="file"]')

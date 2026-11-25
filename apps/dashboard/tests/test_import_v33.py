@@ -30,16 +30,23 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertEqual(response.status_code, 200)
         return load_workbook(BytesIO(response.content))
 
-    def upload(self, rows):
+    def upload(self, rows, definitions=()):
         wb = self.download()
         sheet = wb[import_v33.SHEET]
         for index, row in enumerate(rows, 2):
             for key, value in row.items():
                 sheet.cell(index, import_v33.KEYS.index(key) + 1, value)
+        lists = wb[import_v33.LIST_SHEET]
+        for index, row in enumerate(definitions, 20):
+            for key, value in row.items():
+                lists.cell(index, import_v33.KEYS.index(key) + 1, value)
         data = BytesIO()
         wb.save(data)
+        return self.upload_bytes(data.getvalue())
+
+    def upload_bytes(self, data):
         response = self.client.post(reverse("dashboard:import-upload"), {
-            "file": SimpleUploadedFile("data.xlsx", data.getvalue(), content_type=XLSX_MIME), "import_type": "products", "mode": "upsert",
+            "file": SimpleUploadedFile("data.xlsx", data, content_type=XLSX_MIME), "import_type": "products", "mode": "upsert",
         })
         self.assertEqual(response.status_code, 302)
         return ImportJob.objects.filter(store=self.store).latest("pk")
@@ -56,6 +63,14 @@ class UnifiedImportFlow(ImportViewTestCase):
                  price=250000, stock=7, barcode="001234", specs="جنس: پنبه", status="فعال"),
             dict(group="TEST33", axis1="رنگ", value1="آبی", axis2="اندازه", value2="بزرگ",
                  price=295001, stock=2),
+        ]
+
+    def synthetic_definitions(self):
+        return [
+            dict(category="دسته ساخته‌شده", child="برگ آزمایشی", brand="برند آزمایشی", axis1="رنگ", value1="قرمز"),
+            dict(value1="آبی"),
+            dict(axis1="اندازه", value1="کوچک"),
+            dict(value1="بزرگ"),
         ]
 
     def test_template_keeps_layout_and_only_store_refs(self):
@@ -92,8 +107,8 @@ class UnifiedImportFlow(ImportViewTestCase):
 
     def test_preview_confirm_exact_variants_and_replay(self):
         rows = self.synthetic_rows()
-        job = self.upload(rows)
-        self.assertEqual((job.valid_rows, job.invalid_rows), (2, 0), list(job.row_results.values("errors")))
+        job = self.upload(rows, self.synthetic_definitions())
+        self.assertEqual((job.valid_rows, job.invalid_rows), (6, 0), list(job.row_results.values("errors")))
         self.assertFalse(Product.objects.filter(store=self.store, sku="TEST33").exists())
         self.assertFalse(Brand.objects.filter(store=self.store, name="برند آزمایشی").exists())
         self.assertFalse(Category.objects.filter(store=self.store, name="برگ آزمایشی").exists())
@@ -112,9 +127,10 @@ class UnifiedImportFlow(ImportViewTestCase):
         v = variants[0]
         v.price = 310000
         v.save(update_fields=["price"])
-        replay = self.upload(rows)
+        with job.source_file.open("rb") as source:
+            replay = self.upload_bytes(source.read())
         self.confirm(replay)
-        self.assertEqual((replay.status, replay.skipped_rows), (ImportJob.Status.COMPLETED, 2))
+        self.assertEqual((replay.status, replay.skipped_rows), (ImportJob.Status.COMPLETED, replay.total_rows))
         v.refresh_from_db()
         self.assertEqual(v.price, 310000)
         self.assertEqual(product.variants.count(), 2)
@@ -127,11 +143,11 @@ class UnifiedImportFlow(ImportViewTestCase):
 
     def test_invalid_row_and_last_write_failure_leave_no_partial_records(self):
         rows = self.synthetic_rows()
-        invalid = self.upload([rows[0], dict(rows[1], stock=-1)])
+        invalid = self.upload([rows[0], dict(rows[1], stock=-1)], self.synthetic_definitions())
         self.assertEqual(invalid.row_results.get(row_number=3).errors[0][:2], "M:")
         self.confirm(invalid)
         self.assertFalse(Product.objects.filter(store=self.store, sku="TEST33").exists())
-        job = self.upload(rows)
+        job = self.upload(rows, self.synthetic_definitions())
         original = import_v33._save_variant
 
         def save(store, product, line):
@@ -146,6 +162,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertFalse(Product.objects.filter(store=self.store, sku="TEST33").exists())
         self.assertFalse(Brand.objects.filter(store=self.store, name="برند آزمایشی").exists())
         self.assertFalse(Category.objects.filter(store=self.store, name="برگ آزمایشی").exists())
+        self.assertFalse(Attribute.objects.filter(store=self.store, label="رنگ").exists())
 
     def test_simple_and_duplicate_combination(self):
         simple = self.upload([dict(group="S33", name="ساده", category=self.category.name, price=99, stock=4)])
@@ -154,6 +171,66 @@ class UnifiedImportFlow(ImportViewTestCase):
         product = Product.objects.get(store=self.store, sku="S33")
         self.assertEqual((product.price, product.stock, product.variants.count()), (99, 4, 0))
         rows = self.synthetic_rows()
-        job = self.upload([rows[0], rows[0]])
+        job = self.upload([rows[0], rows[0]], self.synthetic_definitions())
         self.assertEqual(job.invalid_rows, 1)
         self.assertIn("تکرار", job.row_results.get(row_number=3).errors[0])
+
+    def test_undeclared_and_mismatched_selections_block_product(self):
+        row = self.synthetic_rows()[0]
+        for field, value, letter in (
+            ("brand", "تعریف نشده", "E"),
+            ("child", "برگ اشتباه", "D"),
+            ("value1", "کوچک", "G"),
+        ):
+            with self.subTest(field=field):
+                job = self.upload([dict(row, **{field: value})], self.synthetic_definitions())
+                self.assertTrue(job.row_results.get(row_number=2).errors[0].startswith(letter + ":"))
+                self.confirm(job)
+        self.assertFalse(Product.objects.filter(sku="TEST33").exists())
+        self.assertFalse(Brand.objects.filter(store=self.store, name="برند آزمایشی").exists())
+
+    def test_bad_definition_blocks_even_valid_products_and_reports_sheet_row(self):
+        other = Store.objects.create(name="مستأجر دیگر", slug="v33-private")
+        foreign = Brand.objects.create(store=other, name="برند خصوصی", slug="foreign-v33")
+        original = Category.objects.get(pk=self.category.pk)
+        job = self.upload(
+            [dict(group="SAFE33", name="ساده", category=self.category.name, price=99, stock=4)],
+            [dict(brand="برند پیشنهادی", category="ریشه دیگر", child="زیردسته"),
+             dict(brand="برند پیشنهادی"), dict(brand=str(foreign.pk)), dict(axis1="=1+1")],
+        )
+        rows = {row.normalized_data_summary.get("sheet_row"): row for row in job.row_results.all()}
+        for number, column in ((20, "D"), (21, "E"), (22, "E"), (23, "F")):
+            self.assertTrue(rows[number].errors[0].startswith(column + ":"), rows[number].errors)
+        self.assertContains(self.client.get(reverse("dashboard:import-detail", args=[job.pk])), "فهرست‌ها")
+        self.confirm(job)
+        self.assertFalse(Product.objects.filter(sku="SAFE33").exists())
+        self.assertFalse(Brand.objects.filter(name="برند پیشنهادی").exists())
+        self.assertFalse(Category.objects.filter(name="ریشه دیگر").exists())
+        self.assertEqual(Category.objects.get(pk=original.pk).name, original.name)
+        self.assertEqual(Brand.objects.get(pk=foreign.pk).store_id, other.pk)
+
+    def test_duplicate_value_under_same_attribute_is_invalid(self):
+        job = self.upload(self.synthetic_rows(), [*self.synthetic_definitions(), dict(value1="بزرگ")])
+        self.assertIn("تکراری", job.row_results.get(row_number=import_v33.LIST_ROW_OFFSET + 24).errors[0])
+        self.confirm(job)
+        self.assertFalse(Attribute.objects.filter(store=self.store, label="اندازه").exists())
+
+    def test_definition_save_failure_rolls_back_earlier_definitions(self):
+        job = self.upload(self.synthetic_rows(), self.synthetic_definitions())
+        original = import_v33.save_definition
+
+        def save(store, kind, name, parent_id):
+            if kind == "value1":
+                raise ValueError("synthetic definition failure")
+            return original(store, kind, name, parent_id)
+
+        with patch.object(import_v33, "save_definition", side_effect=save):
+            self.confirm(job)
+        self.assertEqual(job.status, ImportJob.Status.FAILED)
+        result = job.row_results.get(row_number=import_v33.LIST_ROW_OFFSET + 20)
+        self.assertEqual(result.normalized_data_summary["sheet_row"], 20)
+        self.assertTrue(result.errors[0].startswith("G:"))
+        self.assertFalse(Brand.objects.filter(store=self.store, name="برند آزمایشی").exists())
+        self.assertFalse(Category.objects.filter(store=self.store, name="دسته ساخته‌شده").exists())
+        self.assertFalse(Attribute.objects.filter(store=self.store, label="رنگ").exists())
+        self.assertFalse(Product.objects.filter(store=self.store, sku="TEST33").exists())

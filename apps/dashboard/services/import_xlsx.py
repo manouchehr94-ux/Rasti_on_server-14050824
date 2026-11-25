@@ -446,7 +446,9 @@ def parse_xlsx_import(fileobj, import_type: str, store) -> ParsedFile:
             raise xlsx_utils.XlsxReadError("ردیف‌های قالب ۳.۳ باید در شیت «ورود محصولات» باشند.")
         if import_type != ImportJob.ImportType.PRODUCTS:
             raise xlsx_utils.XlsxReadError("قالب ۳.۳ برای نوع ورود «کالاها» است.")
-        return ParsedFile(list(import_v33.parse(headers, xrows)), [], headers)
+        fileobj.seek(0)
+        definitions = import_v33.parse_lists(fileobj)
+        return ParsedFile([*import_v33.parse(headers, xrows), *definitions], [], headers)
     aliases = alias_map(import_type)
     columns = column_by_key(import_type)
     mapper = ValueMapper(store)
@@ -812,7 +814,8 @@ def build_error_report_xlsx(job, row_results, source_rows: dict, import_type: st
         raw = dict(source_rows.get(result.row_number, {}).get("__raw__", []))
         shown = display_names.get(result.row_number, {})
         table_rows.append([
-            result.row_number, shown.get("name") or shown.get("fallback", ""), ROW_STATUS_LABELS.get(result.status, result.status),
+            result.normalized_data_summary.get("sheet_row", result.row_number),
+            shown.get("name") or shown.get("fallback", ""), ROW_STATUS_LABELS.get(result.status, result.status),
             "\n".join(f"• {d['column'] + ': ' if d['column'] else ''}{d['message']}" for d in details),
             "\n".join(f"• {w}" for w in result.warnings),
             *[raw.get(h, "") for h in header_pool],
@@ -826,9 +829,13 @@ def build_error_report_xlsx(job, row_results, source_rows: dict, import_type: st
             cell.fill = error_fill
             cell.font = Font(name=xlsx_utils.FONT_NAME, size=10, bold=(column_index == 3), color=xlsx_utils.ERROR_TEXT)
         flagged = {d["column"] for d in details if d["column"]}
+        if result.normalized_data_summary.get("sheet_row"):
+            from apps.dashboard.services.import_v33 import list_headers
+
+            flagged = {label for index, label in enumerate(list_headers(), 3) if get_column_letter(index) in flagged}
         for position, header in enumerate(header_pool, start=len(fixed) + 1):
             key = alias.get(header_key(header))
-            if key and columns_by_key[key].base_label in flagged:
+            if header in flagged or (key and columns_by_key[key].base_label in flagged):
                 cell = ws.cell(row=offset, column=position)
                 cell.fill = error_fill
                 cell.font = Font(name=xlsx_utils.FONT_NAME, size=10, bold=True, color=xlsx_utils.ERROR_TEXT)

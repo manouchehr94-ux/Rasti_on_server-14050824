@@ -26,6 +26,9 @@ from apps.stores.models import Store
 from apps.subscriptions.services.enforcement import product_creation_budget
 
 SHEET = "ورود محصولات"
+LIST_SHEET = "فهرست‌ها"
+LIST_ROW_OFFSET = 1_000_000
+LIST_KEYS = ("category", "child", "brand", "axis1", "value1")
 KEYS = (
     "group", "name", "category", "child", "brand",
     "axis1", "value1", "axis2", "value2", "axis3", "value3",
@@ -90,7 +93,7 @@ def workbook(store):
     lists = wb["فهرست‌ها"]
     contract = wb["قرارداد فنی"]
     product = wb[SHEET]
-    wb["راهنما"]["A2"] = "ابتدا فایل را در پنل همین فروشگاه پیش‌نمایش و سپس ثبت نهایی کنید."
+    wb["راهنما"]["A2"] = "تعریف‌های جدید را در «فهرست‌ها» وارد کنید. سپس در «ورود اطلاعات» همین فروشگاه فایل را پیش‌نمایش و ثبت نهایی کنید."
     contract["A2"] = "قالب ورود محصولات ۳.۳. تعریف‌های تازه فقط پس از تأیید نهایی ذخیره می‌شوند."
     notes = []
     for merged in list(lists.merged_cells.ranges):
@@ -140,15 +143,27 @@ def workbook(store):
             xlsx_utils.set_value(lists.cell(index, 1), note)
             lists.merge_cells(start_row=index, start_column=1, end_row=index, end_column=8)
     helper_end = max(64, limit - 20)
-    for row in range(5, helper_end + 1):
-        for source, detail, label, start, count in (("C", "D", "H", "I", "J"), ("F", "G", "L", "M", "N")):
+    for source, detail, label, start, count, packed, packed_start in (
+        ("C", "D", "H", "I", "J", "T", "V"),
+        ("F", "G", "L", "M", "N", "U", "W"),
+    ):
+        children = f"'فهرست‌ها'!${detail}$5:${detail}${limit}"
+        for row in range(5, limit + 1):
+            contract[f"{packed}{row}"] = (
+                f'=IFERROR(INDEX({children},_xlfn.AGGREGATE(15,6,(ROW({children})-4)/'
+                f'({children}<>""),ROWS(${packed}$5:{packed}{row}))),"")'
+            )
+        for row in range(5, helper_end + 1):
             span = f"'فهرست‌ها'!${source}$5:${source}${limit}"
-            children = f"'فهرست‌ها'!${detail}$5:${detail}${limit}"
             contract[f"{label}{row}"] = (
                 f'=IFERROR(INDEX({span},_xlfn.AGGREGATE(15,6,(ROW({span})-4)/({span}<>""),'
                 f'ROWS(${label}$5:{label}{row}))),"")'
             )
             contract[f"{start}{row}"] = f'=IF({label}{row}="","",MATCH({label}{row},{span},0))'
+            contract[f"{packed_start}{row}"] = (
+                f'=IF({label}{row}="","",IF({start}{row}=1,1,1+'
+                f'COUNTIF(INDEX({children},1):INDEX({children},{start}{row}-1),"?*")))'
+            )
             contract[f"{count}{row}"] = (
                 f'=IF({label}{row}="","",COUNTIF(INDEX({children},{start}{row}):'
                 f'INDEX({children},IF({label}{row+1}="",ROWS({children}),{start}{row+1}-1)),"?*"))'
@@ -183,7 +198,7 @@ def workbook(store):
             xlsx_utils.set_value(contract[f"S{next_value}"], label)
             next_value += 1
     end = len(contexts) + 4
-    for col in "HIJKLM NOPQRS".replace(" ", ""):
+    for col in "HIJKLMNOPQRSTUVW":
         contract.column_dimensions[col].hidden = True
 
     def input_column(column, first=1):
@@ -202,7 +217,7 @@ def workbook(store):
 
     match_category = f'MATCH({picked("C")},{technical("H", helper_end)},0)'
     match_axis = f'IFERROR(MATCH(LEN({picked("C")})&":"&{picked("C")}&{picked("D")},{technical("P", end)},0),1)'
-    category_rule = dependent("'فهرست‌ها'!$D$5", match_category, technical("I", helper_end), technical("J", helper_end))
+    category_rule = dependent("'قرارداد فنی'!$T$5", match_category, technical("V", helper_end), technical("J", helper_end))
     axis_rule = dependent("'قرارداد فنی'!$S$5", match_axis, technical("Q", end), technical("R", end))
     for dv in product.data_validations.dataValidation:
         if dv.type != "list":
@@ -217,7 +232,7 @@ def workbook(store):
         elif column in {"G", "I", "K"}:
             axis_column = {"G": "F", "I": "H", "K": "J"}[column]
             match = f'MATCH({current(axis_column)},{technical("L", helper_end)},0)'
-            formula = dependent("'فهرست‌ها'!$G$5", match, technical("M", helper_end), technical("N", helper_end))
+            formula = dependent("'قرارداد فنی'!$U$5", match, technical("W", helper_end), technical("N", helper_end))
 
         if named:
             # Excel's validation source field stays short. ROW() makes the
@@ -243,6 +258,139 @@ def parse(actual_headers, sheet_rows):
         cells["__errors__"] = [error(KEYS[i], "سلول فرمولی یا دارای خطا مجاز نیست.")
                                for i in row.formula_columns if i < len(KEYS)]
         yield cells
+
+
+@lru_cache(maxsize=1)
+def list_headers():
+    wb = _template()
+    try:
+        return tuple(cell.value for cell in wb[LIST_SHEET][4][2:7])
+    finally:
+        wb.close()
+
+
+def parse_lists(fileobj):
+    headers, rows = xlsx_utils.read_xlsx_table(
+        fileobj, sheet_names=(LIST_SHEET,), require_sheet=True, first_header_row=4,
+    )
+    if tuple(headers[2:7]) != list_headers():
+        raise xlsx_utils.XlsxReadError("سرستون‌های شیت «فهرست‌ها» باید مطابق قالب ۳.۳ باقی بمانند.")
+    for row in rows:
+        cells = dict(zip(LIST_KEYS, row.cells[2:7], strict=True))
+        errors = [error(LIST_KEYS[i - 2], "سلول فرمولی یا دارای خطا مجاز نیست.")
+                  for i in row.formula_columns if 2 <= i < 7]
+        if errors or any(value.strip() for value in cells.values()):
+            yield {
+                **cells, "__v33__": True, "__v33_list__": True,
+                "__row_number__": LIST_ROW_OFFSET + row.number,
+                "__errors__": errors, "__raw__": list(zip(list_headers(), row.cells[2:7], strict=True)),
+            }
+
+
+def identity(record, label):
+    return record.pk if record is not None else normalization_key(label)
+
+
+def definition_key(kind, name, parent=None):
+    return kind, parent, normalization_key(name)
+
+
+def require_definition(declared, column, name, parent=None):
+    kind = {"axis2": "axis1", "axis3": "axis1", "value2": "value1", "value3": "value1"}.get(column, column)
+    if definition_key(kind, name, parent) not in declared:
+        raise InvalidRow(column, "گزینه یا وابستگی آن در شیت «فهرست‌ها» تعریف نشده است.")
+
+
+def plan_lists(store, rows):
+    from apps.dashboard.services.import_service import RowOutcome
+
+    ref = References(store)
+    roots = {
+        "category": (ref.roots, ref.root_labels),
+        "axis1": (ref.axes, ref.axis_labels),
+        "brand": (ref.brands, ref.brand_labels),
+    }
+    parent_columns = {"child": "category", "value1": "axis1"}
+    contexts, seen, declared, outcomes, products = {}, set(), set(), [], []
+    for row in rows:
+        if not row.get("__v33_list__"):
+            products.append(row)
+            continue
+        additions, labels, errors = [], [], list(row["__errors__"])
+        for kind in LIST_KEYS:
+            parent = None
+            parent_record = None
+            if any(message.startswith(f"{error(kind, '')[0]}:") for message in row["__errors__"]):
+                contexts.pop(kind, None)
+                continue
+            try:
+                if kind in roots and row.get(kind, "").strip():
+                    contexts.pop(kind, None)
+                name = text_value(row, kind, 160)
+                if not name:
+                    continue
+                if kind in roots:
+                    records, display = roots[kind]
+                else:
+                    parent_kind = parent_columns[kind]
+                    if parent_kind not in contexts:
+                        raise InvalidRow(kind, "ابتدا والد این گزینه را در ستون مجاور تعریف کنید.")
+                    parent, parent_record = contexts[parent_kind]
+                    if kind == "child":
+                        records = ref.children[parent_record.pk] if parent_record else []
+                        display = ref.child_labels
+                    else:
+                        records = list(parent_record.values.all()) if parent_record else []
+                        display = _display(records, "label")
+                record = lookup(name, records, display, kind, create=True)
+                if kind == "axis1" and record and not record.is_variant_axis:
+                    raise InvalidRow(kind, "این ویژگی محور تنوع نیست.")
+                if kind == "value1" and record is None and parent_record and parent_record.data_type not in Attribute.CHOICE_DATA_TYPES:
+                    raise InvalidRow(kind, "افزودن مقدار به این نوع ویژگی مجاز نیست.")
+                if kind == "child" and record is None and any(
+                    c.parent_id and normalization_key(c.name) == normalization_key(name) for c in ref.categories
+                ):
+                    raise InvalidRow(kind, "این زیرگروه به دسته اصلی دیگری تعلق دارد.")
+                parent_identity = parent_record.pk if parent_record else (parent[2] if parent else None)
+                key = (kind, parent_identity, identity(record, name))
+                if key in seen:
+                    raise InvalidRow(kind, "تعریف تکراری در شیت «فهرست‌ها».")
+                if record is None:
+                    text_value(row, kind, 120)
+                seen.add(key)
+                if kind in ("category", "axis1"):
+                    contexts[kind] = (definition_key(kind, name), record)
+                if record is None:
+                    declared.add(definition_key(kind, name, parent_identity))
+                    additions.append((kind, name, parent, getattr(parent_record, "pk", None)))
+                    labels.append(f"{list_headers()[LIST_KEYS.index(kind)]}: {name}")
+            except InvalidRow as exc:
+                errors.append(str(exc))
+        outcomes.append((RowOutcome(
+            row_number=row["__row_number__"], source_identifier="", status=RS.INVALID if errors else RS.VALID if additions else RS.SKIPPED,
+            errors=errors, warnings=[f"تعریف جدید پس از تأیید: {label}" for label in labels],
+            normalized_data_summary={
+                "action": "define", "product_name": LIST_SHEET, "v33": True,
+                "sheet_row": row["__row_number__"] - LIST_ROW_OFFSET,
+            },
+        ), additions))
+    return products, outcomes, declared
+
+
+def save_definition(store, kind, name, parent_id):
+    if kind == "value1":
+        value = AttributeValue(attribute_id=parent_id, label=name, value=name)
+        value.full_clean()
+        value.save()
+        return value.pk
+    if kind == "axis1":
+        return _new_named(
+            Attribute, store=store, label="label", name=name,
+            defaults={"is_variant_axis": True, "data_type": Attribute.DataType.SELECT},
+        ).pk
+    if kind == "brand":
+        return _new_named(Brand, store=store, label="name", name=name).pk
+    return _new_named(Category, store=store, label="name", name=name, filters={"parent_id": parent_id}).pk
 
 
 def error(key, message):
@@ -300,7 +448,6 @@ class Line:
     name: str = ""
     action: str = ""
     errors: list = field(default_factory=list)
-    definitions: list = field(default_factory=list)
     target: object = None
     price: int | None = None
     stock: int | None = None
@@ -337,7 +484,7 @@ def _specs(text):
     return list(result.values())
 
 
-def _common(group, ref, line):
+def _common(group, ref, declared):
     data, product = group.common, group.product
     if not product and not data.get("name"):
         raise InvalidRow("name", "نام کالای جدید الزامی است.")
@@ -345,20 +492,20 @@ def _common(group, ref, line):
     if category_name:
         group.root = lookup(category_name, ref.roots, ref.root_labels, "category", create=True)
         if not group.root:
-            line.definitions.append(f"دسته: {category_name}")
+            require_definition(declared, "category", category_name)
         if child_name:
             siblings = ref.children[group.root.pk] if group.root else []
             group.child = lookup(child_name, siblings, ref.child_labels, "child", create=True)
             if not group.child:
                 if any(c.parent_id and normalization_key(c.name) == normalization_key(child_name) for c in ref.categories):
                     raise InvalidRow("child", "این زیرگروه به دسته انتخاب‌شده تعلق ندارد.")
-                line.definitions.append(f"زیرگروه: {category_name} / {child_name}")
+                require_definition(declared, "child", child_name, identity(group.root, category_name))
     elif not product or child_name:
         raise InvalidRow("category", "دسته اصلی الزامی است.")
     if brand_name:
         group.brand = lookup(brand_name, ref.brands, ref.brand_labels, "brand", create=True)
         if not group.brand:
-            line.definitions.append(f"برند: {brand_name}")
+            require_definition(declared, "brand", brand_name)
     if data.get("status") and data["status"] not in STATUSES:
         raise InvalidRow("status", "وضعیت معتبر نیست.")
     if data.get("shipping") and data["shipping"] not in ("بله", "خیر"):
@@ -368,7 +515,7 @@ def _common(group, ref, line):
     group.specs = _specs(data.get("specs", ""))
 
 
-def _axis_pairs(row, group, ref, line):
+def _axis_pairs(row, group, ref, declared):
     pairs = []
     category = group.child or group.root or (group.product.category if group.product and not group.common.get("category") else None)
     allowed_category_ids = set()
@@ -395,9 +542,9 @@ def _axis_pairs(row, group, ref, line):
             if not value and axis.data_type not in Attribute.CHOICE_DATA_TYPES:
                 raise InvalidRow(value_key, "افزودن مقدار به این نوع ویژگی مجاز نیست.")
         else:
-            line.definitions.append(f"ویژگی: {axis_name}")
+            require_definition(declared, axis_key, axis_name)
         if not value:
-            line.definitions.append(f"مقدار: {axis_name} / {value_name}")
+            require_definition(declared, value_key, value_name, identity(axis, axis_name))
         pairs.append((axis_identity, axis, axis_name, value, value_name))
     return pairs
 
@@ -418,7 +565,7 @@ def _variant_matches(product):
     return matches
 
 
-def plan(store, rows, mode):
+def plan(store, rows, mode, declared):
     ref = References(store)
     groups, lines, signatures, explicit_skus = {}, [], defaultdict(set), set()
     product_cache, variant_cache = {}, {}
@@ -448,7 +595,7 @@ def plan(store, rows, mode):
             )}
             if code not in groups:
                 group = Group(code, product, common)
-                _common(group, ref, line)
+                _common(group, ref, declared)
                 groups[code] = group
             else:
                 group = groups[code]
@@ -472,7 +619,7 @@ def plan(store, rows, mode):
                 for i, link in enumerate(links, 1):
                     axis_row[f"axis{i}"] = ref.axis_labels.get(link.option.attribute_id, link.option.label)
                     axis_row[f"value{i}"] = link.option_value.label
-            line.pairs = _axis_pairs(axis_row, group, ref, line)
+            line.pairs = _axis_pairs(axis_row, group, ref, declared)
             combo = _combination(line.pairs)
             for key, labels in (
                 ("axis1", [axis.label if axis else name for _, axis, name, _, _ in line.pairs]),
@@ -522,8 +669,6 @@ def plan(store, rows, mode):
             line.stock = integer(row, "stock", 2**31 - 1, required=line.action == "create")
             line.weight = integer(row, "weight", 2**31 - 1)
             line.barcode = text_value(row, "barcode", 64)
-            if line.action == "skip":
-                line.definitions.clear()
             signatures[code].add(combo)
             if combo and line.sku:
                 explicit_skus.add(line.sku)
@@ -570,13 +715,9 @@ def _save_parent(store, group, first):
             status=Product.Status.DRAFT,
         )
     if data["category"]:
-        root = group.root or _new_named(Category, store=store, label="name", name=data["category"], filters={"parent": None})
-        product.category = root
-        if data["child"]:
-            product.category = group.child or _new_named(Category, store=store, label="name", name=data["child"],
-                                                        filters={"parent": root})
+        product.category = group.child or group.root
     if data["brand"]:
-        product.brand = group.brand or _new_named(Brand, store=store, label="name", name=data["brand"])
+        product.brand = group.brand
     if data["tax"]:
         product.tax_class = group.tax
     if data["status"]:
@@ -615,18 +756,7 @@ def _save_variant(store, product, line):
     variant = line.target
     if variant is None:
         values = {}
-        for _, axis, axis_name, value, value_name in line.pairs:
-            axis = axis or _new_named(
-                Attribute, store=store, label="label", name=axis_name,
-                defaults={"is_variant_axis": True, "data_type": Attribute.DataType.SELECT},
-            )
-            if value is None:
-                value, _ = AttributeValue.objects.get_or_create(
-                    attribute=axis, normalized_label=normalization_key(value_name),
-                    defaults={"label": value_name, "value": value_name},
-                )
-                if not value.is_active:
-                    raise InvalidRow("value1", "مقدار ویژگی غیرفعال است.")
+        for _, axis, _, value, _ in line.pairs:
             option = product.options.filter(attribute=axis, is_active=True).first()
             if option is None:
                 option = product.options.filter(normalized_label=normalization_key(axis.label), is_active=True).first()
@@ -693,7 +823,6 @@ def outcomes(groups, lines, *, apply=False, store=None, actor=None):
         result.append(RowOutcome(
             row_number=line.number, source_identifier=(getattr(target, "sku", "") or line.sku or line.group),
             status=status, errors=errors,
-            warnings=[f"تعریف جدید (پس از تأیید نهایی): {value}" for value in dict.fromkeys(line.definitions)],
             target_object_type=type(target).__name__ if target else "",
             target_object_id=target.pk if target else None,
             normalized_data_summary={"action": line.action, "product_name": line.name, "v33": True},
@@ -704,16 +833,41 @@ def outcomes(groups, lines, *, apply=False, store=None, actor=None):
 
 
 def validate(store, rows, mode):
-    groups, lines, limit = plan(store, rows, mode)
-    return outcomes(groups, lines), limit
+    products, definitions, declared = plan_lists(store, rows)
+    groups, lines, limit = plan(store, products, mode, declared)
+    return [*outcomes(groups, lines), *(row for row, _ in definitions)], limit
 
 
 def execute(store, rows, mode, actor):
-    # The enclosing ImportJob transaction also covers new reference definitions and the stock ledger.
+    # The enclosing ImportJob transaction also covers reference definitions and stock.
     Store.objects.select_for_update().get(pk=store.pk)
-    groups, lines, limit = plan(store, rows, mode)
+    products, definitions, declared = plan_lists(store, rows)
+    groups, lines, limit = plan(store, products, mode, declared)
     if limit and lines:
         lines[0].errors.append(error("group", limit))
-    if any(line.errors for line in lines):
-        return outcomes(groups, lines)
-    return outcomes(groups, lines, apply=True, store=store, actor=actor)
+    if any(line.errors for line in lines) or any(row.errors for row, _ in definitions):
+        return [*outcomes(groups, lines), *(row for row, _ in definitions)]
+
+    applied = []
+    records = {}
+    for row, additions in definitions:
+        for kind, name, parent, parent_id in additions:
+            try:
+                records[definition_key(kind, name, parent)] = save_definition(
+                    store, kind, name, records.get(parent, parent_id),
+                )
+            except (IntegrityError, ValidationError, ValueError):
+                row.status = RS.FAILED
+                row.errors = [error(kind, "ثبت تعریف با وضعیت فعلی فروشگاه سازگار نیست.")]
+                return [*applied, row]
+        if additions:
+            row.status = RS.CREATED
+        applied.append(row)
+    if declared:
+        # Resolve the persisted reference IDs before creating products and variants.
+        groups, lines, limit = plan(store, products, mode, set())
+        if limit and lines:
+            lines[0].errors.append(error("group", limit))
+        if any(line.errors for line in lines):
+            return [*applied, *outcomes(groups, lines)]
+    return [*applied, *outcomes(groups, lines, apply=True, store=store, actor=actor)]
