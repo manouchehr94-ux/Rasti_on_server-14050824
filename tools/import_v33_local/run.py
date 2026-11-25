@@ -45,7 +45,9 @@ def main():
     from django.utils import timezone
 
     from apps.catalog.models import Brand, Category, Vendor
-    from apps.stores.models import Store, StoreMembership
+    from apps.core.models import ShopSettings
+    from apps.stores.models import Store, StoreDomain, StoreMembership
+    from apps.stores.resolution import domain_is_eligible_for_routing
 
     call_command("migrate", interactive=False)
     with transaction.atomic():
@@ -57,6 +59,17 @@ def main():
         if store.status == Store.Status.PROVISIONING:
             store.status = Store.Status.ACTIVE
             store.save(update_fields=["status"])
+        ShopSettings.provision_for(store)
+        domain, _ = StoreDomain.objects.get_or_create(
+            hostname="xlsx-shop.rastisi.localhost",
+            defaults={
+                "store": store, "domain_type": StoreDomain.DomainType.PLATFORM_SUBDOMAIN,
+                "verification_status": StoreDomain.VerificationStatus.VERIFIED,
+                "verified_at": timezone.now(),
+            },
+        )
+        if domain.store_id != store.pk or not domain_is_eligible_for_routing(domain):
+            raise RuntimeError("The local storefront hostname is already assigned or inactive.")
         owner, _ = get_user_model().objects.get_or_create(
             username="xlsx-owner", defaults={"email": "xlsx-owner@example.invalid", "is_staff": True},
         )
@@ -76,6 +89,7 @@ def main():
         Brand.objects.get_or_create(store=store, slug="qa-brand", defaults={"name": "برند مصنوعی"})
 
     print("Open in Edge or Chrome:", f"http://xlsx-qa.rastisi.localhost:{args.port}/admin-portal/imports/upload/", flush=True)
+    print("Customer storefront:", f"http://xlsx-shop.rastisi.localhost:{args.port}/", flush=True)
     print("Password sign-in:", owner.email, flush=True)
     print("Local password for this session:", password, flush=True)
     call_command("runserver", f"127.0.0.1:{args.port}", use_reloader=False)

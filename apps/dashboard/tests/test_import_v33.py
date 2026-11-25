@@ -4,18 +4,22 @@ from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.catalog.models import Attribute, AttributeValue, Brand, Category, Product
-from apps.core.models import ImportJob
+from apps.cart.models import CartItem
+from apps.catalog.services.inventory_service import adjust_stock_manually
+from apps.catalog.services.variant_engine_service import add_manual_variant, add_option_value, add_product_option
+from apps.core.models import ImportJob, ShopSettings
 from apps.dashboard.services import import_v33
 from apps.dashboard.tests.test_import_views import ImportViewTestCase
 from apps.dashboard.tests.xlsx_helpers import XLSX_MIME
 from apps.orders.models import TaxClass
-from apps.stores.models import Store
+from apps.stores.models import Store, StoreDomain
 
 
 class UnifiedImportFlow(ImportViewTestCase):
@@ -259,3 +263,48 @@ class UnifiedImportFlow(ImportViewTestCase):
             self.assertIn(column + ":", row[3].value)
         self.confirm(job)
         self.assertFalse(Product.objects.filter(store=self.store, sku="TRACE33").exists())
+
+    @override_settings(ALLOWED_HOSTS=["import-view-test.rastisi.localhost", "xlsx-shop.rastisi.localhost"])
+    def test_imported_and_manually_created_variants_share_availability_and_cart_behavior(self):
+        from apps.dashboard.services.catalog_admin_service import filtered_products
+        from apps.dashboard.templatetags.dashboard_extras import product_status_badge, product_status_label
+
+        job = self.upload(
+            [dict(group="QA-103", name="شلوار آزمایشی", category=self.category.name, axis1="رنگ",
+                  value1="آبی", axis2="سایز", value2="M", stock=10, price=300000, status="فعال")],
+            [dict(axis1="رنگ", value1="آبی"), dict(axis1="سایز", value1="M")],
+        )
+        self.confirm(job)
+        self.assertEqual(job.status, ImportJob.Status.COMPLETED)
+        imported = Product.objects.get(store=self.store, sku="QA-103")
+
+        manual = Product.objects.create(
+            store=self.store, vendor=self.vendor, category=self.category, sku="MANUAL-QA",
+            slug="manual-qa", name="کالای دستی", product_type=Product.ProductType.VARIABLE,
+            status=Product.Status.ACTIVE, price=300000,
+        )
+        option = add_product_option(manual, label="رنگ")
+        value = add_option_value(option, "آبی")
+        manual_variant = add_manual_variant(manual, {option.pk: value.pk})
+        adjust_stock_manually(store=self.store, product=manual, variant=manual_variant, new_stock=8, actor=self.owner)
+        self.assertEqual((imported.stock, manual.stock), (0, 0))
+        self.assertEqual((imported.variants.get().stock, manual_variant.stock), (10, 8))
+        for product in filtered_products(self.store).filter(pk__in=[imported.pk, manual.pk]):
+            self.assertEqual(product_status_label(product), "فعال")
+            self.assertEqual(product_status_badge(product), "b-green")
+        self.assertFalse(filtered_products(self.store, status="out").filter(pk__in=[imported.pk, manual.pk]).exists())
+
+        ShopSettings.provision_for(self.store)
+        StoreDomain.objects.create(
+            store=self.store, hostname="xlsx-shop.rastisi.localhost",
+            verification_status=StoreDomain.VerificationStatus.VERIFIED, verified_at=timezone.now(),
+        )
+        preview = self.client.get(reverse("dashboard:product-preview", args=[imported.pk]))
+        self.assertContains(preview, imported.name)
+        customer = Client(HTTP_HOST="xlsx-shop.rastisi.localhost")
+        for product in (imported, manual):
+            self.assertContains(customer.get(reverse("catalog:product-detail", args=[product.slug])), product.name)
+            variant = product.variants.get()
+            response = customer.post(reverse("cart:add", args=[product.slug]), {"variant_id": variant.pk, "quantity": 1})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(CartItem.objects.filter(product=product, variant=variant, quantity=1).exists())
