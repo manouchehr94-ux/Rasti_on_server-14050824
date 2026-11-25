@@ -9,6 +9,8 @@ import re
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from openpyxl import load_workbook
+from openpyxl.cell import MergedCell
+from openpyxl.styles import Alignment, Border, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
@@ -29,6 +31,10 @@ SHEET = "ورود محصولات"
 LIST_SHEET = "فهرست‌ها"
 LIST_ROW_OFFSET = 1_000_000
 LIST_KEYS = ("category", "child", "brand", "axis1", "value1")
+LIST_COLUMNS = {"category": 1, "child": 2, "brand": 4, "axis1": 5, "value1": 6}
+LEGACY_LIST_COLUMNS = dict(zip(LIST_KEYS, range(3, 8), strict=True))
+LIST_FIRST_ROW = 5
+LIST_WIDTH = 9
 KEYS = (
     "group", "name", "category", "child", "brand",
     "axis1", "value1", "axis2", "value2", "axis3", "value3",
@@ -92,20 +98,95 @@ def _excel_literal(expression):
     return f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({expression},"~","~~"),"*","~*"),"?","~?")'
 
 
+def _style_workbook(wb, list_end):
+    title, guide, heading = "173B32", "DCEFE7", "27604F"
+    stripe = ("FFFFFF", "F2F7F4")
+    editable = ("FFF8E5", "F7ECCA")
+    ink = "20362E"
+    for sheet in wb:
+        sheet.sheet_view.rightToLeft = True
+        sheet.sheet_view.showGridLines = False
+        sheet.sheet_view.topLeftCell = "A1"
+        for selection in sheet.sheet_view.selection:
+            if selection.pane in (None, "bottomRight", "bottomLeft"):
+                selection.activeCell = sheet.freeze_panes or "A1"
+                selection.sqref = selection.activeCell
+
+        grid = sheet.title in (SHEET, "نمونه تکمیل‌شده")
+        lists = sheet.title == LIST_SHEET
+        last_col = 25 if grid else LIST_WIDTH if lists else 6
+        merges = {area.start_cell.coordinate: area for area in sheet.merged_cells.ranges}
+        for row in sheet.iter_rows(max_col=last_col):
+            for cell in row:
+                if isinstance(cell, MergedCell):
+                    continue
+                r, c = cell.row, cell.column
+                band = merges.get(cell.coordinate)
+                if lists and c == 3 and not band:
+                    fill, foreground, bold = "FFFFFF", ink, False
+                    cell.border = Border()
+                elif r == 1 and (band or grid):
+                    fill, foreground, bold = title, "FFFFFF", True
+                elif band and band.min_col == 1 and r == 2:
+                    fill, foreground, bold = guide, ink, True
+                elif (lists and r == 4) or (band and band.min_col == 1) or (sheet.title == "قرارداد فنی" and r == 5):
+                    fill, foreground, bold = heading, "FFFFFF", True
+                elif (sheet.title == SHEET and r > 1 and c <= 22) or (lists and LIST_FIRST_ROW <= r <= list_end and c <= 6):
+                    fill, foreground, bold = editable[r % 2], ink, False
+                else:
+                    fill, foreground, bold = stripe[r % 2], ink, False
+                fill_style = PatternFill("solid", fgColor=fill)
+                cell.fill = fill_style
+                cell.font = Font(name="Tahoma", size=15 if r == 1 and band else 10, color=foreground, bold=bold)
+                ltr = (grid and r > 1 and c in (1, 12, 13, 14, 15, 16, 23, 24)) or (
+                    sheet.title == "قرارداد فنی" and 6 <= r <= 30 and c in (1, 3)
+                )
+                cell.alignment = Alignment(
+                    horizontal="center" if ltr else "right", vertical="center", readingOrder=1 if ltr else 2,
+                    wrap_text=not ltr,
+                )
+                if band:
+                    for band_row in sheet.iter_rows(min_row=band.min_row, max_row=band.max_row,
+                                                   min_col=band.min_col, max_col=band.max_col):
+                        for band_cell in band_row:
+                            band_cell.fill = fill_style
+        if grid:
+            sheet.row_dimensions[1].height = 35
+    wb["راهنما"].row_dimensions[2].height = 30
+    wb["قرارداد فنی"].row_dimensions[2].height = 30
+    wb[LIST_SHEET].row_dimensions[1].height = 32
+    wb[LIST_SHEET].row_dimensions[2].height = 30
+    wb[LIST_SHEET].row_dimensions[4].height = 28
+
+
 def workbook(store):
     wb = _template()
     ref = References(store)
     lists = wb["فهرست‌ها"]
     contract = wb["قرارداد فنی"]
     product = wb[SHEET]
-    wb["راهنما"]["A2"] = "تعریف‌های جدید را در «فهرست‌ها» وارد کنید. سپس در «ورود اطلاعات» همین فروشگاه فایل را پیش‌نمایش و ثبت نهایی کنید."
+    guide = wb["راهنما"]
+    guide["A2"] = "تعریف‌های جدید را در «فهرست‌ها» وارد کنید. سپس در «ورود اطلاعات» همین فروشگاه فایل را پیش‌نمایش و ثبت نهایی کنید."
+    guide["C37"] = "در «فهرست‌ها» نام دسته اصلی را یک‌بار در ستون A بنویسید."
+    guide["D37"] = "زیرگروه‌ها را در ستون B از همان ردیف، زیر هم وارد کنید."
+    guide["D38"] = "دسته بعدی را پس از آخرین زیرگروه در ستون A آغاز کنید."
+    guide["C40"] = "در «فهرست‌ها» ویژگی را در E و مقادیرش را در F بنویسید."
     contract["A2"] = "قالب ورود محصولات ۳.۳. تعریف‌های تازه فقط پس از تأیید نهایی ذخیره می‌شوند."
+    old_headings = [cell.value for cell in lists[4][:8]]
+    for merged in ("A1:H1", "A2:H2"):
+        lists.unmerge_cells(merged)
+        lists.merge_cells(merged.replace("H", "I"))
+    for col, title in enumerate((*old_headings[2:4], None, *old_headings[4:], *old_headings[:2]), 1):
+        lists.cell(4, col).value = title
+    for col, width in zip("ABCDEFGHI", (25, 28, 5, 24, 21, 23, 24, 17, 14), strict=True):
+        lists.column_dimensions[col].width = width
+        lists.column_dimensions[col].hidden = False
     notes = []
     for merged in list(lists.merged_cells.ranges):
         if merged.min_row >= 5:
             notes.append((merged.min_row, lists.cell(merged.min_row, merged.min_col).value))
             lists.unmerge_cells(str(merged))
-    for row in lists.iter_rows(min_row=5, max_col=8):
+    for row in lists.iter_rows(min_row=5, max_col=13):
         for cell in row:
             if cell.value is not None:
                 cell.value = None
@@ -137,20 +218,22 @@ def workbook(store):
                                  lambda root: (ref.child_labels[x.pk] for x in ref.children[root.pk] if x.is_active)))
     axis_rows = list(grouped(axes, ref.axis_labels,
                              lambda axis: (value.label for value in axis.values.all() if value.is_active)))
-    last = max(write(1, list(STATUSES)), write(2, ["بله", "خیر"]),
-               write(3, [row[0] for row in category_rows]), write(4, [row[1] for row in category_rows]),
-               write(5, [ref.brand_labels[b.pk] for b in ref.brands if b.is_active]),
-               write(6, [row[0] for row in axis_rows]), write(7, [row[1] for row in axis_rows]),
-               write(8, [ref.tax_labels[t.pk] for t in ref.taxes if t.is_active] + [NO_TAX_CLASS]))
+    last = max(write(8, list(STATUSES)), write(9, ["بله", "خیر"]),
+               write(1, [row[0] for row in category_rows]), write(2, [row[1] for row in category_rows]),
+               write(4, [ref.brand_labels[b.pk] for b in ref.brands if b.is_active]),
+               write(5, [row[0] for row in axis_rows]), write(6, [row[1] for row in axis_rows]),
+               write(7, [ref.tax_labels[t.pk] for t in ref.taxes if t.is_active] + [NO_TAX_CLASS]))
     limit = max(120, last + 40)
-    for index, (_, note) in enumerate(sorted(notes), limit + 2):
+    # Notes belong in the guide: column A of Lists now carries actual categories.
+    for index, (_, note) in enumerate(sorted(notes), guide.max_row + 2):
         if note:
-            xlsx_utils.set_value(lists.cell(index, 1), note)
-            lists.merge_cells(start_row=index, start_column=1, end_row=index, end_column=8)
+            xlsx_utils.set_value(guide.cell(index, 1), note)
+            guide.merge_cells(start_row=index, start_column=1, end_row=index, end_column=6)
+            guide.row_dimensions[index].height = 32
     helper_end = limit
     for source, detail, label, start, count, packed, packed_start in (
-        ("C", "D", "H", "I", "J", "T", "V"),
-        ("F", "G", "L", "M", "N", "U", "W"),
+        ("A", "B", "H", "I", "J", "T", "V"),
+        ("E", "F", "L", "M", "N", "U", "W"),
     ):
         children = f"'فهرست‌ها'!${detail}$5:${detail}${limit}"
         for row in range(5, limit + 1):
@@ -198,7 +281,7 @@ def workbook(store):
     known_axes = f"$X$5:$X${max(5, len(axes) + 4)}"
     candidates = f"$Y$5:$Y${limit}"
     for row in range(5, limit + 1):
-        source = f"'فهرست‌ها'!F{row}"
+        source = f"'فهرست‌ها'!E{row}"
         contract[f"Y{row}"] = f'=IF({source}="","",IF(ISNUMBER(MATCH({_excel_literal(source)},{known_axes},0)),"",{source}))'
         contract[f"Z{row}"] = (
             f'=IFERROR(INDEX({candidates},_xlfn.AGGREGATE(15,6,(ROW({candidates})-4)/'
@@ -257,7 +340,11 @@ def workbook(store):
         column = str(dv.sqref).split("2", 1)[0]
         formula = dv.formula1.replace("$120", f"${limit}").replace("$64", f"${helper_end}")
         named = column in {"D", "F", "G", "H", "I", "J", "K"}
-        if column == "D":
+        list_column = {"E": "D", "Q": "H", "R": "I", "S": "G"}.get(column)
+        if list_column:
+            address = f"'فهرست‌ها'!${list_column}$5"
+            formula = f'OFFSET(INDIRECT("{address}"),0,0,MAX(1,COUNTA(INDIRECT("{address}:${list_column}${limit}"))),1)'
+        elif column == "D":
             formula = category_rule
         elif column in {"F", "H", "J"}:
             formula = axis_rule
@@ -275,6 +362,7 @@ def workbook(store):
         dv.formula1 = formula
         # Typing a proposed reference is allowed; validation is authoritative on upload.
         dv.showErrorMessage = column in {"Q", "R", "S", "Y"}
+    _style_workbook(wb, limit)
     wb.calculation.fullCalcOnLoad = True
     return xlsx_utils.workbook_to_bytes(wb)
 
@@ -305,18 +393,26 @@ def parse_lists(fileobj):
     headers, rows = xlsx_utils.read_xlsx_table(
         fileobj, sheet_names=(LIST_SHEET,), require_sheet=True, first_header_row=4,
     )
-    if tuple(headers[2:7]) != list_headers():
+    columns = next((mapping for mapping in (LIST_COLUMNS, LEGACY_LIST_COLUMNS)
+                    if tuple(headers[i - 1] for i in mapping.values() if i <= len(headers)) == list_headers()), None)
+    if columns is None:
         raise xlsx_utils.XlsxReadError("سرستون‌های شیت «فهرست‌ها» باید مطابق قالب ۳.۳ باقی بمانند.")
     for row in rows:
-        cells = dict(zip(LIST_KEYS, row.cells[2:7], strict=True))
-        errors = [error(LIST_KEYS[i - 2], "سلول فرمولی یا دارای خطا مجاز نیست.")
-                  for i in row.formula_columns if 2 <= i < 7]
+        cells = {key: row.cells[index - 1] for key, index in columns.items()}
+        errors = [error(key, "سلول فرمولی یا دارای خطا مجاز نیست.")
+                  for key, index in columns.items() if index - 1 in row.formula_columns]
         if errors or any(value.strip() for value in cells.values()):
             yield {
                 **cells, "__v33__": True, "__v33_list__": True,
                 "__row_number__": LIST_ROW_OFFSET + row.number,
-                "__errors__": errors, "__raw__": list(zip(list_headers(), row.cells[2:7], strict=True)),
+                "__list_columns__": columns,
+                "__errors__": errors, "__raw__": list(zip(list_headers(), cells.values(), strict=True)),
             }
+
+
+def list_error_at(message, columns):
+    key = KEYS[ord(message[0]) - ord("A")]
+    return f"{get_column_letter(columns[key])}{message[1:]}"
 
 
 def identity(record, label):
@@ -398,12 +494,13 @@ def plan_lists(store, rows):
                     labels.append(f"{list_headers()[LIST_KEYS.index(kind)]}: {name}")
             except InvalidRow as exc:
                 errors.append(str(exc))
+        columns = row.get("__list_columns__", LEGACY_LIST_COLUMNS)
         outcomes.append((RowOutcome(
             row_number=row["__row_number__"], source_identifier="", status=RS.INVALID if errors else RS.VALID if additions else RS.SKIPPED,
-            errors=errors, warnings=[f"تعریف جدید پس از تأیید: {label}" for label in labels],
+            errors=[list_error_at(message, columns) for message in errors], warnings=[f"تعریف جدید پس از تأیید: {label}" for label in labels],
             normalized_data_summary={
                 "action": "define", "product_name": LIST_SHEET, "v33": True,
-                "sheet_row": row["__row_number__"] - LIST_ROW_OFFSET,
+                "sheet_row": row["__row_number__"] - LIST_ROW_OFFSET, "list_columns": list(columns.values()),
             },
         ), additions))
     return products, outcomes, declared
@@ -890,7 +987,8 @@ def execute(store, rows, mode, actor):
                 )
             except (IntegrityError, ValidationError, ValueError):
                 row.status = RS.FAILED
-                row.errors = [error(kind, "ثبت تعریف با وضعیت فعلی فروشگاه سازگار نیست.")]
+                columns = dict(zip(LIST_KEYS, row.normalized_data_summary["list_columns"], strict=True))
+                row.errors = [list_error_at(error(kind, "ثبت تعریف با وضعیت فعلی فروشگاه سازگار نیست."), columns)]
                 return [*applied, row]
         if additions:
             row.status = RS.CREATED

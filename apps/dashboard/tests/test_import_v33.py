@@ -43,7 +43,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         lists = wb[import_v33.LIST_SHEET]
         for index, row in enumerate(definitions, 20):
             for key, value in row.items():
-                lists.cell(index, import_v33.KEYS.index(key) + 1, value)
+                lists.cell(index, import_v33.LIST_COLUMNS[key], value)
         data = BytesIO()
         wb.save(data)
         return self.upload_bytes(data.getvalue())
@@ -97,6 +97,16 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertEqual([c.value for c in wb[import_v33.SHEET][1]], [c.value for c in approved[import_v33.SHEET][1]])
         self.assertTrue(all(s.sheet_view.rightToLeft for s in wb))
         self.assertIsNone(wb[import_v33.SHEET]["A2"].value)
+        lists = wb[import_v33.LIST_SHEET]
+        self.assertEqual([cell.value for cell in lists[4][:9]], [
+            *import_v33.list_headers()[:2], None, *import_v33.list_headers()[2:],
+            "دسته مالیاتی", "وضعیت کالا", "بله / خیر",
+        ])
+        self.assertFalse(lists.column_dimensions["I"].hidden)
+        self.assertIsNone(lists["C5"].value)
+        self.assertEqual(lists["A5"].alignment.readingOrder, 2)
+        self.assertEqual(wb[import_v33.SHEET]["A2"].alignment.readingOrder, 1)
+        self.assertNotEqual(wb[import_v33.SHEET]["B2"].fill.fgColor, wb[import_v33.SHEET]["B3"].fill.fgColor)
         values = " ".join(str(value) for row in wb["فهرست‌ها"].values for value in row if value is not None)
         for label in ("برند", "راه‌راه", "مالیات آزمایشی", "زیردسته"):
             self.assertIn(label, values)
@@ -208,7 +218,7 @@ class UnifiedImportFlow(ImportViewTestCase):
              dict(brand="برند پیشنهادی"), dict(brand=str(foreign.pk)), dict(axis1="=1+1")],
         )
         rows = {row.normalized_data_summary.get("sheet_row"): row for row in job.row_results.all()}
-        for number, column in ((20, "D"), (21, "E"), (22, "E"), (23, "F")):
+        for number, column in ((20, "B"), (21, "D"), (22, "D"), (23, "E")):
             self.assertTrue(rows[number].errors[0].startswith(column + ":"), rows[number].errors)
         self.assertContains(self.client.get(reverse("dashboard:import-detail", args=[job.pk])), "فهرست‌ها")
         self.confirm(job)
@@ -238,7 +248,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertEqual(job.status, ImportJob.Status.FAILED)
         result = job.row_results.get(row_number=import_v33.LIST_ROW_OFFSET + 20)
         self.assertEqual(result.normalized_data_summary["sheet_row"], 20)
-        self.assertTrue(result.errors[0].startswith("G:"))
+        self.assertTrue(result.errors[0].startswith("F:"))
         self.assertFalse(Brand.objects.filter(store=self.store, name="برند آزمایشی").exists())
         self.assertFalse(Category.objects.filter(store=self.store, name="دسته ساخته‌شده").exists())
         self.assertFalse(Attribute.objects.filter(store=self.store, label="رنگ").exists())
@@ -251,13 +261,13 @@ class UnifiedImportFlow(ImportViewTestCase):
             [{kind: "=1+1"} for kind in kinds],
         )
         self.assertEqual(job.invalid_rows, len(kinds))
-        for number, column in enumerate("CDEFG", 20):
+        for number, column in enumerate("ABDEF", 20):
             result = job.row_results.get(row_number=import_v33.LIST_ROW_OFFSET + number)
             self.assertEqual(result.normalized_data_summary["sheet_row"], number)
             self.assertTrue(result.errors[0].startswith(column + ":"), result.errors)
         response = self.client.get(reverse("dashboard:import-download-errors", args=[job.pk]))
         report = load_workbook(BytesIO(b"".join(response.streaming_content)))
-        for row, number, column in zip(report.active.iter_rows(min_row=2), range(20, 25), "CDEFG", strict=True):
+        for row, number, column in zip(report.active.iter_rows(min_row=2), range(20, 25), "ABDEF", strict=True):
             self.assertEqual(row[0].value, number)
             self.assertIn("فهرست‌ها", row[1].value)
             self.assertIn(column + ":", row[3].value)
@@ -308,3 +318,15 @@ class UnifiedImportFlow(ImportViewTestCase):
             response = customer.post(reverse("cart:add", args=[product.slug]), {"variant_id": variant.pk, "quantity": 1})
             self.assertEqual(response.status_code, 200)
             self.assertTrue(CartItem.objects.filter(product=product, variant=variant, quantity=1).exists())
+
+    def test_legacy_list_layout_keeps_its_original_error_column(self):
+        wb = import_v33._template()
+        ws = wb[import_v33.LIST_SHEET]
+        ws["G5"] = "=1+1"
+        stream = BytesIO()
+        wb.save(stream)
+        stream.seek(0)
+        rows = list(import_v33.parse_lists(stream))
+        _, definitions, _ = import_v33.plan_lists(self.store, rows)
+        outcome, _ = definitions[0]
+        self.assertTrue(outcome.errors[-1].startswith("G:"), outcome.errors)

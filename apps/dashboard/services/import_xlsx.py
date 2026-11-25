@@ -832,7 +832,9 @@ def build_error_report_xlsx(job, row_results, source_rows: dict, import_type: st
         if result.normalized_data_summary.get("sheet_row"):
             from apps.dashboard.services.import_v33 import list_headers
 
-            flagged = {label for index, label in enumerate(list_headers(), 3) if get_column_letter(index) in flagged}
+            source_columns = result.normalized_data_summary.get("list_columns", range(3, 8))
+            flagged = {label for index, label in zip(source_columns, list_headers(), strict=True)
+                       if get_column_letter(index) in flagged}
         for position, header in enumerate(header_pool, start=len(fixed) + 1):
             key = alias.get(header_key(header))
             if header in flagged or (key and columns_by_key[key].base_label in flagged):
