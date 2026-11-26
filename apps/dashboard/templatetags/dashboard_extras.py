@@ -1,6 +1,7 @@
 from django import template
 
 from apps.catalog.models import Product
+from apps.catalog.services.availability_service import is_available
 from apps.dashboard.services.catalog_admin_service import category_chain as _category_chain
 from apps.dashboard.services.catalog_admin_service import product_price_range as _product_price_range
 from apps.dashboard.services.dashboard_service import ORDER_STATUS_BADGE, PAYMENT_STATUS_BADGE
@@ -63,11 +64,9 @@ def is_price_range(product):
 
 @register.filter
 def product_status_badge(product):
-    if product.stock == 0:
-        return "b-red"
-    if product.status == "inactive":
+    if product.status != Product.Status.ACTIVE:
         return "b-gray"
-    return "b-green"
+    return "b-green" if is_available(product) else "b-red"
 
 
 @register.filter
@@ -77,11 +76,9 @@ def dict_get(mapping, key):
 
 @register.filter
 def product_status_label(product):
-    if product.stock == 0:
-        return "ناموجود"
-    if product.status == "inactive":
-        return "غیرفعال"
-    return "فعال"
+    if product.status != Product.Status.ACTIVE:
+        return product.get_status_display()
+    return product.get_status_display() if is_available(product) else "ناموجود"
 
 
 @register.filter

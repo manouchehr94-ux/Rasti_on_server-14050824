@@ -436,7 +436,19 @@ def parse_xlsx_import(fileobj, import_type: str, store) -> ParsedFile:
     می‌کند): ``__row_number__`` (شماره‌ی ردیف در اکسل)، ``__errors__`` (ردیفِ
     رد‌شده پیش از اعتبارسنجی)، ``__warnings__``، ``__raw__`` (مقدارهایِ اصلیِ
     فایل برایِ گزارشِ خطا)."""
-    headers, xrows = xlsx_utils.read_xlsx_table(fileobj)
+    from apps.dashboard.services import import_v33
+
+    headers, xrows, sheet = xlsx_utils.read_xlsx_table(fileobj, sheet_names=(
+        import_v33.SHEET, "داده‌ها", "داده ها", "Data",
+    ), include_sheet_name=True)
+    if sheet == import_v33.SHEET or any(header_key(h) == header_key("کد گروه کالا *") for h in headers):
+        if sheet != import_v33.SHEET:
+            raise xlsx_utils.XlsxReadError("ردیف‌های قالب ۳.۳ باید در شیت «ورود محصولات» باشند.")
+        if import_type != ImportJob.ImportType.PRODUCTS:
+            raise xlsx_utils.XlsxReadError("قالب ۳.۳ برای نوع ورود «کالاها» است.")
+        fileobj.seek(0)
+        definitions = import_v33.parse_lists(fileobj)
+        return ParsedFile([*import_v33.parse(headers, xrows), *definitions], [], headers)
     aliases = alias_map(import_type)
     columns = column_by_key(import_type)
     mapper = ValueMapper(store)
@@ -581,6 +593,10 @@ def describe_errors(import_type: str, messages) -> list:
     results = []
     for raw in messages or []:
         text = str(raw)
+        letter = re.fullmatch(r"([A-Y]): (.*)", text, re.DOTALL)
+        if letter:
+            results.append({"column": letter[1], "message": letter[2]})
+            continue
         key = None
         for match in re.finditer(r"«([a-z0-9_]+)»", text):
             if match.group(1) in columns:
@@ -798,7 +814,8 @@ def build_error_report_xlsx(job, row_results, source_rows: dict, import_type: st
         raw = dict(source_rows.get(result.row_number, {}).get("__raw__", []))
         shown = display_names.get(result.row_number, {})
         table_rows.append([
-            result.row_number, shown.get("name") or shown.get("fallback", ""), ROW_STATUS_LABELS.get(result.status, result.status),
+            result.normalized_data_summary.get("sheet_row", result.row_number),
+            shown.get("name") or shown.get("fallback", ""), ROW_STATUS_LABELS.get(result.status, result.status),
             "\n".join(f"• {d['column'] + ': ' if d['column'] else ''}{d['message']}" for d in details),
             "\n".join(f"• {w}" for w in result.warnings),
             *[raw.get(h, "") for h in header_pool],
@@ -812,9 +829,15 @@ def build_error_report_xlsx(job, row_results, source_rows: dict, import_type: st
             cell.fill = error_fill
             cell.font = Font(name=xlsx_utils.FONT_NAME, size=10, bold=(column_index == 3), color=xlsx_utils.ERROR_TEXT)
         flagged = {d["column"] for d in details if d["column"]}
+        if result.normalized_data_summary.get("sheet_row"):
+            from apps.dashboard.services.import_v33 import list_headers
+
+            source_columns = result.normalized_data_summary.get("list_columns", range(3, 8))
+            flagged = {label for index, label in zip(source_columns, list_headers(), strict=True)
+                       if get_column_letter(index) in flagged}
         for position, header in enumerate(header_pool, start=len(fixed) + 1):
             key = alias.get(header_key(header))
-            if key and columns_by_key[key].base_label in flagged:
+            if header in flagged or (key and columns_by_key[key].base_label in flagged):
                 cell = ws.cell(row=offset, column=position)
                 cell.fill = error_fill
                 cell.font = Font(name=xlsx_utils.FONT_NAME, size=10, bold=True, color=xlsx_utils.ERROR_TEXT)
