@@ -7,7 +7,10 @@
 * ``CustomIndustryTenantIsolationTests`` — a name is bound to its own store; another tenant's owner cannot read or set it.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.test import SimpleTestCase, TestCase
 
 from apps.catalog.models import Category, IndustryTemplate, StoreIndustryInstallation
@@ -147,6 +150,37 @@ class OnboardingCustomIndustryTests(_Base):
         html = self.get("industry").content.decode()
         self.assertIn("گالری سفال", html)
         self.assertIn("قالبِ پایه", html)
+
+
+    def test_review_correction_requires_review_stage_and_unpublished_store(self):
+        self.post(self.other, "فروشگاه_هنری")
+        installation = StoreIndustryInstallation.objects.get(store=self.store)
+        for stage, completed, should_replace in (
+            (Store.OnboardingStage.TEMPLATE, None, False),
+            (Store.OnboardingStage.REVIEW, None, True),
+            (Store.OnboardingStage.DONE, timezone.now(), False),
+        ):
+            with self.subTest(stage=stage):
+                Store.objects.filter(pk=self.store.pk).update(onboarding_stage=stage, onboarding_completed_at=completed)
+                choice = self.rich if stage != Store.OnboardingStage.DONE else self.other
+                response = self.post(choice, "نام دیگر", edit_industry="1")
+                self.assertRedirects(response, self.url("review"), fetch_redirect_response=False)
+                installation.refresh_from_db()
+                self.assertEqual(installation.industry_template_id,
+                                 self.rich.pk if should_replace or completed else self.other.pk)
+        self.assertEqual(StoreIndustryInstallation.objects.filter(store=self.store).count(), 1)
+
+    def test_failed_review_correction_rolls_back_seeded_rows_and_keeps_original_choice(self):
+        self.post(self.other, "هنر دستی")
+        Store.objects.filter(pk=self.store.pk).update(onboarding_stage=Store.OnboardingStage.REVIEW)
+        previous = StoreIndustryInstallation.objects.get(store=self.store)
+        original_count = Category.objects.filter(store=self.store).count()
+        with patch.object(svc, "_unique_category_slug", side_effect=["rollback-probe", svc.IndustryInstallationError("خطای آزمایشی")]):
+            response = self.post(self.rich, edit_industry="1")
+        self.assertContains(response, "خطای آزمایشی")
+        previous.refresh_from_db()
+        self.assertEqual(previous.industry_template_id, self.other.pk)
+        self.assertEqual(Category.objects.filter(store=self.store).count(), original_count)
 
 
 class LegacyAndCompatibilityTests(_Base):

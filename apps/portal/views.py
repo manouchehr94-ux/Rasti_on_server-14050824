@@ -1468,21 +1468,24 @@ def onboarding_identity(request, store_public_id):
 
 @owner_required
 def onboarding_industry(request, store_public_id):
-    """مرحله‌ی ۲: انتخابِ صنف — **الزامی** (تصمیمِ مالکِ محصول؛ «سایر (صنف آزاد)» برایِ صنفی که در فهرست نیست)، و فقط یک‌بار قابلِ نصب
-    (``apps.catalog.services.industry_template_service``، ADR-25). اگر
-    Store از قبل یک قالب نصب کرده، این مرحله فقط اطلاعِ همان نصب را نشان
-    می‌دهد؛ هرگز دوباره نصب صدا زده نمی‌شود (idempotent-safe در برابرِ
-    GET/POST مکرر یا دکمه‌ی back مرورگر)."""
+    """Install the mandatory industry or explicitly correct it before publishing."""
     from apps.catalog.models import StoreIndustryInstallation
     from apps.catalog.services import industry_template_service
     from apps.catalog.services.industry_template_service import IndustryInstallationError, install_industry_template
 
     store = _get_owned_store_or_404(request, store_public_id)
     installation = StoreIndustryInstallation.objects.select_related("industry_template").filter(store=store).first()
+    edit_requested = (
+        request.POST.get("edit_industry") == "1" if request.method == "POST" else request.GET.get("edit") == "1"
+    )
+    editing = bool(
+        edit_requested and installation and store.onboarding_completed_at is None
+        and store.onboarding_stage == Store.OnboardingStage.REVIEW
+    )
     templates = provisioning_service.latest_offerable_industry_templates()
-    selected_template_id = ""
+    selected_template_id = str(installation.industry_template_id) if editing else ""
     confirm_error = False
-    custom_industry_name = ""
+    custom_industry_name = installation.custom_industry_name if editing else ""
     custom_name_error = ""
 
     if request.method == "POST":
@@ -1495,9 +1498,12 @@ def onboarding_industry(request, store_public_id):
         # view uses.
         if not portal_action_allowed(request, store, SETTINGS_MANAGE):
             return portal_permission_denied(request)
+        if edit_requested and not editing:
+            messages.error(request, "اصلاح صنف فقط پس از انتخاب اولیه و پیش از انتشار ممکن است.")
+            return redirect("portal:onboarding-review", store_public_id=store.public_id)
 
     registry_ready = True
-    if installation is None:
+    if installation is None or editing:
         from apps.catalog.services import industry_registry_readiness
 
         status = industry_registry_readiness.check_registry()
@@ -1506,12 +1512,14 @@ def onboarding_industry(request, store_public_id):
             # operator alert (never a customer-triggered seed): the platform has to run `ensure_industry_registry --apply`
             logger.error("Industry registry not ready while a seller is at the mandatory industry step: %s", "; ".join(status.problems))
 
-    if request.method == "POST" and installation is None:
+    if request.method == "POST" and (installation is None or editing):
         action = request.POST.get("action")
         if action == "skip" or not registry_ready:
             # the industry choice is mandatory: there is no «skip» (a business not in the list picks «سایر (صنف آزاد)»),
             # and while the catalogue is not loaded nothing can be installed — say so honestly instead of failing silently
             messages.error(request, INDUSTRY_REQUIRED_MESSAGE if registry_ready else INDUSTRY_REGISTRY_NOT_READY_MESSAGE)
+            if editing:
+                return redirect(reverse("portal:onboarding-industry", kwargs={"store_public_id": store.public_id}) + "?edit=1")
             return redirect("portal:onboarding-industry", store_public_id=store.public_id)
 
         form = OnboardingIndustryForm(request.POST)
@@ -1540,10 +1548,11 @@ def onboarding_industry(request, store_public_id):
                         # برایِ هر قالبِ دیگری نامِ آزاد نادیده گرفته می‌شود.
                         install_industry_template(
                             store, template,
+                            **({"correct_onboarding": True} if editing else {}),
                             **({"custom_name": custom_industry_name} if industry_template_service.is_other_industry(template) else {}),
                         )
                     except IndustryInstallationError as exc:
-                        if StoreIndustryInstallation.objects.filter(store=store).exists():
+                        if not editing and StoreIndustryInstallation.objects.filter(store=store).exists():
                             # دابل‌کلیک/درخواستِ هم‌زمان: نصبِ اول موفق بوده؛ خطا نشان نده، فقط جلو ببر.
                             _advance_onboarding_stage(store, completed=Store.OnboardingStage.INDUSTRY)
                             return redirect("portal:onboarding-template", store_public_id=store.public_id)
@@ -1551,6 +1560,8 @@ def onboarding_industry(request, store_public_id):
                             custom_name_error = str(exc)
                         messages.error(request, str(exc))
                     else:
+                        if editing:
+                            return redirect("portal:onboarding-review", store_public_id=store.public_id)
                         _advance_onboarding_stage(store, completed=Store.OnboardingStage.INDUSTRY)
                         return redirect("portal:onboarding-template", store_public_id=store.public_id)
     elif request.method == "POST":
@@ -1567,7 +1578,7 @@ def onboarding_industry(request, store_public_id):
         "template_cards": template_cards, "installation": installation, "installed_summary": installed_summary,
         "selected_template_id": selected_template_id, "confirm_error": confirm_error,
         "custom_industry_name": custom_industry_name, "custom_name_error": custom_name_error,
-        "industry_sector_tabs": _sector_tabs_for(template_cards), "registry_ready": registry_ready,
+        "industry_sector_tabs": _sector_tabs_for(template_cards), "registry_ready": registry_ready, "editing": editing,
     })
 
 
@@ -1735,6 +1746,10 @@ def onboarding_review(request, store_public_id):
         **_onboarding_shell_context(store, Store.OnboardingStage.REVIEW, applied_template=applied),
         "shop_settings": shop_settings, "installation": installation, "installed_summary": installed_summary,
         "trial_domain": trial_domain, "applied_template": applied, "template_card": template_card,
+        "can_edit_industry": bool(
+            installation and store.onboarding_stage == Store.OnboardingStage.REVIEW
+            and store.onboarding_completed_at is None
+        ),
         **_publication_context(store),
     })
 

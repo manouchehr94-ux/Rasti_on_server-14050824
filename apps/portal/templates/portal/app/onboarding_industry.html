@@ -1,15 +1,15 @@
 {% extends "portal/onboarding/base_onboarding.html" %}
 {% block title %}انتخابِ صنف | راه‌اندازی | راستی‌سی{% endblock %}
-{% block ob_page_class %}{% if not installation %} ob-page--wide{% else %} ob-page--narrow{% endif %}{% endblock %}
+{% block ob_page_class %}{% if not installation or editing %} ob-page--wide{% else %} ob-page--narrow{% endif %}{% endblock %}
 {% block ob_body %}
 {% include "portal/onboarding/_wizard_head.html" %}
 
 <section class="ob-card" aria-labelledby="ob-industry-title">
-  {% if installation %}
+  {% if installation and not editing %}
   {# ── از قبل نصب‌شده: خلاصه + ادامه‌ی idempotent ── #}
   <div class="ob-card-head">
     <h2 id="ob-industry-title">صنفِ فروشگاه</h2>
-    <p>قالبِ صنفِ این فروشگاه نصب شده است. نصبِ قالب فقط یک‌بار برای هر فروشگاه ممکن است، پس نیازی به کاری در این مرحله نیست.</p>
+    <p>قالب صنف این فروشگاه نصب شده است. تا پیش از انتشار، از مرحله بازبینی می‌توانید صنف را اصلاح کنید.</p>
   </div>
   <div class="ob-installed">
     <span class="ob-ic-icon" aria-hidden="true">{{ installed_summary.icon|default:"🏷️" }}</span>
@@ -17,7 +17,7 @@
       <h3>{% if installation.custom_industry_name %}{{ installation.custom_industry_name }}{% else %}{{ installation.industry_template.name }}{% endif %}</h3>
       {% if installation.custom_industry_name %}<p>قالبِ پایه: {{ installation.industry_template.name }}</p>{% endif %}
       <p>{{ installed_summary.sector_label }} · نسخه‌ی {{ installation.installed_version }}</p>
-      <p>{{ installation.categories_created }} دسته‌بندی و {{ installation.attributes_created }} ویژگی ساخته شد. می‌توانید آن‌ها را از پنلِ مدیریت ویرایش کنید؛ نصبِ قالبِ دیگری ممکن نیست.</p>
+      <p>{{ installation.categories_created }} دسته‌بندی و {{ installation.attributes_created }} ویژگی ساخته شد. می‌توانید آن‌ها را از پنل مدیریت ویرایش کنید.</p>
     </div>
   </div>
   <form method="post" id="ob-industry-form" data-ob-once>{% csrf_token %}</form>
@@ -32,6 +32,7 @@
   {% if template_cards %}
   <form method="post" id="ob-industry-form" data-ob-industry data-ob-once>
     {% csrf_token %}
+    {% if editing %}<input type="hidden" name="edit_industry" value="1">{% endif %}
     <div class="ob-industry-tools">
       <div class="ob-search">
         <label class="ob-sr-only" for="ob-industry-search">جست‌وجوی صنف</label>
@@ -74,7 +75,7 @@
   <div class="ob-sticky-foot">
     <div class="ob-confirm{% if confirm_error %} has-error{% endif %}" data-ob-confirm>
       <p class="ob-confirm-title" data-ob-confirm-title>صنف انتخاب‌شده: <span data-ob-selected-name>هنوز انتخاب نشده</span></p>
-      <p class="ob-confirm-note">دسته‌بندی‌ها و ویژگی‌های پایه‌ی این صنف برای فروشگاه ساخته می‌شوند. نصب فقط یک‌بار برای هر فروشگاه ممکن است.</p>
+      <p class="ob-confirm-note">{% if editing %}داده‌های فعلی کاتالوگ حفظ می‌شوند و موارد پایه مورد نیاز صنف تازه اضافه می‌شوند.{% else %}دسته‌بندی‌ها و ویژگی‌های پایه‌ی این صنف برای فروشگاه ساخته می‌شوند. انتخاب اولیه فقط یک‌بار انجام می‌شود و تا پیش از انتشار از مرحله بازبینی قابل اصلاح است.{% endif %}</p>
       <label class="ob-check"><input type="checkbox" name="confirm_industry_install" value="1" data-ob-confirm-check form="ob-industry-form"{% if confirm_error %} aria-invalid="true" aria-describedby="ob-confirm-error"{% endif %}> این صنف را برای فروشگاهم نصب کن</label>
       {% if confirm_error %}<p class="ob-error" id="ob-confirm-error">برای نصب باید کادرِ تأییدِ بالا را علامت بزنید.</p>{% endif %}
     </div>
