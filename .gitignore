@@ -32,3 +32,7 @@ node_modules/
 /apps/stores/demo_assets/rasti_mode_demo/raw_user_catalog/[1-5]/*.jpg
 !/tools/ci/assets/rasti-mode-demo-raw-1.zip
 !/tools/ci/assets/rasti-mode-demo-raw-2.zip
+
+# Isolated Excel acceptance exercise
+/.xlsx-local/
+/.xlsx-venv/

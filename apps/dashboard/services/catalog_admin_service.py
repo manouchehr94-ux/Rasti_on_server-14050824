@@ -15,6 +15,7 @@ from django.db.models import Count, Prefetch, Q, Sum
 from django.utils.text import slugify
 
 from apps.catalog.models import Category, Product, ProductVariant, Vendor
+from apps.catalog.services.availability_service import annotate_availability
 from apps.catalog.services.pricing_service import resolve_effective_price
 
 LOW_STOCK_THRESHOLD = 10
@@ -167,8 +168,9 @@ def filtered_products(
         qs = qs.filter(category_id__in=_category_and_descendant_ids(store, category_id))
     if brand_id:
         qs = qs.filter(brand_id=brand_id)
+    qs = annotate_availability(qs)
     if status == "out":
-        qs = qs.filter(stock=0)
+        qs = qs.filter(is_available_for_sale=False)
     elif status:
         qs = qs.filter(status=status)
     if product_type in Product.ProductType.values:

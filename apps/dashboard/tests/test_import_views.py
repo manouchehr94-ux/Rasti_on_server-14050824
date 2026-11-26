@@ -178,7 +178,7 @@ class TemplateDownloadTests(ImportViewTestCase):
         Category.objects.create(store=self.other_store, name="برگِ بیگانه", slug="f-leaf-ivw", parent=other_root)
 
     def _template(self, import_type):
-        response = self.client.get(reverse("dashboard:import-template", args=[import_type]))
+        response = self.client.get(reverse("dashboard:import-template", args=[import_type]), {"format": "legacy"})
         self.assertEqual(response.status_code, 200)
         return response, open_workbook(response.content)
 

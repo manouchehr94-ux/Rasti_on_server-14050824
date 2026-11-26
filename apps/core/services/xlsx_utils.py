@@ -504,7 +504,8 @@ def cell_to_text(value) -> str:
 
 
 def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داده ها", "Data"),
-                    max_rows: int = MAX_IMPORT_ROWS):
+                    max_rows: int = MAX_IMPORT_ROWS, include_sheet_name: bool = False,
+                    first_header_row: int = 1, require_sheet: bool = False):
     """جدولِ اصلیِ یک XLSX را می‌خواند: ``(headers, rows)``. شیتِ «داده‌ها» اگر
     باشد، وگرنه نخستین شیتِ غیرِ راهنما. فرمول‌ها اجرا نمی‌شوند (``data_only``
     روشن نیست و سلولِ فرمولی فقط علامت‌گذاری می‌شود). حداکثرِ ردیف رعایت
@@ -520,7 +521,7 @@ def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داد
             if wanted in by_name:
                 sheet = workbook[by_name[wanted]]
                 break
-        if sheet is None:
+        if sheet is None and not require_sheet:
             skip = {"راهنما", "فهرست‌ها", "فهرست ها", "درباره فایل", "نمونه"}
             for name in workbook.sheetnames:
                 if name.strip() not in skip:
@@ -536,7 +537,7 @@ def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داد
         headers: list[str] = []
         rows: list[XlsxRow] = []
         blank_streak = 0
-        for row_index, excel_row in enumerate(sheet.iter_rows(max_col=MAX_COLUMNS), start=1):
+        for row_index, excel_row in enumerate(sheet.iter_rows(min_row=first_header_row, max_col=MAX_COLUMNS), start=first_header_row):
             if not headers:
                 values = [cell_to_text(getattr(c, "value", None)).strip() for c in excel_row]
                 if any(values):
@@ -564,6 +565,6 @@ def read_xlsx_table(fileobj, *, sheet_names: tuple = ("داده‌ها", "داد
                 raise XlsxRowLimitExceededError(f"تعدادِ ردیف‌ها از حداکثرِ مجاز ({max_rows}) بیشتر است.")
             texts += [""] * (len(headers) - len(texts))
             rows.append(XlsxRow(number=row_index, cells=texts, formula_columns=formulas))
-        return headers, rows
+        return (headers, rows, sheet.title) if include_sheet_name else (headers, rows)
     finally:
         workbook.close()

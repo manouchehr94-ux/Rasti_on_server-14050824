@@ -182,7 +182,7 @@
     <tbody>
     {% for row in row_results %}
       <tr>
-        <td>{{ row.row_number|fa_number }}</td>
+        <td>{% if row.normalized_data_summary.sheet_row %}فهرست‌ها · {{ row.normalized_data_summary.sheet_row|fa_number }}{% else %}{{ row.row_number|fa_number }}{% endif %}</td>
         <td data-testid="row-name">
           {% if row.shown.name %}<b>{{ row.shown.name }}</b>{% else %}<span style="color:var(--muted)">{{ row.shown.fallback|default:"—" }}</span>{% endif %}
           {% if row.shown.ident or row.shown.extra %}<div style="font-size:11.5px;color:var(--muted)">{% if row.shown.name %}{{ row.shown.extra|default:row.shown.ident }}{% endif %}{% if row.shown.name and row.shown.extra and row.shown.ident and row.shown.ident != row.shown.extra %} · {{ row.shown.ident }}{% endif %}</div>{% endif %}

@@ -1136,6 +1136,10 @@ def _validate_all(job: ImportJob, rows: list[dict], *, actor, batch_size: int = 
     همین تابع استفاده می‌شود. ``(outcomes, پیامِ سقفِ پلن)`` برمی‌گرداند — پیامِ
     سقف وقتی پُر می‌شود که تعدادِ کالایِ تازه از بودجه‌ی پلن بیشتر باشد (کلِ فایل
     مسدود می‌شود، نه فقط ردیف‌هایِ آخر)."""
+    if rows and rows[0].get("__v33__"):
+        from apps.dashboard.services import import_v33
+
+        return import_v33.validate(job.store, rows, job.mode)
     if job.import_type not in _BATCH_EXECUTORS:
         raise ImportServiceError(f"نوعِ اطلاعاتِ «{job.import_type}» پشتیبانی نمی‌شود.")
     build_cache, _execute = _BATCH_EXECUTORS[job.import_type]
@@ -1223,7 +1227,7 @@ def build_preview(job: ImportJob, rows: list[dict], *, actor, batch_size: int = 
     job.save(update_fields=["status", "started_at", "dry_run"])
     outcomes, limit_message = _validate_all(job, rows, actor=actor, batch_size=batch_size)
     _save_preview(job, outcomes, limit_message)
-    if job.import_type == ImportJob.ImportType.PRODUCTS:
+    if job.import_type == ImportJob.ImportType.PRODUCTS and not (rows and rows[0].get("__v33__")):
         import_proposals.sync_from_outcomes(job, outcomes)   # فقط صفِ تأیید؛ هیچ برند/دسته‌ای ساخته نمی‌شود
     record_audit_event(
         store=job.store, actor=actor, action_code="import.preview_completed",
@@ -1383,6 +1387,13 @@ def _apply_all(job, rows, *, actor, batch_size):
     """بدنه‌ی تراکنشِ اجرا: همه‌ی ردیف‌ها را اعمال می‌کند؛ اگر حتی یک ردیف
     نامعتبر/ناموفق باشد ``_RollbackImport`` می‌اندازد تا تراکنشِ بیرونی کلِ
     تغییراتِ این واردات را برگرداند."""
+    if rows and rows[0].get("__v33__"):
+        from apps.dashboard.services import import_v33
+
+        outcomes = import_v33.execute(job.store, rows, job.mode, actor)
+        if any(o.status in _PROBLEM_STATUSES for o in outcomes):
+            raise _RollbackImport(outcomes)
+        return outcomes
     build_cache, _execute = _BATCH_EXECUTORS[job.import_type]
     cache = build_cache(job.store, rows)
     if job.import_type == ImportJob.ImportType.PRODUCTS:
@@ -1415,14 +1426,22 @@ def _finalize_rollback(job, rows, executed, *, actor, detail: str):
         if number in executed_by_number:
             final.append(executed_by_number[number])
             continue
+        summary = {}
+        if row.get("__v33_list__"):
+            from apps.dashboard.services import import_v33
+
+            summary = {"sheet_row": number - import_v33.LIST_ROW_OFFSET, "product_name": import_v33.LIST_SHEET}
         final.append(RowOutcome(
             row_number=number, source_identifier=_row_identifier(row, number), status=RS.VALID,
+            normalized_data_summary=summary,
             warnings=list(row.get("__warnings__", [])) + ["این ردیف اعمال نشد؛ چون کلِ ورودِ اطلاعات بازگردانده شد."],
         ))
     _store_outcomes(job, final)
     first = next((o for o in sorted(final, key=lambda o: o.row_number) if o.status in _PROBLEM_STATUSES), None)
     if first is not None and first.errors:
-        detail = f"ردیف {first.row_number}: {first.errors[0]}"
+        sheet_row = first.normalized_data_summary.get("sheet_row")
+        location = f"فهرست‌ها، ردیف {sheet_row}" if sheet_row else f"ردیف {first.row_number}"
+        detail = f"{location}: {first.errors[0]}"
     job.dry_run = False
     job.status = ImportJob.Status.FAILED
     job.error_summary = f"اجرا متوقف شد و هیچ تغییری روی فروشگاه اعمال نشد. {detail}"
