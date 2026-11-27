@@ -383,6 +383,10 @@ class TestNotificationAndWorkerFileTests(_V):
         pref = NotificationPreference.objects.create(user=self.owner, scope_key=S.key_for(self.store),
                                                       browser_enabled=True)
         url = self.url("inbox-summary")
+        anonymous = Client(HTTP_HOST=self.host_a)
+        response = anonymous.get(url, {"push_item": old.public_id})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"ok": False})
         response = self.client.get(url, {"push_item": old.public_id})
         self.assertEqual(response.json(), {"item": {"id": str(old.public_id), "title": "سفارش جدید"}})
         other = Client(HTTP_HOST=self.host_b)

@@ -120,9 +120,7 @@ def build(site):
         })
 
     @guard
-    @never_cache
-    @require_GET
-    def summary_api(request):
+    def _protected_summary(request):
         c = _ctx(request, site)
         try:
             since = int(request.GET.get("since", "0"))
@@ -147,6 +145,14 @@ def build(site):
         data = svc.summary(c.user, c.store, since_ms=since)
         data["user_key"] = f"{c.user.pk}:{c.scope_key}"
         return JsonResponse(data)
+
+    @never_cache
+    @require_GET
+    def summary_api(request):
+        if "push_item" in request.GET and not request.user.is_authenticated:
+            # Distinguish an expired session from a signed-in account that lost scope.
+            return JsonResponse({"ok": False}, status=401)
+        return _protected_summary(request)
 
     @guard
     @require_GET

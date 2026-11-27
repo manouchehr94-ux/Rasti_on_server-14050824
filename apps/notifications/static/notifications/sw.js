@@ -11,14 +11,20 @@ self.addEventListener('push', function (event) {
       var wanted = event.data ? event.data.json().item : null;
       if (event.data && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(wanted)) return;
       var summary = wanted ? SUMMARY_URL + '?push_item=' + encodeURIComponent(wanted) : SUMMARY_URL;
-      var r = await fetch(summary, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store' });
-      if (!r.ok || (r.headers.get('content-type') || '').indexOf('json') < 0) return;
-      var d = await r.json();
-      var item = wanted ? d.item : null, i;
-      for (i = 0; !wanted && i < (d.items || []).length; i++) { if (!d.items[i].read) { item = d.items[i]; break; } }
-      if (!item || (wanted && item.id !== wanted)) return;                                              // همه خوانده شده: مزاحمت نه
+      var item = null, response;
+      try {
+        response = await fetch(summary, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store', redirect: 'manual' });
+      } catch (_) { /* Targeted alerts can still show a generic notice offline. */ }
+      if (response && response.ok && (response.headers.get('content-type') || '').includes('json')) {
+        var data = await response.json();
+        item = wanted ? data.item : (data.items || []).find(function (candidate) { return !candidate.read; });
+      } else if (wanted && (!response || response.status === 401)) {
+        item = {id: wanted};
+      }
+      // A scoped 403/404 means revoked, disabled, read, or another user's item.
+      if (!item || (wanted && item.id !== wanted)) return;
       var url = INBOX_URL + item.id + '/' + (wanted ? 'go/?push=1' : (item.has_link ? 'go/' : ''));
-      await self.registration.showNotification(String(item.title || 'اعلان جدید').slice(0, 120), {
+      await self.registration.showNotification(String(item.title || 'در پنل راستی‌سی اعلان تازه‌ای دارید').slice(0, 120), {
         tag: 'rs-' + item.id, dir: 'rtl', lang: 'fa', data: { url: url }, requireInteraction: item.severity >= 4,
       });
     } catch (e) { /* بی‌صدا: اعلانِ درون‌برنامه‌ای همچنان در دسترس است */ }

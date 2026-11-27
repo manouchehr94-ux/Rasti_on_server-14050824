@@ -1,0 +1,17 @@
+{
+    admin off
+    auto_https disable_redirects
+    skip_install_trust
+    storage file_system {
+        root {$RASTISI_QA_CADDY_DATA}
+    }
+}
+
+https://rastisi-qa.test:8443, https://platformadmins.rastisi-qa.test:8443,
+https://qa-a.rastisi-qa.test:8443, https://qa-b.rastisi-qa.test:8443,
+https://qa-bike.rastisi-qa.test:8443, https://qa-other.rastisi-qa.test:8443,
+https://mybikestore.test:8443, https://otherstore.test:8443 {
+    bind {$RASTISI_QA_LAN_IP}
+    tls internal
+    reverse_proxy 127.0.0.1:8771
+}

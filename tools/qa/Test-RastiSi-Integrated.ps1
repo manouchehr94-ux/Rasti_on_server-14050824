@@ -1,10 +1,12 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$Commit,
     [string]$SourceRepo = 'D:\Projects\RastiSi\Rasti_on_server-14050824',
-    [switch]$EnableWebPush
+    [switch]$EnableWebPush,
+    [switch]$LanHttpsQa
 )
 $ErrorActionPreference = 'Stop'
-$qa = Join-Path $env:LOCALAPPDATA "RastiSi-Integrated-QA-$($Commit.Substring(0,8))"
+$mode = if ($LanHttpsQa) { "lan" } else { "loopback" }
+$qa = Join-Path $env:LOCALAPPDATA "RastiSi-Integrated-QA-$($Commit.Substring(0,8))-$mode"
 $app = Join-Path $qa 'app'
 $venv = Join-Path $qa 'venv'
 
@@ -50,6 +52,13 @@ try {
     $env:RASTISI_OWNER_SMS_BACKEND = 'console'
     $env:RASTISI_OWNER_SMS_ALLOW_CONSOLE_OTP = '1'
     $env:RASTISI_DEV_OTP_CODE = '123456'
+    if ($LanHttpsQa) {
+        $env:DJANGO_SETTINGS_MODULE = 'tools.qa.mobile_lan_settings'
+        $env:DJANGO_SECURE_PROXY_SSL_HEADER = 'X-Forwarded-Proto:https'
+        $env:DJANGO_TRUSTED_PROXY_CIDRS = '127.0.0.1/32'
+        Write-Host 'Private LAN QA: use https://qa-bike.rastisi-qa.test:8443/admin-portal/ via the reviewed local Caddy proxy.'
+    }
+
 
     Invoke-Checked py @('-3.12','-m','venv',$venv)
     $python = Join-Path $venv 'Scripts\python.exe'
@@ -58,7 +67,13 @@ try {
     Invoke-Checked $python @('-c',$check)
     Invoke-Checked $python @('manage.py','migrate','--noinput')
     Invoke-Checked $python @('manage.py','ensure_industry_registry','--apply')
-    Invoke-Checked $python @('manage.py','seed_qa_notifications','--password','Synthetic-QA-4827!','--port','8771')
+    $fixtureFile = Join-Path $qa 'fixture.json'
+    Invoke-Checked $python @('manage.py','seed_qa_notifications','--password','Synthetic-QA-4827!','--port','8771','--json',$fixtureFile)
+    Write-Host 'QA password: Synthetic-QA-4827! ; local owner OTP: 123456'
+    if (-not $LanHttpsQa) {
+        Write-Host 'Owner: http://platformadmins.rastisi.localhost:8771/'
+        Write-Host 'Bike store: http://qa-bike.rastisi.localhost:8771/admin-portal/'
+    }
 
     if ($EnableWebPush) {
         $keys = Invoke-Checked $python @('manage.py','generate_vapid_keys')

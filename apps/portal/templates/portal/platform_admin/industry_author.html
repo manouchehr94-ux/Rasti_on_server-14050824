@@ -1,16 +1,35 @@
 {% extends "portal/platform_admin/base.html" %}
+{% load static %}
 {% block title %}تعریف نسخه صنف{% endblock %}
 {% block content %}
-<div class="pa-card"><div class="pa-cardbody">
-<h1>{% if source %}نسخه جدید {{ source.name }}{% else %}صنف جدید{% endif %}</h1>
-<form method="post">
+<div class="pa-card" dir="rtl"><div class="pa-cardbody">
+<h1>{% if source %}ویرایش {{ source.name }} در نسخه جدید{% else %}صنف جدید{% endif %}</h1>
+<p>ذخیره، یک نسخهٔ غیرفعال می‌سازد. بعد از اعتبارسنجی می‌توانید آن را از صفحهٔ صنف فعال کنید.</p>
+<form method="post" id="industry-author">
   {% csrf_token %}
-  <div class="pa-field">
-    <label for="definition">تعریف صنف (JSON)</label>
-    <p class="pa-help">برای زیردسته از کد والد در parent_code استفاده کنید. مقادیر هر ویژگی را در values آن بنویسید. نسخه پس از اعتبارسنجی غیرفعال ذخیره می‌شود.</p>
-    <textarea name="definition" id="definition" dir="ltr" rows="24" required spellcheck="false">{{ definition }}</textarea>
+  <div id="industry-fields" hidden>
+    <fieldset><legend>مشخصات صنف</legend><div data-fields="header"></div></fieldset>
+    <fieldset><legend>دسته‌بندی‌ها و زیردسته‌ها</legend><div data-list="categories"></div>
+      <button type="button" class="pa-btn" data-add="categories">افزودن دسته</button>
+    </fieldset>
+    <fieldset><legend>ویژگی‌ها و مقادیر</legend><div data-list="attributes"></div>
+      <button type="button" class="pa-btn" data-add="attributes">افزودن ویژگی</button>
+    </fieldset>
+    <fieldset><legend>ویژگی‌های هر دسته</legend><div data-list="mappings"></div>
+      <button type="button" class="pa-btn" data-add="mappings">افزودن نگاشت</button>
+    </fieldset>
+    <p id="industry-form-error" role="alert" hidden></p>
   </div>
+  <details class="pa-field" id="industry-advanced">
+    <summary>ویرایش پیشرفته (JSON)</summary>
+    <label for="definition">تعریف کامل نسخه</label>
+    <textarea name="definition" id="definition" dir="ltr" rows="18" required spellcheck="false">{{ definition }}</textarea>
+  </details>
   <button type="submit" class="pa-btn pa-primary">اعتبارسنجی و ذخیره نسخه</button>
 </form>
+{{ sectors|json_script:"industry-sectors" }}
+{{ attribute_types|json_script:"industry-types" }}
+{{ display_types|json_script:"industry-displays" }}
 </div></div>
+<script src="{% static 'portal/industry-author.js' %}" defer></script>
 {% endblock %}

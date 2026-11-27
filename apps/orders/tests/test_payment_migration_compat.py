@@ -28,7 +28,7 @@ from apps.orders.encryption import reset_fernet
 from apps.orders.models import PaymentGatewayConfig
 from apps.stores.models import Store
 
-NEW_MIGRATIONS = ["0021_payment_engine_unified"]
+NEW_MIGRATIONS = ["0021_payment_engine_unified", "0023_order_cancellation_requested_at"]
 
 # Operations that would be destructive to existing data if present in an
 # "additive" migration.
@@ -83,7 +83,14 @@ class MigrationAdditivityTests(TestCase):
         loader = MigrationLoader(None, ignore_no_migrations=True)
         leaves = [k for k in loader.graph.leaf_nodes() if k[0] == "orders"]
         # Exactly one leaf, and it descends from 0021 (the chain may grow; 0020/0021 are never renumbered or replaced).
-        self.assertEqual(leaves, [("orders", "0022_refund_idempotency_key_per_store")])
+        self.assertEqual(leaves, [("orders", "0023_order_cancellation_requested_at")])
+        latest = loader.get_migration(*leaves[0])
+        self.assertEqual(latest.dependencies, [("orders", "0022_refund_idempotency_key_per_store")])
+        self.assertEqual(len(latest.operations), 1)
+        addition = latest.operations[0]
+        self.assertEqual((type(addition).__name__, addition.model_name, addition.name),
+                         ("AddField", "order", "cancellation_requested_at"))
+        self.assertTrue(addition.field.null)  # Previous releases may still insert orders.
         self.assertIn(("orders", "0021_payment_engine_unified"),
                       loader.get_migration("orders", "0022_refund_idempotency_key_per_store").dependencies)
         migration = loader.get_migration("orders", "0021_payment_engine_unified")

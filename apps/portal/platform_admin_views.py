@@ -2324,7 +2324,7 @@ def industry_author(request, template_id=None):
 
     from django.core.exceptions import ValidationError
     from django.db import IntegrityError, transaction
-    from apps.catalog.models import IndustryTemplate
+    from apps.catalog.models import Attribute, IndustryTemplate
     from apps.catalog.services.industry_authoring import create_version
     from apps.catalog.services.template_validation_service import _canonical_template_payload
 
@@ -2358,6 +2358,8 @@ def industry_author(request, template_id=None):
         text = json.dumps(definition, ensure_ascii=False, indent=2)
     return render(request, "portal/platform_admin/industry_author.html", {
         "definition": text, "source": source, "active_nav": "industries",
+        "sectors": IndustryTemplate.Sector.choices,
+        "attribute_types": Attribute.DataType.choices, "display_types": Attribute.DisplayType.choices,
     })
 
 
