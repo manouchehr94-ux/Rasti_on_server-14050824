@@ -2,6 +2,7 @@
 from io import StringIO
 import json
 import os
+import secrets
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
@@ -42,7 +43,7 @@ class IntegratedBrowserAcceptance(StaticLiveServerTestCase):
 
     def setUp(self):
         self.output = Path(os.environ["RASTISI_ACCEPTANCE_OUTPUT"])
-        call_command("seed_qa_notifications", password="Synthetic-QA-4827!", stdout=StringIO())
+        call_command("seed_qa_notifications", password=secrets.token_urlsafe(32), stdout=StringIO())
         self.shop = Store.objects.get(slug="qa-bike")
         self.other = Store.objects.get(slug="qa-other")
 

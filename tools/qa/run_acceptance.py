@@ -4,10 +4,12 @@ import html
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from xml.etree import ElementTree as XML
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +35,29 @@ GROUPS = {
 }
 KEEP = {"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SYSTEMROOT",
         "WINDIR", "COMSPEC", "LANG", "LC_ALL", "PLAYWRIGHT_BROWSERS_PATH", "PATHEXT"}
+
+
+def remove_excel_scratch(scratch):
+    """The child is already reaped. Verify the real file and remove its whole isolated directory."""
+    database = scratch / "rastisi_browser_tests.sqlite3"
+    database_seen = database.is_file()
+    retries = 0
+    for delay in (0, 0.25, 0.5, 1, 2, 4):
+        if delay:
+            time.sleep(delay)
+            retries += 1
+        try:
+            shutil.rmtree(scratch)
+        except PermissionError as exc:
+            error = str(exc)
+        except OSError as exc:
+            error = str(exc)
+            break
+        else:
+            removed = not scratch.exists() and not database.exists()
+            return {"database_seen": database_seen, "removed": removed, "retries": retries,
+                    "error": None if removed and database_seen else "Expected database lifecycle was not observed"}
+    return {"database_seen": database_seen, "removed": False, "retries": retries, "error": error}
 
 
 def run(output, chromium, groups, previous_report=None):
@@ -63,15 +88,28 @@ def run(output, chromium, groups, previous_report=None):
         for name in groups:
             labels = GROUPS[name]
             cmd = [sys.executable, "manage.py", "test", *labels, "--noinput", "--verbosity", "2"]
+            group_env = env
+            excel_scratch = None
+            if name == "browser-excel-v33":
+                # A fresh directory on every run: keepdb only delegates deletion
+                # to the parent, after every connection in Django's process is gone.
+                excel_scratch = Path(tempfile.mkdtemp(prefix="rastisi-excel-db-"))
+                cmd.append("--keepdb")
+                group_env = {**env, **dict.fromkeys(("TEMP", "TMP", "TMPDIR"), str(excel_scratch))}
             log = output / f"{name}.log"
             with log.open("w", encoding="utf-8") as stream:
-                result = subprocess.run(cmd, env=env, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT)
+                result = subprocess.run(cmd, env=group_env, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT)
+                cleanup = remove_excel_scratch(excel_scratch) if excel_scratch else None
+                if cleanup is not None:
+                    stream.write("\nParent SQLite cleanup after Django exit: " + json.dumps(cleanup) + "\n")
             contents = log.read_text(encoding="utf-8", errors="replace")
             # These named acceptance suites require their browser checks to run.
             skipped = name.startswith("browser-") and ("skipped '" in contents or "skipped=" in contents)
-            result_name = "FAIL" if result.returncode or skipped else "PASS"
+            result_name = "FAIL" if result.returncode or skipped or (cleanup and cleanup["error"]) else "PASS"
             results.append({"name": name, "status": result_name, "log": log.name,
                             "exit_code": result.returncode, "browser_skipped": skipped})
+            if cleanup is not None:
+                results[-1]["sqlite_cleanup"] = cleanup
             print(result_name, name, flush=True)
     if "diagnostic-evidence" in groups and os.name == "nt":
         results.append({"name": "gunicorn-posix-configuration-and-hooks", "status": "NOT_RUN",

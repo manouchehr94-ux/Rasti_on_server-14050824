@@ -1,0 +1,43 @@
+name: Windows Excel acceptance
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-excel-acceptance.yml
+      - apps/dashboard/tests/test_import_v33_browser.py
+      - tools/qa/run_acceptance.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-excel-acceptance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  excel:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt -r tools/qa/requirements-management-browser.txt
+      - name: Run Excel browser acceptance and verify SQLite removal
+        shell: pwsh
+        run: |
+          $browser = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path -LiteralPath $browser)) {
+            $browser = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+          }
+          python tools/qa/run_acceptance.py --output "$env:RUNNER_TEMP\excel-acceptance" --chromium "$browser" --group browser-excel-v33
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: windows-excel-acceptance
+          path: ${{ runner.temp }}/excel-acceptance
