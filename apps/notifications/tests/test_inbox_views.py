@@ -366,7 +366,7 @@ class TestNotificationAndWorkerFileTests(_V):
         self.assertEqual(codes[:10], [200] * 10)
         self.assertIn(429, codes[10:])
 
-    def test_service_worker_is_served_with_scope_header_and_receives_no_payload_logic(self):
+    def test_service_worker_is_served_with_scope_header_and_opaque_id_logic(self):
         r = self.client.get(self.url("inbox-sw"))
         self.assertEqual(r.status_code, 200)
         self.assertIn("javascript", r["Content-Type"])
@@ -374,8 +374,23 @@ class TestNotificationAndWorkerFileTests(_V):
         body = r.content.decode()
         self.assertIn(self.url("inbox-summary"), body)
         self.assertNotIn("__SUMMARY_URL__", body)
-        self.assertNotIn("event.data", body)                                                      # nothing is read from the push payload
+        self.assertIn("event.data.json().item", body)  # only the opaque inbox identifier
         self.assertEqual(Client(HTTP_HOST=self.host_a).get(self.url("inbox-sw")).status_code, 302)
+
+    def test_targeted_push_summary_checks_recipient_store_and_opt_out(self):
+        old = self.item(event=self.ev("order.created", dedupe_key="targeted"))
+        self.ev("order.created", dedupe_key="newer")
+        pref = NotificationPreference.objects.create(user=self.owner, scope_key=S.key_for(self.store),
+                                                      browser_enabled=True)
+        url = self.url("inbox-summary")
+        response = self.client.get(url, {"push_item": old.public_id})
+        self.assertEqual(response.json(), {"item": {"id": str(old.public_id), "title": "سفارش جدید"}})
+        other = Client(HTTP_HOST=self.host_b)
+        other.force_login(self.other_owner)
+        self.assertEqual(other.get(url, {"push_item": old.public_id}).status_code, 404)
+        pref.disabled_push_events = ["order.created"]
+        pref.save()
+        self.assertEqual(self.client.get(url, {"push_item": old.public_id}).status_code, 404)
 
     def test_management_commands_run_and_are_safe_with_flags_off(self):
         from django.core.management import call_command
@@ -464,13 +479,14 @@ class ScriptContractTests(PermissionEnforcementTestCase):
         before = js[: js.index("requestPermission")]
         self.assertIn("enable.addEventListener('click'", before[-400:])
 
-    def test_service_worker_never_reads_a_push_payload_and_only_opens_same_site_paths(self):
+    def test_service_worker_uses_opaque_id_and_only_opens_same_site_paths(self):
         sw = self._read("sw.js")
-        self.assertNotIn("event.data", sw)
+        self.assertIn("encodeURIComponent(wanted)", sw)
+        self.assertNotIn("event.data.json().url", sw)
         self.assertNotIn("innerHTML", sw)
         self.assertIn("target.charAt(0) !== '/'", sw)
         self.assertIn("credentials: 'same-origin'", sw)
-        self.assertIn("if (!item) return;", sw)                   # nothing unread ⇒ no OS notification
+        self.assertIn("item.id !== wanted", sw)                   # nothing unread ⇒ no OS notification
 
     def test_templates_do_not_inline_user_content_into_scripts(self):
         from pathlib import Path

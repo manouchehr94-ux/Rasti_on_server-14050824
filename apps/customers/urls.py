@@ -19,6 +19,7 @@ urlpatterns = [
     path("addresses/add/", views.address_add, name="address-add"),
     path("addresses/<int:address_id>/delete/", views.address_delete, name="address-delete"),
     path("addresses/<int:address_id>/default/", views.address_set_default, name="address-set-default"),
+    path("orders/<str:code>/request-cancel/", views.account_request_order_cancel, name="account-order-request-cancel"),
     path("orders/<str:code>/", views.account_order_detail, name="account-order-detail"),
     path("wishlist/", views.wishlist_list, name="wishlist"),
     path("wishlist/<uslug:slug>/toggle/", views.wishlist_toggle, name="wishlist-toggle"),

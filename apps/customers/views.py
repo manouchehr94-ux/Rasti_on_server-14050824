@@ -457,3 +457,25 @@ def account_order_detail(request, code):
         request, "customers/order_detail.html",
         {"can_view": True, "order": order, "tracker": tracker, "tracker_tracks": [tracker.payment, tracker.fulfillment]},
     )
+
+
+@require_POST
+def account_request_order_cancel(request, code):
+    from django.db import transaction
+    from django.utils import timezone
+
+    from apps.notifications.services import admin_events
+
+    if not _can_use_wishlist(request):
+        raise PermissionDenied
+    with transaction.atomic():
+        order = get_object_or_404(
+            Order.objects.select_for_update(), code=code,
+            store=_account_store(request), customer=request.user.customer_profile,
+        )
+        if (order.status in (Order.Status.PENDING, Order.Status.PROCESSING)
+                and order.cancellation_requested_at is None):
+            order.cancellation_requested_at = timezone.now()
+            order.save(update_fields=["cancellation_requested_at"])
+            admin_events.order_cancel_requested(order)
+    return redirect("customers:account-order-detail", code=code)

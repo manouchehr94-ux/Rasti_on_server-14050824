@@ -41,6 +41,7 @@ def order_status_changed(order, to_status: str) -> None:
 def payment_result(order, *, success: bool) -> None:
     ctx = cb.order_context(order.store, order)
     if success:
+        admin_events.payment_succeeded(order)
         safe_dispatch("payment.succeeded", store=order.store, customer=order.customer, order=order, context=ctx,
                       dedupe_key=f"order:{order.pk}")
     else:

@@ -16,7 +16,7 @@ class Command(BaseCommand):
     def handle(self, *args, **o):
         require_qa()
         while True:
-            for name in ("process_notification_outbox", "refresh_email_identities"):
+            for name in ("process_notification_outbox", "refresh_email_identities", "process_inbox_deliveries"):
                 try:
                     call_command(name, stdout=self.stdout)
                 except Exception as exc:  # noqa: BLE001 — a failed batch must not kill the QA worker

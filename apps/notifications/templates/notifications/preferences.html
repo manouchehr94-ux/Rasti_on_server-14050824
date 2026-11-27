@@ -31,6 +31,14 @@
 
     <section class="nt-card" aria-labelledby="nt-p3">
       <h3 id="nt-p3">اعلان سیستمِ مرورگر</h3>
+      {% if push_events %}
+      <fieldset><legend>رویدادهای Web Push</legend>
+        <input type="hidden" name="push_event_settings" value="1">
+        {% for event in push_events %}
+        <label class="nt-switch"><input type="checkbox" name="push_events" value="{{ event.key }}"{% if event.key not in pref.disabled_push_events %} checked{% endif %}><span>{{ event.label }}</span></label>
+        {% endfor %}
+      </fieldset>
+      {% endif %}
       <label class="nt-switch"><input type="checkbox" name="browser_enabled" value="1"{% if pref.browser_enabled %} checked{% endif %}><span>دریافتِ اعلان سیستم (Web Push)<small>فقط برای دستگاه‌هایی که پایین ثبت کرده‌اید و فقط وقتی سرور آن را فعال کرده باشد.</small></span></label>
       <label>حداقل اهمیت <select class="nt-select" name="min_browser_severity">{% for v, l in severities %}<option value="{{ v }}"{% if pref.min_browser_severity == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
     </section>

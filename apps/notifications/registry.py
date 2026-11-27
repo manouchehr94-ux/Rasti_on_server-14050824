@@ -35,6 +35,8 @@ CATEGORY_HINTS = {
     "integrations": "سرویس‌های بیرونی و همگام‌سازی",
     "system": "اعلان‌های آزمایشی و پیام‌های سامانه",
 }
+ORDER_PUSH_EVENTS = ("order.created", "payment.succeeded", "order.cancel_requested", "return.requested")
+
 ALWAYS_INBOX_CATEGORIES = frozenset({"security"})
 
 STORE, PLATFORM = "store", "platform"
@@ -69,6 +71,8 @@ EVENT_TYPES: dict[str, EventType] = _t(
     # ---------------------------------------------------------------- سفارش‌ها
     EventType("order.created", "سفارش جدید", "orders", NORMAL, permission=A.ORDER_VIEW, link_name="order-detail", urgent=True, retention_days=60,
               source="orders.order_service.place_order → business_events.order_created"),
+    EventType("order.cancel_requested", "درخواست لغو سفارش", "orders", IMPORTANT, permission=A.ORDER_VIEW,
+              link_name="order-detail", source="customers.views.account_request_order_cancel"),
     EventType("order.canceled", "لغو سفارش", "orders", IMPORTANT, permission=A.ORDER_VIEW, link_name="order-detail",
               source="orders.order_service.change_status(canceled) → business_events.order_status_changed"),
     EventType("return.requested", "درخواست مرجوعی", "orders", IMPORTANT, permission=A.RETURN_VIEW, link_name="return-detail",
@@ -77,6 +81,8 @@ EVENT_TYPES: dict[str, EventType] = _t(
     EventType("payment.refund_failed", "بازپرداخت اشتراک انجام نشد", "finance", IMPORTANT,
               permission=A.SUBSCRIPTION_VIEW, link_name="subscription-overview", inbox_only=True,
               source="billing.refund_service._record_outcome(declined) / fail_refund_manually → admin_events.subscription_refund_failed"),
+    EventType("payment.succeeded", "پرداخت موفق", "finance", IMPORTANT, permission=A.ORDER_VIEW, link_name="order-detail",
+              source="orders.lifecycle.apply_payment_success → business_events.payment_result"),
     EventType("payment.failed", "تلاش پرداخت ناموفق", "finance", NORMAL, permission=A.ORDER_VIEW, link_name="order-detail", groupable=True, retention_days=30,
               source="orders.gateway_payment_service.process_callback_and_verify (تأییدِ server-to-server ناموفق؛ on_commit، dedupe روی PaymentAttempt) + simulate_payment (فقط توسعه)"),
     EventType("payment.suspicious", "پرداخت مشکوک / مغایرت", "finance", CRITICAL, permission=A.REFUND_MANAGE, link_name="payment-reconciliations",

@@ -15,9 +15,19 @@ def order_created(order):
                  entity=("Order", order.pk), link_kwargs={"code": order.code}, dedupe_key=f"order:{order.pk}")
 
 
+def order_cancel_requested(order):
+    safe_publish("order.cancel_requested", store=order.store, title="درخواست لغو سفارش",
+                 entity=("Order", order.pk), link_kwargs={"code": order.code}, dedupe_key=f"cancel-request:{order.pk}")
+
+
 def order_canceled(order):
     safe_publish("order.canceled", store=order.store, title=f"سفارش {order.code} لغو شد", entity=("Order", order.pk), link_kwargs={"code": order.code},
                  dedupe_key=f"order-canceled:{order.pk}")
+
+
+def payment_succeeded(order):
+    safe_publish("payment.succeeded", store=order.store, title="پرداخت سفارش تأیید شد",
+                 entity=("Order", order.pk), link_kwargs={"code": order.code}, dedupe_key=f"paid:{order.pk}")
 
 
 def payment_failed(order):

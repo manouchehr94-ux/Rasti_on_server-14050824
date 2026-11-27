@@ -61,15 +61,28 @@ class WebPushChannel(Channel):
         from apps.notifications.services import webpush
 
         sub = delivery.subscription
-        if sub is None or sub.revoked_at is not None:
+        if (sub is None or sub.revoked_at is not None or sub.user_id != delivery.inbox_item.user_id
+                or sub.scope_key != delivery.inbox_item.scope_key):
             return Outcome("skipped", "subscription_gone")
         if not webpush.is_configured():
             return Outcome("skipped", "vapid_not_configured")
-        recent = D.objects.filter(channel=Chan.WEB_PUSH, inbox_item__user_id=delivery.inbox_item.user_id, status=Status.DELIVERED,
-                                  sent_at__gte=timezone.now() - timedelta(minutes=10)).count()
-        if recent >= MAX_PUSH_PER_10_MIN:
-            return Outcome("skipped", "rate_limited")
-        result = webpush.send(sub, transport=transport)
+        from apps.notifications.registry import ORDER_PUSH_EVENTS
+
+        item = delivery.inbox_item
+        targeted = item.event.type_key in ORDER_PUSH_EVENTS
+        now = timezone.now()
+        if targeted and item.created_at < now - timedelta(hours=1):
+            return Outcome("skipped", "push_expired")
+        recent = D.objects.filter(channel=Chan.WEB_PUSH, inbox_item__user_id=item.user_id,
+                                  status=Status.DELIVERED, sent_at__gte=now - timedelta(minutes=10))
+        if targeted:
+            recent = recent.filter(subscription_id=sub.pk)
+        if recent.count() >= MAX_PUSH_PER_10_MIN:
+            return Outcome("defer" if targeted else "skipped", "rate_limited")
+        if targeted and transport is None:
+            result = webpush.send(sub, item_id=item.public_id)
+        else:
+            result = webpush.send(sub, transport=transport)
         code = result.status
         if code is not None and 200 <= code < 300:
             return Outcome("delivered")
@@ -150,7 +163,9 @@ def _still_allowed(delivery, channel, now) -> str:
     if not channel.enabled():
         return "channel_disabled"
     pref = NotificationPreference.objects.filter(user=user, scope_key=item.scope_key).first() or NotificationPreference(user=user, scope_key=item.scope_key)
-    if not channel.preference_on(pref):
+    if not channel.preference_on(pref) or (
+        delivery.channel == Chan.WEB_PUSH and ev.type_key in (pref.disabled_push_events or [])
+    ):
         return "preference_off"
     return ""
 
@@ -174,6 +189,10 @@ def _process(delivery: NotificationDelivery, now, transports: dict) -> str:
         outcome = channel.send(delivery, transport=transports.get(delivery.channel))
     except Exception as exc:  # noqa: BLE001 — یک تحویلِ خراب نباید بقیه‌ی صف را متوقف کند
         outcome = Outcome("retry", sanitize_error(f"{type(exc).__name__}: {exc}"))
+    if outcome.kind == "defer":
+        delivery.status, delivery.next_attempt_at, delivery.claimed_at = Status.PENDING, now + timedelta(minutes=10), None
+        delivery.save(update_fields=["status", "next_attempt_at", "claimed_at"])
+        return "deferred"
     delivery.claimed_at = None
     if outcome.kind == "delivered":
         delivery.status, delivery.sent_at, delivery.last_error, delivery.next_attempt_at = Status.DELIVERED, now, "", None

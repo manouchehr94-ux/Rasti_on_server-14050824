@@ -240,6 +240,7 @@ class NotificationPreference(models.Model):
     min_toast_severity = models.PositiveSmallIntegerField("حداقل اهمیتِ اعلانِ فوری", choices=Severity.choices, default=Severity.IMPORTANT)
     min_browser_severity = models.PositiveSmallIntegerField("حداقل اهمیتِ اعلانِ مرورگر", choices=Severity.choices, default=Severity.IMPORTANT)
     mute_low = models.BooleanField("بی‌صداکردنِ اعلان‌های کم‌اهمیت", default=True)
+    disabled_push_events = models.JSONField("رویدادهای Push خاموش", blank=True, null=True, default=list)
     disabled_categories = models.JSONField("دسته‌های خاموش", blank=True, default=list)
     email_enabled = models.BooleanField("ایمیل (آینده؛ غیرفعال)", default=False)
     mobile_enabled = models.BooleanField("اعلانِ موبایل (آینده؛ غیرفعال)", default=False)

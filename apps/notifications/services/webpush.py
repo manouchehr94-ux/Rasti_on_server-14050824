@@ -1,7 +1,7 @@
 """Web Push (استانداردِ W3C/RFC 8030 + VAPID RFC 8292) — بدونِ وابستگیِ جدید (فقط ``cryptography`` و ``requests`` که از قبل در پروژه‌اند).
 
-طراحیِ امن: **Push بدونِ Payload** — نه متنِ اعلان، نه نامِ مشتری، نه مبلغ از سرویسِ Pushِ مرورگر عبور نمی‌کند. Service Worker پس از دریافتِ Push، خودش با نشستِ همان
-کاربر ``summary`` را می‌خواند و (فقط اگر هنوز مجاز بود) اعلانِ سیستمی را نشان می‌دهد؛ اگر نشست نبود، یک متنِ عمومیِ بی‌اطلاعات.
+اعلان سفارش تنها شناسه مبهم صندوق را با رمزگذاری RFC 8291 می‌فرستد.
+جزئیات فقط با نشست و کنترل دسترسی در همان مبدأ قابل دریافت هستند.
 
 * کلیدِ خصوصیِ VAPID فقط از محیط (``RASTISI_VAPID_PRIVATE_KEY``) خوانده می‌شود؛ هیچ کلیدی در Repository نیست.
 * نشانیِ Subscription و کلیدهایش با Fernet رمزنگاری و فقط هشِ آن برایِ یکتایی ذخیره می‌شود؛ هرگز در لاگ/خطا نمی‌آید.
@@ -13,6 +13,8 @@ import base64
 import hashlib
 import json
 import logging
+import os
+import struct
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -168,17 +170,51 @@ class PushResult:
     error: str = ""
 
 
-def default_transport(endpoint: str, headers: dict) -> PushResult:
-    """ارسالِ واقعی — فقط توسطِ کارگر و فقط وقتی پرچم روشن است (در تست‌ها همیشه جایگزین می‌شود)."""
+def _encrypted_body(data, payload):
+    """Single final aes128gcm record (RFC 8188 / RFC 8291)."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    receiver = _b64u_decode(data["p256dh"])
+    auth = _b64u_decode(data["auth"])
+    if len(receiver) != 65 or len(auth) != 16 or len(payload) > 256:
+        raise ValueError("invalid_push_encryption_input")
+    peer = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), receiver)
+    private = ec.generate_private_key(ec.SECP256R1())
+    sender = private.public_key().public_bytes(serialization.Encoding.X962,
+                                              serialization.PublicFormat.UncompressedPoint)
+    shared = private.exchange(ec.ECDH(), peer)
+    salt = os.urandom(16)
+
+    def derive(key_material, salt, info, length):
+        return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(key_material)
+
+    ikm = derive(shared, auth, b"WebPush: info\x00" + receiver + sender, 32)
+    key = derive(ikm, salt, b"Content-Encoding: aes128gcm\x00", 16)
+    nonce = derive(ikm, salt, b"Content-Encoding: nonce\x00", 12)
+    return salt + struct.pack("!IB", 4096, len(sender)) + sender + AESGCM(key).encrypt(nonce, payload + b"\x02", None)
+
+
+def default_transport(endpoint: str, headers: dict, body: bytes = b"") -> PushResult:
     import requests
 
     try:
-        response = requests.post(endpoint, headers=headers, data=b"", timeout=10, allow_redirects=False)
+        response = requests.post(endpoint, headers=headers, data=body, timeout=10, allow_redirects=False)
     except requests.RequestException as exc:
         return PushResult(None, type(exc).__name__)
     return PushResult(response.status_code)
 
 
-def send(sub: WebPushSubscription, *, transport=None) -> PushResult:
+def send(sub: WebPushSubscription, *, transport=None, item_id=None) -> PushResult:
     data = decrypt(sub)
-    return (transport or default_transport)(data["endpoint"], vapid_headers(data["endpoint"]))
+    endpoint = data["endpoint"]
+    headers = vapid_headers(endpoint)
+    if item_id is None:
+        return (transport or default_transport)(endpoint, headers)
+    body = _encrypted_body(data, json.dumps({"item": str(item_id)}, separators=(",", ":")).encode())
+    headers.pop("Content-Length", None)
+    headers.update({"Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
+                    "Topic": str(item_id).replace("-", "")})
+    return (transport or default_transport)(endpoint, headers, body)
