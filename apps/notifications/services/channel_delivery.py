@@ -162,6 +162,11 @@ def _still_allowed(delivery, channel, now) -> str:
         return "snoozed"
     if not channel.enabled():
         return "channel_disabled"
+    if delivery.channel == Chan.WEB_PUSH:
+        from apps.notifications.services.webpush_policy import allowed
+
+        if not allowed(ev.store):
+            return "webpush_scope_disabled"
     pref = NotificationPreference.objects.filter(user=user, scope_key=item.scope_key).first() or NotificationPreference(user=user, scope_key=item.scope_key)
     if not channel.preference_on(pref) or (
         delivery.channel == Chan.WEB_PUSH and ev.type_key in (pref.disabled_push_events or [])

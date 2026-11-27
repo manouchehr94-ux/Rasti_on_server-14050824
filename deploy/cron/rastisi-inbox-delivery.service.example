@@ -1,0 +1,20 @@
+[Unit]
+Description=RASTISI notification inbox worker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=REPLACE_WITH_RASTISI_JOB_USER
+EnvironmentFile=/etc/rastisi/inbox-delivery-worker.conf
+ExecStart=/bin/bash /srv/rastisi/current/app/deploy/cron/run_inbox_watch.sh
+Restart=always
+RestartPreventExitStatus=64 95 96 97 98 99
+RestartSec=5s
+TimeoutStopSec=120s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

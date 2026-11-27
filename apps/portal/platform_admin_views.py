@@ -226,6 +226,11 @@ def home(request):
 def configuration(request):
     """تنظیماتِ عمومیِ پلتفرم — هویت/پیش‌فرض‌هایِ تجاری/عملیات (بخشِ ۲۰).
     پیکربندیِ درگاهِ پیامکِ مرکزی این‌جا نیست — نگاه کنید به ``sms_settings``."""
+    from apps.notifications.services import webpush_policy
+
+    if request.method == "POST" and "webpush_policy" in request.POST:
+        webpush_policy.set_enabled(actor=request.user, enabled=request.POST["webpush_policy"] == "on")
+        return redirect("portal_platform_admin:configuration")
     config = get_platform_configuration()
     if request.method == "POST":
         previous_enamad = {key: getattr(config, key) for key in ("enamad_id", "enamad_auth_code", "enamad_verification_meta_tag")}
@@ -249,7 +254,8 @@ def configuration(request):
             return redirect("portal_platform_admin:configuration")
     else:
         form = PlatformConfigurationForm(instance=config)
-    return render(request, "portal/platform_admin/configuration.html", {"form": form, "active_nav": "platform-settings"})
+    return render(request, "portal/platform_admin/configuration.html", {"form": form, "active_nav": "platform-settings",
+                   "webpush_policy_enabled": webpush_policy.scope_enabled(webpush_policy.GLOBAL_SCOPE)})
 
 
 # ---------------------------------------------------------------- مرکز کنترل پیامک
@@ -619,9 +625,13 @@ def stores(request):
 
 @user_passes_test(_is_platform_staff, login_url="portal_platform_admin:login")
 def store_detail(request, store_public_id):
+    from apps.notifications.services import webpush_policy
     from apps.sms.services.balance_service import get_or_create_balance
 
     store = get_object_or_404(Store, public_id=store_public_id)
+    if request.method == "POST" and "webpush_policy" in request.POST:
+        webpush_policy.set_enabled(actor=request.user, enabled=request.POST["webpush_policy"] == "on", store=store)
+        return redirect("portal_platform_admin:store-detail", store_public_id)
     domains = store.domains.all().order_by("-is_primary", "-created_at")
     memberships = store.memberships.select_related("user", "user__owner_profile").order_by("-status", "role")
     owner_membership = next(
@@ -652,6 +662,7 @@ def store_detail(request, store_public_id):
         "invoices": invoices, "audit_entries": audit_entries, "notes": notes, "sms_balance": sms_balance,
         "industry_installation": industry_installation, "product_count": product_count, "order_count": order_count,
         "tab": tab, "active_nav": "stores",
+        "webpush_policy_enabled": webpush_policy.scope_enabled(webpush_policy.key_for(store)),
     })
 
 

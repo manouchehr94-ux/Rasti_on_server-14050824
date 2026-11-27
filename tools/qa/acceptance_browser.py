@@ -70,6 +70,31 @@ class IntegratedBrowserAcceptance(StaticLiveServerTestCase):
     def record(self, name, **values):
         (self.output / f"{name}.json").write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    @override_settings(RASTISI_NOTIF_WEBPUSH_ENABLED=True)
+    def test_platform_owner_controls_web_push_pilot(self):
+        from django.urls import reverse
+
+        from apps.notifications.services import webpush_policy
+        from apps.notifications.services.scope import key_for
+
+        page, origin = self.session(PLATFORM, "09120000001")
+        configuration = reverse("portal_platform_admin:configuration", urlconf="shop_core.urls_platform_admin")
+        detail = reverse("portal_platform_admin:store-detail", args=[self.shop.public_id], urlconf="shop_core.urls_platform_admin")
+        self.assertFalse(webpush_policy.allowed(self.shop))
+        for route in (configuration, detail):
+            page.goto(origin + route)
+            page.locator('button[name="webpush_policy"][value="on"]').click()
+            page.locator('button[name="webpush_policy"][value="off"]').wait_for()
+        self.assertTrue(webpush_policy.allowed(self.shop))
+        self.assertFalse(webpush_policy.allowed(self.other))
+        self.evidence(page, "web-push-pilot")
+        page.locator('button[name="webpush_policy"][value="off"]').click()
+        page.locator('button[name="webpush_policy"][value="on"]').wait_for()
+        self.assertFalse(webpush_policy.allowed(self.shop))
+        self.assertEqual(PlatformAuditLogEntry.objects.filter(action_code="webpush.policy_updated",
+                                                               object_id=key_for(self.shop)).count(), 2)
+        self.record("web-push-pilot", store_gate=True, other_store_denied=True, disable_audited=True)
+
     def test_platform_version_and_tenant_permissions(self):
         original = make_rich_template()
         install_industry_template(self.shop, original)

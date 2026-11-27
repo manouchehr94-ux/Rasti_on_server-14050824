@@ -4,6 +4,14 @@
 {% block content %}
 <div class="pa-pagehead"><div><h1>تنظیماتِ پلتفرم</h1><p>پیکربندیِ درگاهِ پیامکِ مرکزی در صفحه‌یِ جداگانه‌یِ «پیامک › شرکت‌هایِ پیامکی» است.</p></div></div>
 
+<form method="post" class="pa-card pa-cardbody">
+  {% csrf_token %}
+  <p>Web Push در پلتفرم · {% if webpush_policy_enabled %}مجاز{% else %}غیرفعال{% endif %}</p>
+  <button class="pa-btn" type="submit" name="webpush_policy" value="{% if webpush_policy_enabled %}off{% else %}on{% endif %}">
+    {% if webpush_policy_enabled %}غیرفعال کردن Web Push{% else %}فعال کردن Web Push{% endif %}
+  </button>
+</form>
+
 <form method="post" enctype="multipart/form-data" class="pa-form" data-pa-dirty>
   {% csrf_token %}
   <fieldset class="pa-fieldset"><legend>هویتِ پلتفرم</legend>

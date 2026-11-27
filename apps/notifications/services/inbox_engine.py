@@ -142,8 +142,9 @@ def publish(
 
 def _create_deliveries(event, etype, scope_key, planned, now) -> None:
     rows = []
-    if getattr(settings, "RASTISI_NOTIF_WEBPUSH_ENABLED", False):
-        from apps.notifications.services import webpush
+    from apps.notifications.services import webpush, webpush_policy
+
+    if any(d["push"] for _, d in planned) and webpush_policy.allowed(event.store):
 
         if webpush.is_configured():
             for item, d in planned:

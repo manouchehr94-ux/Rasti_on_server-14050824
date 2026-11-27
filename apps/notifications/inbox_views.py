@@ -26,7 +26,7 @@ from apps.notifications.models import NotificationPreference, Severity, WebPushS
 from apps.notifications.services import inbox_engine as eng
 from apps.notifications.services import inbox_service as svc
 from apps.notifications.services import scope as S
-from apps.notifications.services import webpush
+from apps.notifications.services import webpush, webpush_policy
 
 DASH = SimpleNamespace(name="dashboard", ns="dashboard", base="dashboard/base_admin.html", platform=False)
 PLAT = SimpleNamespace(name="platform", ns="portal_platform_admin", base="portal/platform_admin/base.html", platform=True)
@@ -128,6 +128,8 @@ def build(site):
             since = 0
         item_id = request.GET.get("push_item")
         if item_id is not None:
+            if not webpush_policy.allowed(c.store):
+                raise Http404
             try:
                 item_id = uuid.UUID(item_id)
             except ValueError:
@@ -243,12 +245,10 @@ def build(site):
             messages.success(request, "تنظیمات اعلان‌ها ذخیره شد.")
             return redirect(_url(c, "inbox-preferences"))
         devices = WebPushSubscription.objects.filter(user=c.user, scope_key=c.scope_key, revoked_at__isnull=True).order_by("-last_seen_at")
-        from django.conf import settings
-
         return render(request, "notifications/preferences.html", {
             "base_template": site.base, "site": site, "pref": pref, "categories": categories, "disabled": set(pref.disabled_categories or []),
             "push_events": push_events, "always": R.ALWAYS_INBOX_CATEGORIES, "devices": devices, "severities": [(v, l) for v, l in Severity.choices if v >= 2],
-            "push": {"enabled": bool(getattr(settings, "RASTISI_NOTIF_WEBPUSH_ENABLED", False)), "configured": webpush.is_configured(), "public_key": webpush.public_key_b64u(),
+            "push": {"enabled": webpush_policy.allowed(c.store), "configured": webpush.is_configured(), "public_key": webpush.public_key_b64u(),
                      "subscribe_url": _url(c, "inbox-push-subscribe"), "unsubscribe_url": _url(c, "inbox-push-unsubscribe"), "sw_url": _url(c, "inbox-sw")},
             "test_url": _url(c, "inbox-test"), "inbox_url": _url(c, "inbox-home"), "scope_label": "پلتفرم راستی‌سی" if site.platform else request.store.name,
             "active_nav": "notifications",
@@ -258,6 +258,8 @@ def build(site):
     @require_POST
     def push_subscribe(request):
         c = _ctx(request, site)
+        if not webpush_policy.allowed(c.store):
+            return JsonResponse({"ok": False, "error": "push_disabled"}, status=403)
         if (resp := _limited(request, "nt_push_subscribe", 20, 3600)) is not None:
             return resp
         try:

@@ -12,6 +12,8 @@ import tempfile
 import time
 from xml.etree import ElementTree as XML
 
+from cryptography.fernet import Fernet
+
 ROOT = Path(__file__).resolve().parents[2]
 GROUPS = {
     "browser-management-commerce": ["tools.qa.acceptance_browser"],
@@ -20,6 +22,9 @@ GROUPS = {
     "browser-signup-industry-choice": ["apps.portal.tests.test_custom_industry_browser"],
     "order-push-permissions": [
         "apps.notifications.tests.test_targeted_webpush",
+        "apps.notifications.tests.test_inbox_engine.WebPushDeliveryTests",
+        "apps.notifications.tests.test_inbox_views.PushEndpointTests",
+        "apps.notifications.tests.test_inbox_watch",
         "apps.notifications.tests.test_inbox_views.TestNotificationAndWorkerFileTests",
         "apps.notifications.tests.test_inbox_wiring.OrderSideTests",
         "apps.orders.tests.test_cod_confirmation",
@@ -79,6 +84,7 @@ def run(output, chromium, groups, previous_report=None):
             DJANGO_ALLOW_ASYNC_UNSAFE="true", DJANGO_MEDIA_ROOT=str(scratch / "media"),
             DJANGO_PRIVATE_MEDIA_ROOT=str(scratch / "private"), RASTISI_QA_MODE="1",
             RASTISI_EMAIL_PROVIDER="fake", RASTISI_OWNER_SMS_BACKEND="console",
+            PAYMENT_CREDENTIAL_KEY=Fernet.generate_key().decode("ascii"),
             RASTISI_OWNER_SMS_ALLOW_CONSOLE_OTP="1", RASTISI_DEV_OTP_CODE="123456",
             RASTISI_ACCEPTANCE_OUTPUT=str(output), SFB_BROWSER_TESTS="1", RASTISI_V33_BROWSER="1",
             PYTHONIOENCODING="utf-8",

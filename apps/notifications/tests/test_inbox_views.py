@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.dashboard.tests.test_permission_enforcement import PermissionEnforcementTestCase, _user_with_role
-from apps.notifications.models import InboxItem, NotificationEvent, NotificationPreference, WebPushSubscription
+from apps.notifications.models import InboxItem, NotificationEvent, NotificationPreference, WebPushPolicy, WebPushSubscription
 from apps.notifications.services import inbox_engine as eng
 from apps.notifications.services import inbox_service as svc
 from apps.notifications.services import scope as S
@@ -315,7 +315,23 @@ class PreferenceTests(_V):
         self.assertTrue(svc.get_preference(self.owner, self.other).toast_enabled)
 
 
+@override_settings(RASTISI_NOTIF_WEBPUSH_ENABLED=True)
 class PushEndpointTests(_V):
+    def setUp(self):
+        super().setUp()
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
+
+    def test_other_store_and_global_off_refuse_device_registration(self):
+        other = Client(HTTP_HOST=self.host_b)
+        other.force_login(self.other_owner)
+        data = json.dumps(VALID_SUB)
+        self.assertEqual(other.post(self.url("inbox-push-subscribe"), data=data,
+                                    content_type="application/json").status_code, 403)
+        WebPushPolicy.objects.filter(pk=S.PLATFORM_KEY).update(enabled=False)
+        self.assertEqual(self.sub().status_code, 403)
+        self.assertFalse(WebPushSubscription.objects.exists())
+
     def sub(self, payload=None, **kw):
         return self.client.post(self.url("inbox-push-subscribe"), data=json.dumps(payload or VALID_SUB), content_type="application/json", **kw)
 
@@ -377,7 +393,10 @@ class TestNotificationAndWorkerFileTests(_V):
         self.assertIn("event.data.json().item", body)  # only the opaque inbox identifier
         self.assertEqual(Client(HTTP_HOST=self.host_a).get(self.url("inbox-sw")).status_code, 302)
 
+    @override_settings(RASTISI_NOTIF_WEBPUSH_ENABLED=True)
     def test_targeted_push_summary_checks_recipient_store_and_opt_out(self):
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
         old = self.item(event=self.ev("order.created", dedupe_key="targeted"))
         self.ev("order.created", dedupe_key="newer")
         pref = NotificationPreference.objects.create(user=self.owner, scope_key=S.key_for(self.store),

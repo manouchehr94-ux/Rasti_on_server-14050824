@@ -252,6 +252,13 @@ class NotificationPreference(models.Model):
         constraints = [models.UniqueConstraint(fields=["user", "scope_key"], name="uniq_notif_pref_user_scope")]
 
 
+class WebPushPolicy(models.Model):
+    """Opt-in per scope; an absent row has the same effect as disabled."""
+
+    scope_key = models.CharField(max_length=30, primary_key=True)
+    enabled = models.BooleanField(default=False)
+
+
 class WebPushSubscription(models.Model):
     """دستگاه/مرورگرِ ثبت‌شده برای Web Push. نشانی و کلیدها **رمزنگاری‌شده** (Fernet) ذخیره می‌شوند؛ فقط هشِ نشانی برای یکتایی/جست‌وجو."""
 
