@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.dashboard.tests.test_permission_enforcement import PermissionEnforcementTestCase, _user_with_role
-from apps.notifications.models import InboxItem, NotificationEvent, NotificationPreference, WebPushSubscription
+from apps.notifications.models import InboxItem, NotificationEvent, NotificationPreference, WebPushPolicy, WebPushSubscription
 from apps.notifications.services import inbox_engine as eng
 from apps.notifications.services import inbox_service as svc
 from apps.notifications.services import scope as S
@@ -315,7 +315,23 @@ class PreferenceTests(_V):
         self.assertTrue(svc.get_preference(self.owner, self.other).toast_enabled)
 
 
+@override_settings(RASTISI_NOTIF_WEBPUSH_ENABLED=True)
 class PushEndpointTests(_V):
+    def setUp(self):
+        super().setUp()
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
+
+    def test_other_store_and_global_off_refuse_device_registration(self):
+        other = Client(HTTP_HOST=self.host_b)
+        other.force_login(self.other_owner)
+        data = json.dumps(VALID_SUB)
+        self.assertEqual(other.post(self.url("inbox-push-subscribe"), data=data,
+                                    content_type="application/json").status_code, 403)
+        WebPushPolicy.objects.filter(pk=S.PLATFORM_KEY).update(enabled=False)
+        self.assertEqual(self.sub().status_code, 403)
+        self.assertFalse(WebPushSubscription.objects.exists())
+
     def sub(self, payload=None, **kw):
         return self.client.post(self.url("inbox-push-subscribe"), data=json.dumps(payload or VALID_SUB), content_type="application/json", **kw)
 
@@ -366,7 +382,7 @@ class TestNotificationAndWorkerFileTests(_V):
         self.assertEqual(codes[:10], [200] * 10)
         self.assertIn(429, codes[10:])
 
-    def test_service_worker_is_served_with_scope_header_and_receives_no_payload_logic(self):
+    def test_service_worker_is_served_with_scope_header_and_opaque_id_logic(self):
         r = self.client.get(self.url("inbox-sw"))
         self.assertEqual(r.status_code, 200)
         self.assertIn("javascript", r["Content-Type"])
@@ -374,8 +390,30 @@ class TestNotificationAndWorkerFileTests(_V):
         body = r.content.decode()
         self.assertIn(self.url("inbox-summary"), body)
         self.assertNotIn("__SUMMARY_URL__", body)
-        self.assertNotIn("event.data", body)                                                      # nothing is read from the push payload
+        self.assertIn("event.data.json().item", body)  # only the opaque inbox identifier
         self.assertEqual(Client(HTTP_HOST=self.host_a).get(self.url("inbox-sw")).status_code, 302)
+
+    @override_settings(RASTISI_NOTIF_WEBPUSH_ENABLED=True)
+    def test_targeted_push_summary_checks_recipient_store_and_opt_out(self):
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
+        old = self.item(event=self.ev("order.created", dedupe_key="targeted"))
+        self.ev("order.created", dedupe_key="newer")
+        pref = NotificationPreference.objects.create(user=self.owner, scope_key=S.key_for(self.store),
+                                                      browser_enabled=True)
+        url = self.url("inbox-summary")
+        anonymous = Client(HTTP_HOST=self.host_a)
+        response = anonymous.get(url, {"push_item": old.public_id})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"ok": False})
+        response = self.client.get(url, {"push_item": old.public_id})
+        self.assertEqual(response.json(), {"item": {"id": str(old.public_id), "title": "سفارش جدید"}})
+        other = Client(HTTP_HOST=self.host_b)
+        other.force_login(self.other_owner)
+        self.assertEqual(other.get(url, {"push_item": old.public_id}).status_code, 404)
+        pref.disabled_push_events = ["order.created"]
+        pref.save()
+        self.assertEqual(self.client.get(url, {"push_item": old.public_id}).status_code, 404)
 
     def test_management_commands_run_and_are_safe_with_flags_off(self):
         from django.core.management import call_command
@@ -464,13 +502,14 @@ class ScriptContractTests(PermissionEnforcementTestCase):
         before = js[: js.index("requestPermission")]
         self.assertIn("enable.addEventListener('click'", before[-400:])
 
-    def test_service_worker_never_reads_a_push_payload_and_only_opens_same_site_paths(self):
+    def test_service_worker_uses_opaque_id_and_only_opens_same_site_paths(self):
         sw = self._read("sw.js")
-        self.assertNotIn("event.data", sw)
+        self.assertIn("encodeURIComponent(wanted)", sw)
+        self.assertNotIn("event.data.json().url", sw)
         self.assertNotIn("innerHTML", sw)
         self.assertIn("target.charAt(0) !== '/'", sw)
         self.assertIn("credentials: 'same-origin'", sw)
-        self.assertIn("if (!item) return;", sw)                   # nothing unread ⇒ no OS notification
+        self.assertIn("item.id !== wanted", sw)                   # nothing unread ⇒ no OS notification
 
     def test_templates_do_not_inline_user_content_into_scripts(self):
         from pathlib import Path

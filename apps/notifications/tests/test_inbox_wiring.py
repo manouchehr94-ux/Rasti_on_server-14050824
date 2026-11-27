@@ -72,7 +72,9 @@ class OrderSideTests(_W):
         self.assertEqual(NotificationEvent.objects.filter(type_key__startswith="order.").exclude(type_key="order.canceled").count(), 0)
         business_events.payment_result(self.order, success=False)
         business_events.payment_result(self.order, success=False)
-        business_events.payment_result(self.order, success=True)                                     # success is covered by order.created
+        business_events.payment_result(self.order, success=True)
+        business_events.payment_result(self.order, success=True)
+        self.assertEqual(self.events("payment.succeeded").count(), 1)
         failed = self.events("payment.failed").get()
         self.assertEqual(failed.occurrence_count, 2)                                                  # grouped, not two rows
 

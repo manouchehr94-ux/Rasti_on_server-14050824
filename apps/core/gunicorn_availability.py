@@ -6,6 +6,7 @@ import time
 from apps.core.availability_gate import evidence_enabled
 
 _REQUEST_ID = re.compile(r"[a-f0-9]{32}")
+_EDGE_EPOCH = re.compile(r"[0-9]{10}\.[0-9]{3}")
 
 
 def _event(worker, event, *, logger=None, **evidence):
@@ -18,7 +19,16 @@ def pre_request(worker, req):
     request_ids = [value for name, value in req.headers if name.lower() == "x-request-id"]
     if len(request_ids) == 1 and _REQUEST_ID.fullmatch(request_ids[0]):
         req._rastisi_availability = request_ids[0], time.monotonic_ns()
-        _event(worker, "request_started", request_id=request_ids[0])
+        dispatched = [value for name, value in req.headers if name.lower() == "x-rastisi-edge-dispatched"]
+        timings = {}
+        if len(dispatched) == 1 and _EDGE_EPOCH.fullmatch(dispatched[0]):
+            seconds, fraction = dispatched[0].split(".")
+            elapsed = time.time_ns() // 1_000_000 - (int(seconds) * 1000 + int(fraction))
+            if -300_000 <= elapsed <= 300_000:
+                timings["edge_to_worker_ms"] = elapsed
+        _event(worker, "request_started", request_id=request_ids[0], **timings)
+    else:
+        _event(worker, "request_started_without_id")
 
 
 def post_request(worker, req, environ, resp):

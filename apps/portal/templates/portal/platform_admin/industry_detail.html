@@ -16,6 +16,7 @@
     </div>
   </div>
   <div class="pa-actions pa-row">
+    <a class="pa-btn" href="{% url 'portal_platform_admin:industry-new-version' template.pk %}">ساخت نسخه جدید</a>
     <form method="post">{% csrf_token %}<input type="hidden" name="action" value="validate"><button class="pa-btn pa-soft" type="submit">اجرایِ اعتبارسنجی</button></form>
     <form method="post" data-confirm="{% if template.is_active %}این قالب غیرفعال شود؟ فروشگاه‌هایِ جدید دیگر نمی‌توانند آن را انتخاب کنند.{% else %}این قالب دوباره فعال شود؟{% endif %}">{% csrf_token %}<input type="hidden" name="action" value="toggle_active"><button class="pa-btn pa-danger" type="submit">{% if template.is_active %}غیرفعال‌سازی{% else %}فعال‌سازی{% endif %}</button></form>
   </div>

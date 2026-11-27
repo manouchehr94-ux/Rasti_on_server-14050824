@@ -1,13 +1,19 @@
 """Optional Chromium test against the real dashboard and a disposable database."""
+from contextlib import ExitStack
 from io import BytesIO
+import json
 import os
+from pathlib import Path
 import tempfile
 import unittest
 
 from django.conf import settings
+from django.core.servers.basehttp import ThreadedWSGIServer
+from django.db import connections
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import Client, override_settings
+from django.test.testcases import LiveServerThread
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -26,9 +32,28 @@ except ImportError:
 HOST = f"import-v33-browser.{settings.RASTISI_ADMIN_DOMAIN_SUFFIX}"
 
 
+class JoiningWSGIServer(ThreadedWSGIServer):
+    # Django's server normally uses daemon workers, which server_close()
+    # doesn't join. A late inbox poll can still hold a SQLite file handle.
+    daemon_threads = False
+    block_on_close = True
+
+
+class JoiningLiveServerThread(LiveServerThread):
+    server_class = JoiningWSGIServer
+
+
 @unittest.skipUnless(os.getenv("RASTISI_V33_BROWSER") == "1" and sync_playwright, "opt-in Chromium test")
 @override_settings(ALLOWED_HOSTS=[HOST, "localhost", "127.0.0.1"])
 class UnifiedImportBrowser(StaticLiveServerTestCase):
+    server_thread_class = JoiningLiveServerThread
+
+    @classmethod
+    def setUpClass(cls):
+        # LIFO: Django stops the server and joins request workers first.
+        cls.addClassCleanup(connections.close_all)
+        super().setUpClass()
+
     def test_download_preview_and_confirm(self):
         store = Store.objects.get(slug="akhlaghi")
         store.admin_subdomain = "import-v33-browser"
@@ -41,20 +66,29 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
         client = Client(HTTP_HOST=HOST)
         client.force_login(user)
         base = f"http://{HOST}:{self.server_thread.port}"
-        with tempfile.TemporaryDirectory() as storage, override_settings(PRIVATE_MEDIA_ROOT=storage), sync_playwright() as pw:
+        with (tempfile.TemporaryDirectory() as storage, override_settings(PRIVATE_MEDIA_ROOT=storage),
+              sync_playwright() as pw, ExitStack() as cleanup):
             browser = pw.chromium.launch(
                 executable_path=os.environ["RASTISI_CHROMIUM"],
-                args=["--no-sandbox", f"--host-resolver-rules=MAP {HOST} 127.0.0.1"],
+                args=["--no-sandbox", "--no-proxy-server", f"--host-resolver-rules=MAP {HOST} 127.0.0.1"],
             )
+            cleanup.callback(browser.close)
             context = browser.new_context(accept_downloads=True)
+            cleanup.callback(context.close)
             context.add_cookies([{"name": "sessionid", "value": client.cookies["sessionid"].value,
                                   "domain": HOST, "path": "/"}])
+            context.route("**/*", lambda route: route.continue_() if route.request.url.startswith(base + "/") else route.abort())
             page = context.new_page()
+            output = os.environ.get("RASTISI_ACCEPTANCE_OUTPUT")
+            if output:
+                output = Path(output)
             page.goto(base + reverse("dashboard:import-upload"))
             href = reverse("dashboard:import-template", args=["products"])
             with page.expect_download() as downloaded:
                 page.locator(f'a[href="{href}"]').first.click()
             wb = load_workbook(BytesIO(downloaded.value.path().read_bytes()))
+            self.assertEqual(len(wb.sheetnames), 5)
+            self.assertTrue(all(sheet.sheet_view.rightToLeft for sheet in wb))
             sheet = wb[SHEET]
             for col, value in {1: "BROWSER33", 2: "کالای مرورگر", 3: "دسته مرورگر", 5: "برند جدید مرورگر",
                                12: 120001, 13: 3}.items():
@@ -62,11 +96,16 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
             wb["فهرست‌ها"]["D20"] = "برند جدید مرورگر"
             binary = BytesIO()
             wb.save(binary)
+            wb.close()
+            if output:
+                (output / "excel-v33-synthetic.xlsx").write_bytes(binary.getvalue())
             upload = page.locator('input[name="file"]')
             upload.set_input_files({"name": "browser.xlsx", "mimeType": "application/octet-stream", "buffer": binary.getvalue()})
             page.locator("form").filter(has=upload).locator('button[type="submit"]').click()
             job = ImportJob.objects.latest("pk")
             page.wait_for_url("**" + reverse("dashboard:import-detail", args=[job.pk]))
+            if output:
+                page.screenshot(path=output / "excel-preview.png")
             self.assertFalse(Brand.objects.filter(store=store, name="برند جدید مرورگر").exists())
             self.assertFalse(Product.objects.filter(store=store, sku="BROWSER33").exists())
             execute = reverse("dashboard:import-execute", args=[job.pk])
@@ -76,4 +115,20 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
             self.assertEqual(confirmed.value.status, 302)
             product = Product.objects.get(store=store, sku="BROWSER33")
             self.assertEqual((product.price, product.stock, product.brand.name), (120001, 3, "برند جدید مرورگر"))
-            browser.close()
+            if output:
+                page.screenshot(path=output / "excel-confirmed.png")
+            page.goto(base + reverse("dashboard:import-upload"))
+            upload = page.locator('input[name="file"]')
+            upload.set_input_files({"name": "browser.xlsx", "mimeType": "application/octet-stream", "buffer": binary.getvalue()})
+            page.locator("form").filter(has=upload).locator('button[type="submit"]').click()
+            replay = ImportJob.objects.filter(store=store).latest("pk")
+            page.wait_for_url("**" + reverse("dashboard:import-detail", args=[replay.pk]))
+            row = replay.row_results.get(row_number=2)
+            self.assertEqual(row.normalized_data_summary["action"], "skip")
+            self.assertEqual(Product.objects.filter(store=store, sku="BROWSER33").count(), 1)
+            if output:
+                page.screenshot(path=output / "excel-reimport.png")
+                (output / "excel.json").write_text(json.dumps({
+                    "sheets": 5, "preview_writes": 0, "price_toman": 120001, "stock": 3,
+                    "reimport": "skip", "same_sku_products": 1,
+                }, indent=2), encoding="utf-8")

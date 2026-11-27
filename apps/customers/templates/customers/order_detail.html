@@ -3,7 +3,8 @@
 {% load static persian storefront_builder_extras %}
 
 {% block title %}
-{% if order %}سفارش {{ order.code }}{% else %}سفارش یافت نشد{% endif %} | {{ SHOP_NAME }}
+{% if order %}سفارش {{ order.code }}{% else %}
+سفارش یافت نشد{% endif %} | {{ SHOP_NAME }}
 {% endblock %}
 
 {% block extra_css %}
@@ -46,6 +47,15 @@
       — ثبت‌شده در {{ order.created_at|jalali }}
     </p>
   </div>
+
+
+{% if order.cancellation_requested_at %}
+  <p>درخواست لغو برای بررسی فروشگاه ثبت شده است.</p>
+{% elif order.status == 'pending' or order.status == 'processing' %}
+  <form method="post" action="{% url 'customers:account-order-request-cancel' order.code %}">
+    {% csrf_token %}<button class="btn" type="submit">درخواست لغو سفارش</button>
+  </form>
+{% endif %}
 
   {% include "customers/partials/order_tracker.html" %}
 

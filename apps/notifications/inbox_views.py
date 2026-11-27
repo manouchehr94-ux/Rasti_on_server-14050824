@@ -15,6 +15,7 @@ from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
@@ -25,7 +26,7 @@ from apps.notifications.models import NotificationPreference, Severity, WebPushS
 from apps.notifications.services import inbox_engine as eng
 from apps.notifications.services import inbox_service as svc
 from apps.notifications.services import scope as S
-from apps.notifications.services import webpush
+from apps.notifications.services import webpush, webpush_policy
 
 DASH = SimpleNamespace(name="dashboard", ns="dashboard", base="dashboard/base_admin.html", platform=False)
 PLAT = SimpleNamespace(name="platform", ns="portal_platform_admin", base="portal/platform_admin/base.html", platform=True)
@@ -119,17 +120,41 @@ def build(site):
         })
 
     @guard
-    @never_cache
-    @require_GET
-    def summary_api(request):
+    def _protected_summary(request):
         c = _ctx(request, site)
         try:
             since = int(request.GET.get("since", "0"))
         except ValueError:
             since = 0
+        item_id = request.GET.get("push_item")
+        if item_id is not None:
+            if not webpush_policy.allowed(c.store):
+                raise Http404
+            try:
+                item_id = uuid.UUID(item_id)
+            except ValueError:
+                raise Http404 from None
+            item = svc.get_item(c.user, c.store, item_id)
+            if item is None or item.read_at or item.archived_at or (
+                item.snoozed_until and item.snoozed_until > timezone.now()
+            ):
+                raise Http404
+            pref = svc.get_preference(c.user, c.store)
+            if not pref.browser_enabled or item.event.type_key in (pref.disabled_push_events or []):
+                raise Http404
+            return JsonResponse({"item": {"id": str(item.public_id),
+                                          "title": R.get_type(item.event.type_key).label}})
         data = svc.summary(c.user, c.store, since_ms=since)
         data["user_key"] = f"{c.user.pk}:{c.scope_key}"
         return JsonResponse(data)
+
+    @never_cache
+    @require_GET
+    def summary_api(request):
+        if "push_item" in request.GET and not request.user.is_authenticated:
+            # Distinguish an expired session from a signed-in account that lost scope.
+            return JsonResponse({"ok": False}, status=401)
+        return _protected_summary(request)
 
     @guard
     @require_GET
@@ -180,6 +205,17 @@ def build(site):
             raise Http404
         svc.mark(item, "read")
         target = svc.resolve_link(item.event, site.ns) if S.can_open_link(c.user, item.event) else ""
+        if target and item.event.type_key == "return.requested" and request.GET.get("push") == "1":
+            from apps.orders.models import ReturnRequest
+            from apps.stores import authorization as auth
+
+            membership = auth.get_active_membership(c.user, c.store)
+            if membership and auth.membership_has_permission(membership, auth.ORDER_VIEW):
+                code = (ReturnRequest.objects.filter(store=c.store, pk=item.event.entity_id,
+                                                     order__store=c.store)
+                        .values_list("order__code", flat=True).first()) if item.event.entity_id.isdecimal() else None
+                if code:
+                    target = _url(c, "order-detail", code=code)
         if not target:
             messages.info(request, "دسترسیِ لازم برای صفحه‌ی مرتبط را ندارید یا این صفحه دیگر وجود ندارد.")
             return redirect(_url(c, "inbox-detail", public_id=item.public_id))
@@ -191,7 +227,11 @@ def build(site):
         pref = svc.get_preference(c.user, c.store)
         allowed_types = [R.get_type(k) for k in S.allowed_type_keys(c.user, c.store)]
         categories = [(k, v, R.CATEGORY_HINTS.get(k, "")) for k, v in R.CATEGORIES.items() if any(t.category == k for t in allowed_types)]
+        push_events = [t for t in allowed_types if t.key in R.ORDER_PUSH_EVENTS]
         if request.method == "POST":
+            if request.POST.get("push_event_settings") == "1":
+                selected = set(request.POST.getlist("push_events"))
+                pref.disabled_push_events = [t.key for t in push_events if t.key not in selected]
             pref.toast_enabled = request.POST.get("toast_enabled") == "1"
             pref.mute_low = request.POST.get("mute_low") == "1"
             pref.browser_enabled = request.POST.get("browser_enabled") == "1"
@@ -205,12 +245,10 @@ def build(site):
             messages.success(request, "تنظیمات اعلان‌ها ذخیره شد.")
             return redirect(_url(c, "inbox-preferences"))
         devices = WebPushSubscription.objects.filter(user=c.user, scope_key=c.scope_key, revoked_at__isnull=True).order_by("-last_seen_at")
-        from django.conf import settings
-
         return render(request, "notifications/preferences.html", {
             "base_template": site.base, "site": site, "pref": pref, "categories": categories, "disabled": set(pref.disabled_categories or []),
-            "always": R.ALWAYS_INBOX_CATEGORIES, "devices": devices, "severities": [(v, l) for v, l in Severity.choices if v >= 2],
-            "push": {"enabled": bool(getattr(settings, "RASTISI_NOTIF_WEBPUSH_ENABLED", False)), "configured": webpush.is_configured(), "public_key": webpush.public_key_b64u(),
+            "push_events": push_events, "always": R.ALWAYS_INBOX_CATEGORIES, "devices": devices, "severities": [(v, l) for v, l in Severity.choices if v >= 2],
+            "push": {"enabled": webpush_policy.allowed(c.store), "configured": webpush.is_configured(), "public_key": webpush.public_key_b64u(),
                      "subscribe_url": _url(c, "inbox-push-subscribe"), "unsubscribe_url": _url(c, "inbox-push-unsubscribe"), "sw_url": _url(c, "inbox-sw")},
             "test_url": _url(c, "inbox-test"), "inbox_url": _url(c, "inbox-home"), "scope_label": "پلتفرم راستی‌سی" if site.platform else request.store.name,
             "active_nav": "notifications",
@@ -220,6 +258,8 @@ def build(site):
     @require_POST
     def push_subscribe(request):
         c = _ctx(request, site)
+        if not webpush_policy.allowed(c.store):
+            return JsonResponse({"ok": False, "error": "push_disabled"}, status=403)
         if (resp := _limited(request, "nt_push_subscribe", 20, 3600)) is not None:
             return resp
         try:

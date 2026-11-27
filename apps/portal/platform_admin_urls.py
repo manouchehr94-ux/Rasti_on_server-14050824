@@ -124,6 +124,9 @@ urlpatterns = [
 
     # --- صنف‌ها و قالب‌ها ---
     path("industries/", views.industries, name="industries"),
+    path("industries/suggestions/<int:installation_id>/review/", views.industry_review_suggestion, name="industry-review-suggestion"),
+    path("industries/new/", views.industry_author, name="industry-new"),
+    path("industries/<int:template_id>/new-version/", views.industry_author, name="industry-new-version"),
     path("industries/<int:template_id>/", views.industry_detail, name="industry-detail"),
 
     # --- دامنه‌ها ---

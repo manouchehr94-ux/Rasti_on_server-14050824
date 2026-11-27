@@ -57,7 +57,7 @@ def decide(etype: R.EventType, severity: int, pref: NotificationPreference, forc
     low = severity < R.IMPORTANT and not etype.urgent
     muted = pref.mute_low and low
     toast = inbox and pref.toast_enabled and not muted and (severity >= pref.min_toast_severity or etype.urgent)
-    push = inbox and pref.browser_enabled and not muted and (severity >= pref.min_browser_severity or etype.urgent)
+    push = inbox and pref.browser_enabled and etype.key not in (pref.disabled_push_events or []) and not muted and (severity >= pref.min_browser_severity or etype.urgent)
     return {"inbox": inbox, "toast": bool(toast), "push": bool(push), "email": inbox and pref.email_enabled, "mobile": inbox and pref.mobile_enabled}
 
 
@@ -142,8 +142,9 @@ def publish(
 
 def _create_deliveries(event, etype, scope_key, planned, now) -> None:
     rows = []
-    if getattr(settings, "RASTISI_NOTIF_WEBPUSH_ENABLED", False):
-        from apps.notifications.services import webpush
+    from apps.notifications.services import webpush, webpush_policy
+
+    if any(d["push"] for _, d in planned) and webpush_policy.allowed(event.store):
 
         if webpush.is_configured():
             for item, d in planned:

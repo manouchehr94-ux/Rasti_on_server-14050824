@@ -32,6 +32,14 @@
   </div>
 </div>
 
+<form method="post" class="pa-card pa-cardbody">
+  {% csrf_token %}
+  <p>Web Push برای این فروشگاه · {% if webpush_policy_enabled %}مجاز{% else %}غیرفعال{% endif %}</p>
+  <button class="pa-btn" type="submit" name="webpush_policy" value="{% if webpush_policy_enabled %}off{% else %}on{% endif %}">
+    {% if webpush_policy_enabled %}غیرفعال کردن Web Push{% else %}فعال کردن Web Push{% endif %}
+  </button>
+</form>
+
 <nav class="pa-tabs" aria-label="بخش‌هایِ فروشگاه">
   <a class="pa-tab {% if tab == 'overview' %}active{% endif %}" href="?tab=overview">نمای‌کلی</a>
   <a class="pa-tab {% if tab == 'subscription' %}active{% endif %}" href="?tab=subscription">اشتراک</a>

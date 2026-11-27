@@ -99,7 +99,7 @@ class StageTwoTests(unittest.TestCase):
                     self.assertEqual([values[key] for key in ("bind", "workers", "threads", "timeout")],
                                      ["['127.0.0.1:18082']", "1", "2", "40"])
 
-    def test_django_slow_sql_and_5xx_only_emit_sanitized_summary(self):
+    def test_django_phases_and_slow_sql_report_without_sensitive_data(self):
         code = """
 import time
 from types import SimpleNamespace
@@ -114,10 +114,18 @@ def handler(_):
         cursor.execute('SELECT secret_query_name(%s)', ['SECRET_SQL_VALUE'])
     return SimpleNamespace(status_code=503)
 logger.warning = lambda _, result: print(result)
-AvailabilityEvidenceMiddleware(handler)(SimpleNamespace(META={'HTTP_X_REQUEST_ID': 'a' * 32}))
+request = SimpleNamespace(META={'HTTP_X_REQUEST_ID': 'a' * 32},
+                          resolver_match=SimpleNamespace(url_name='order-detail'),
+                          path='/SECRET_CUSTOMER_URL/')
+middleware = AvailabilityEvidenceMiddleware(handler)
+middleware.process_view(request, None, (), {})
+middleware(request)
 """
         result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True, text=True, capture_output=True)
-        row = json.loads(result.stdout)
-        self.assertEqual((row["status"], row["slow_db_count"]), (503, 1))
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([row["event"] for row in rows], ["view_entered", "database_entered", "request_summary"])
+        self.assertTrue(all(row["route"] == "order-detail" for row in rows))
+        self.assertNotIn("SECRET_CUSTOMER_URL", result.stdout)
+        self.assertEqual((rows[-1]["status"], rows[-1]["slow_db_count"]), (503, 1))
         self.assertNotIn("SECRET_SQL_VALUE", result.stdout)
         self.assertNotIn("secret_query_name", result.stdout)

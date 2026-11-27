@@ -6,6 +6,9 @@
 {% block page_sub %}مشاهده و مدیریت وضعیت سفارش{% endblock %}
 
 {% block content %}
+{% if order.cancellation_requested_at and order.status != 'canceled' %}
+<p role="status">مشتری درخواست لغو این سفارش را ثبت کرده است.</p>
+{% endif %}
 <div style="margin-bottom:14px">
   <a class="btn btn-sm" href="{% url 'dashboard:order-list' %}">→ بازگشت به فهرست سفارشات</a>
 </div>

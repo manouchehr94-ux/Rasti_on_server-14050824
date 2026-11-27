@@ -371,6 +371,7 @@ class Order(TimeStampedModel):
         "کلید یکتای درخواست تسویه‌حساب", max_length=64, blank=True, default=""
     )
 
+    cancellation_requested_at = models.DateTimeField("زمان درخواست لغو", null=True, blank=True)
     address = models.JSONField("آدرس (اسنپ‌شات)", default=dict)
     shipping_method = models.ForeignKey(
         ShippingMethod, verbose_name="روش ارسال", on_delete=models.PROTECT, related_name="orders"

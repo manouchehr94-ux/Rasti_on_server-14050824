@@ -343,6 +343,10 @@ class InboxServiceTests(_Base):
 class WebPushDeliveryTests(_Base):
     def setUp(self):
         super().setUp()
+        from apps.notifications.models import WebPushPolicy
+
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
         keys = webpush.generate_keypair()
         patcher = override_settings(RASTISI_VAPID_PRIVATE_KEY=keys["private"])
         patcher.enable()
@@ -366,6 +370,19 @@ class WebPushDeliveryTests(_Base):
         self.pub("order.canceled", dedupe_key="p1")
         self.assertEqual(self.deliveries().count(), 1)
         self.assertEqual(self.deliveries().get().inbox_item.user, self.owner)
+
+    def test_store_off_stops_queued_push_and_new_events_keep_their_inbox(self):
+        from apps.notifications.models import WebPushPolicy
+
+        self.pub("order.created", dedupe_key="pilot-before")
+        self.assertEqual(self.deliveries().count(), 1)
+        WebPushPolicy.objects.filter(pk=self.key).update(enabled=False)
+        result, calls = self.run_worker()
+        self.assertEqual((result["skipped"], calls), (1, []))
+        self.assertEqual(self.deliveries().get().skip_reason, "webpush_scope_disabled")
+        event = self.pub("order.created", dedupe_key="pilot-after")
+        self.assertTrue(InboxItem.objects.filter(event=event, user=self.owner).exists())
+        self.assertEqual(self.deliveries().count(), 1)
 
     def test_delivery_sends_an_empty_vapid_signed_request_and_marks_it_delivered(self):
         self.pub("order.canceled", dedupe_key="p2", title="لغو سفارش با نام مشتری محرمانه", summary="مبلغ ۵۰٬۰۰۰٬۰۰۰")

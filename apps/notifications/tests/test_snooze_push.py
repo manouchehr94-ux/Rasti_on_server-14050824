@@ -21,6 +21,10 @@ from apps.notifications.tests.test_inbox_engine import VALID_SUB
 class SnoozeVsPushTests(PermissionEnforcementTestCase):
     def setUp(self):
         super().setUp()
+        from apps.notifications.models import WebPushPolicy
+
+        WebPushPolicy.objects.create(scope_key=S.PLATFORM_KEY, enabled=True)
+        WebPushPolicy.objects.create(scope_key=S.key_for(self.store), enabled=True)
         patcher = override_settings(RASTISI_VAPID_PRIVATE_KEY=webpush.generate_keypair()["private"])
         patcher.enable()
         self.addCleanup(patcher.disable)

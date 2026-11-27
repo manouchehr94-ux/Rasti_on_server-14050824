@@ -43,7 +43,7 @@ NAV = (
         NavItem("فروشگاه‌ها", "stores", "store", also=("store-detail",)),
         NavItem("کاربران", "users", "users", also=("user-detail",)),
         NavItem("دامنه‌ها", "domains", "globe"),
-        NavItem("صنف‌ها و قالب‌ها", "industries", "layers", also=("industry-detail",)),
+        NavItem("صنف‌ها و قالب‌ها", "industries", "layers", also=("industry-detail", "industry-new", "industry-new-version", "industry-review-suggestion")),
     )),
     NavGroup("pricing", "اشتراک و قیمت‌گذاری", "tag", (
         NavItem("دوره‌ی آزمایشی (Trial)", "trial-settings", "clock"),

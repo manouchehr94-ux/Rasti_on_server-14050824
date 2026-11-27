@@ -3,6 +3,13 @@
 {% block content %}
 <div class="pa-pagehead"><div><h1>صنف‌ها و قالب‌ها</h1><p>هر نسخه‌ی یک قالبِ صنف پس از ساخته‌شدن تغییرناپذیر است؛ نسخه‌ی تازه یک ردیفِ کاملاً جدید می‌سازد.</p></div></div>
 
+<p><a class="pa-btn pa-primary" href="{% url 'portal_platform_admin:industry-new' %}">تعریف صنف جدید</a></p>
+{% if suggestions %}<details class="pa-card pa-cardbody"><summary>پیشنهادهای اخیر فروشندگان</summary>
+<ul>{% for item in suggestions %}<li>{{ item.custom_industry_name }}
+{% if item.reviewed %}<span>بررسی شد</span>{% else %}
+<form method="post" action="{% url 'portal_platform_admin:industry-review-suggestion' item.pk %}">
+  {% csrf_token %}<button class="pa-btn" type="submit">ثبت بررسی</button>
+</form>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
 <form method="get" class="pa-card" role="search"><div class="pa-cardbody pa-filters">
   <div class="pa-field pa-grow"><label for="flt-q">جستجو</label><input id="flt-q" type="search" name="q" value="{{ q }}"></div>
   <div class="pa-field"><label for="flt-sector">رسته</label><select id="flt-sector" name="sector">

@@ -240,6 +240,7 @@ class NotificationPreference(models.Model):
     min_toast_severity = models.PositiveSmallIntegerField("حداقل اهمیتِ اعلانِ فوری", choices=Severity.choices, default=Severity.IMPORTANT)
     min_browser_severity = models.PositiveSmallIntegerField("حداقل اهمیتِ اعلانِ مرورگر", choices=Severity.choices, default=Severity.IMPORTANT)
     mute_low = models.BooleanField("بی‌صداکردنِ اعلان‌های کم‌اهمیت", default=True)
+    disabled_push_events = models.JSONField("رویدادهای Push خاموش", blank=True, null=True, default=list)
     disabled_categories = models.JSONField("دسته‌های خاموش", blank=True, default=list)
     email_enabled = models.BooleanField("ایمیل (آینده؛ غیرفعال)", default=False)
     mobile_enabled = models.BooleanField("اعلانِ موبایل (آینده؛ غیرفعال)", default=False)
@@ -249,6 +250,13 @@ class NotificationPreference(models.Model):
         verbose_name = "تنظیماتِ اعلان"
         verbose_name_plural = "تنظیماتِ اعلان‌ها"
         constraints = [models.UniqueConstraint(fields=["user", "scope_key"], name="uniq_notif_pref_user_scope")]
+
+
+class WebPushPolicy(models.Model):
+    """Opt-in per scope; an absent row has the same effect as disabled."""
+
+    scope_key = models.CharField(max_length=30, primary_key=True)
+    enabled = models.BooleanField(default=False)
 
 
 class WebPushSubscription(models.Model):

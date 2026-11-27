@@ -137,6 +137,19 @@ class AccountOrderDetailViewTests(TestCase):
         response = self.client.get(reverse("customers:account-order-detail", args=[self.order.code]))
         self.assertContains(response, self.order.code)
 
+    def test_cancel_request_is_idempotent_without_canceling_order(self):
+        from apps.notifications.models import NotificationEvent
+
+        self.client.force_login(self.user)
+        url = reverse("customers:account-order-request-cancel", args=[self.order.code])
+        self.assertEqual(self.client.post(url).status_code, 302)
+        self.assertEqual(self.client.post(url).status_code, 302)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.cancellation_requested_at)
+        self.assertEqual(self.order.status, Order.Status.PENDING)
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+        self.assertEqual(NotificationEvent.objects.filter(type_key="order.cancel_requested").count(), 1)
+
     def test_other_customer_gets_404(self):
         other_user = User.objects.create_user(username="09121118866", password="pass12345")
         Customer.objects.create(user=other_user, full_name="دیگری", phone="09121118866")

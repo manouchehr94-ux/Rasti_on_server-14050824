@@ -226,6 +226,11 @@ def home(request):
 def configuration(request):
     """تنظیماتِ عمومیِ پلتفرم — هویت/پیش‌فرض‌هایِ تجاری/عملیات (بخشِ ۲۰).
     پیکربندیِ درگاهِ پیامکِ مرکزی این‌جا نیست — نگاه کنید به ``sms_settings``."""
+    from apps.notifications.services import webpush_policy
+
+    if request.method == "POST" and "webpush_policy" in request.POST:
+        webpush_policy.set_enabled(actor=request.user, enabled=request.POST["webpush_policy"] == "on")
+        return redirect("portal_platform_admin:configuration")
     config = get_platform_configuration()
     if request.method == "POST":
         previous_enamad = {key: getattr(config, key) for key in ("enamad_id", "enamad_auth_code", "enamad_verification_meta_tag")}
@@ -249,7 +254,8 @@ def configuration(request):
             return redirect("portal_platform_admin:configuration")
     else:
         form = PlatformConfigurationForm(instance=config)
-    return render(request, "portal/platform_admin/configuration.html", {"form": form, "active_nav": "platform-settings"})
+    return render(request, "portal/platform_admin/configuration.html", {"form": form, "active_nav": "platform-settings",
+                   "webpush_policy_enabled": webpush_policy.scope_enabled(webpush_policy.GLOBAL_SCOPE)})
 
 
 # ---------------------------------------------------------------- مرکز کنترل پیامک
@@ -619,9 +625,13 @@ def stores(request):
 
 @user_passes_test(_is_platform_staff, login_url="portal_platform_admin:login")
 def store_detail(request, store_public_id):
+    from apps.notifications.services import webpush_policy
     from apps.sms.services.balance_service import get_or_create_balance
 
     store = get_object_or_404(Store, public_id=store_public_id)
+    if request.method == "POST" and "webpush_policy" in request.POST:
+        webpush_policy.set_enabled(actor=request.user, enabled=request.POST["webpush_policy"] == "on", store=store)
+        return redirect("portal_platform_admin:store-detail", store_public_id)
     domains = store.domains.all().order_by("-is_primary", "-created_at")
     memberships = store.memberships.select_related("user", "user__owner_profile").order_by("-status", "role")
     owner_membership = next(
@@ -652,6 +662,7 @@ def store_detail(request, store_public_id):
         "invoices": invoices, "audit_entries": audit_entries, "notes": notes, "sms_balance": sms_balance,
         "industry_installation": industry_installation, "product_count": product_count, "order_count": order_count,
         "tab": tab, "active_nav": "stores",
+        "webpush_policy_enabled": webpush_policy.scope_enabled(webpush_policy.key_for(store)),
     })
 
 
@@ -2276,11 +2287,90 @@ def industries(request):
     if readiness:
         template_list = template_list.filter(readiness=readiness)
     template_list = template_list.order_by("slug", "-version")
+    from apps.catalog.models import StoreIndustryInstallation
+    from apps.portal.models import PlatformAuditLogEntry
+
+    suggestions = list(StoreIndustryInstallation.objects.exclude(custom_industry_name="").order_by("-pk")[:100])
+    reviewed = set(PlatformAuditLogEntry.objects.filter(
+        action_code="platform_admin.industry_suggestion_reviewed",
+        object_type="StoreIndustryInstallation", object_id__in=[str(item.pk) for item in suggestions],
+    ).values_list("object_id", flat=True))
+    for item in suggestions:
+        item.reviewed = str(item.pk) in reviewed
 
     return render(request, "portal/platform_admin/industries.html", {
-        "templates": template_list, "active_nav": "industries",
+        "templates": template_list, "suggestions": suggestions, "active_nav": "industries",
         "sector_tabs": SECTOR_TABS, "readiness_choices": IndustryTemplate.Readiness.choices,
         "q": q, "selected_sector": sector, "selected_active": active, "selected_readiness": readiness,
+    })
+
+
+@user_passes_test(_is_platform_staff, login_url="portal_platform_admin:login")
+@require_POST
+def industry_review_suggestion(request, installation_id):
+    from django.db import transaction
+
+    from apps.catalog.models import StoreIndustryInstallation
+    from apps.portal.models import PlatformAuditLogEntry
+
+    with transaction.atomic():
+        item = get_object_or_404(
+            StoreIndustryInstallation.objects.select_for_update().exclude(custom_industry_name=""),
+            pk=installation_id,
+        )
+        if not PlatformAuditLogEntry.objects.filter(
+            action_code="platform_admin.industry_suggestion_reviewed",
+            object_type="StoreIndustryInstallation", object_id=str(item.pk),
+        ).exists():
+            record_platform_audit_event(
+                actor=request.user, action_code="platform_admin.industry_suggestion_reviewed",
+                object_type="StoreIndustryInstallation", object_id=item.pk,
+            )
+    return redirect("portal_platform_admin:industries")
+
+
+@user_passes_test(_is_platform_staff, login_url="portal_platform_admin:login")
+def industry_author(request, template_id=None):
+    import json
+
+    from django.core.exceptions import ValidationError
+    from django.db import IntegrityError, transaction
+    from apps.catalog.models import Attribute, IndustryTemplate
+    from apps.catalog.services.industry_authoring import create_version
+    from apps.catalog.services.template_validation_service import _canonical_template_payload
+
+    source = get_object_or_404(IndustryTemplate, pk=template_id) if template_id is not None else None
+    if request.method == "POST":
+        text = request.POST.get("definition", "")
+        try:
+            if len(text) > 250_000:
+                raise ValidationError("حجم تعریف قالب بیش از حد مجاز است.")
+            with transaction.atomic():
+                template = create_version(json.loads(text), source=source)
+                record_platform_audit_event(
+                    actor=request.user, action_code="platform_admin.industry_version_created",
+                    object_type="IndustryTemplate", object_id=template.pk, object_label=template.name,
+                    metadata={"version": template.version},
+                )
+        except (ValueError, RecursionError, IntegrityError):
+            messages.error(request, "تعریف قالب معتبر نیست یا هم‌زمان ذخیره شده است.")
+        except ValidationError as exc:
+            for message in exc.messages[:20]:
+                messages.error(request, message)
+        else:
+            return redirect("portal_platform_admin:industry-detail", template.pk)
+    else:
+        definition = _canonical_template_payload(source) if source else {
+            "slug": "", "name": "", "categories": [], "attributes": [], "mappings": [], "recommendations": [],
+        }
+        if source:
+            definition.update(sector=source.sector, display_order=source.display_order,
+                              default_section_keys=source.default_section_keys)
+        text = json.dumps(definition, ensure_ascii=False, indent=2)
+    return render(request, "portal/platform_admin/industry_author.html", {
+        "definition": text, "source": source, "active_nav": "industries",
+        "sectors": IndustryTemplate.Sector.choices,
+        "attribute_types": Attribute.DataType.choices, "display_types": Attribute.DisplayType.choices,
     })
 
 
@@ -2310,13 +2400,30 @@ def industry_detail(request, template_id):
         return redirect("portal_platform_admin:industry-detail", template_id)
 
     if request.method == "POST" and request.POST.get("action") == "toggle_active":
-        template.is_active = not template.is_active
-        template.save(update_fields=["is_active", "updated_at"])
-        record_platform_audit_event(
-            actor=request.user,
-            action_code="platform_admin.industry_template_deactivated" if not template.is_active else "platform_admin.industry_template_activated",
-            object_type="IndustryTemplate", object_id=template.pk, object_label=template.name,
-        )
+        from django.db import transaction
+
+        with transaction.atomic():
+            family = IndustryTemplate.objects.filter(slug=template.slug)
+            locked = {row.pk: row for row in family.select_for_update().order_by("pk")}
+            template = locked[template.pk]
+            if template.slug == "other" and template.is_active:
+                messages.error(request, "گزینه سایر برای ثبت‌نام ضروری است.")
+                return redirect("portal_platform_admin:industry-detail", template_id)
+            if not template.is_active and template.readiness != IndustryTemplate.Readiness.PRODUCTION_READY:
+                messages.error(request, "فقط نسخه آماده می‌تواند فعال شود.")
+                return redirect("portal_platform_admin:industry-detail", template_id)
+            activating = not template.is_active
+            family.update(is_active=False)
+            if activating:
+                template.is_active = True
+                template.save(update_fields=["is_active", "updated_at"])
+            else:
+                template.is_active = False
+            record_platform_audit_event(
+                actor=request.user,
+                action_code="platform_admin.industry_template_deactivated" if not template.is_active else "platform_admin.industry_template_activated",
+                object_type="IndustryTemplate", object_id=template.pk, object_label=template.name,
+            )
         messages.success(request, f"قالبِ «{template.name}» {'غیرفعال' if not template.is_active else 'فعال'} شد.")
         return redirect("portal_platform_admin:industry-detail", template_id)
 

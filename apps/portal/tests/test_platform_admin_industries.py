@@ -100,6 +100,31 @@ class PlatformAdminIndustryDetailActionTests(TestCase):
         self.template.refresh_from_db()
         self.assertFalse(self.template.is_active)
 
+    def test_author_form_creates_disabled_version_and_keeps_source(self):
+        import json
+
+        url = f"/industries/{self.template.pk}/new-version/"
+        response = self.client.get(url, HTTP_HOST=_HOST)
+        self.assertContains(response, "industry-author.js")
+        response = self.client.post(url, {"definition": json.dumps({
+            "slug": self.template.slug, "name": "ویرایش آزمایشی",
+            "categories": [{"code": "parent", "name": "دسته"},
+                           {"code": "child", "name": "زیردسته", "parent_code": "parent"}],
+            "attributes": [], "mappings": [], "recommendations": [],
+        })}, HTTP_HOST=_HOST)
+        self.assertEqual(response.status_code, 302)
+        new = IndustryTemplate.objects.get(slug=self.template.slug, version=self.template.version + 1)
+        self.assertFalse(new.is_active)
+        self.assertEqual(new.categories.get(code="child").parent.code, "parent")
+        self.template.refresh_from_db()
+        self.assertTrue(self.template.is_active)
+
+    def test_suggestion_review_remains_post_only_and_owner_only(self):
+        url = "/industries/suggestions/1/review/"
+        self.assertEqual(self.client.get(url, HTTP_HOST=_HOST).status_code, 405)
+        self.client.logout()
+        self.assertEqual(self.client.post(url, HTTP_HOST=_HOST).status_code, 302)
+
     def test_validate_action_runs_validation(self):
         response = self.client.post(
             f"/industries/{self.template.pk}/", {"action": "validate"}, HTTP_HOST=_HOST,

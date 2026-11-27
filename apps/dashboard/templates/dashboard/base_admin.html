@@ -1,6 +1,8 @@
 {% load static dashboard_nav storefront_builder_extras persian %}<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
+<link rel="manifest" href="{% static 'notifications/merchant.webmanifest' %}">
+<link rel="apple-touch-icon" href="{% static 'notifications/merchant-192.png' %}">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}پنل مدیریت فروشگاه | {{ SHOP_NAME }}{% endblock %}</title>
