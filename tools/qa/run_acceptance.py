@@ -35,7 +35,12 @@ KEEP = {"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SYSTEMROOT",
         "WINDIR", "COMSPEC", "LANG", "LC_ALL", "PLAYWRIGHT_BROWSERS_PATH", "PATHEXT"}
 
 
-def run(output, chromium):
+def run(output, chromium, groups, previous_report=None):
+    previous = None
+    if previous_report:
+        original = json.loads(previous_report.read_text(encoding="utf-8"))
+        previous = {"sha": original["sha"], "summary_path": str(previous_report),
+                    "groups": [{"name": g["name"], "status": g["status"]} for g in original["groups"]]}
     output.mkdir(parents=True, exist_ok=False)
     results = []
     with tempfile.TemporaryDirectory(prefix="rastisi-e2e-") as scratch_name:
@@ -55,7 +60,8 @@ def run(output, chromium):
         )
         if chromium:
             env["SFB_CHROMIUM_PATH"] = env["RASTISI_CHROMIUM"] = str(chromium)
-        for name, labels in GROUPS.items():
+        for name in groups:
+            labels = GROUPS[name]
             cmd = [sys.executable, "manage.py", "test", *labels, "--noinput", "--verbosity", "2"]
             log = output / f"{name}.log"
             with log.open("w", encoding="utf-8") as stream:
@@ -67,13 +73,17 @@ def run(output, chromium):
             results.append({"name": name, "status": result_name, "log": log.name,
                             "exit_code": result.returncode, "browser_skipped": skipped})
             print(result_name, name, flush=True)
-    if os.name == "nt":
+    if "diagnostic-evidence" in groups and os.name == "nt":
         results.append({"name": "gunicorn-posix-configuration-and-hooks", "status": "NOT_RUN",
                         "log": None, "reason": "Run unchanged on Linux in release-system CI."})
-    results.append({"name": "physical-android-iphone-delivery", "status": "NOT_RUN",
-                    "log": None, "reason": "Physical devices are required."})
+    if "order-push-permissions" in groups:
+        results.append({"name": "physical-android-iphone-delivery", "status": "NOT_RUN",
+                        "log": None, "reason": "Physical devices are required."})
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    (output / "summary.json").write_text(json.dumps({"sha": sha, "groups": results}, indent=2), encoding="utf-8")
+    summary = {"sha": sha, "requested_groups": groups, "groups": results}
+    if previous:
+        summary["previous_run"] = previous
+    (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     suite = XML.Element("testsuite", name="RastiSi acceptance", tests=str(len(results)),
                         failures=str(sum(item["status"] == "FAIL" for item in results)))
     for result in results:
@@ -103,7 +113,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--chromium", type=Path, required=True)
+    parser.add_argument("--group", choices=GROUPS, action="append")
+    parser.add_argument("--previous-summary", type=Path)
     args = parser.parse_args()
     if importlib.util.find_spec("playwright") is None:
         parser.error("Install tools/qa/requirements-management-browser.txt in the QA runtime.")
-    raise SystemExit(run(args.output.resolve(), args.chromium.resolve() if args.chromium else None))
+    raise SystemExit(run(args.output.resolve(), args.chromium.resolve(),
+                         list(dict.fromkeys(args.group or GROUPS)), args.previous_summary))
