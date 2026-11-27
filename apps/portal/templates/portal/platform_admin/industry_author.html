@@ -1,0 +1,16 @@
+{% extends "portal/platform_admin/base.html" %}
+{% block title %}تعریف نسخه صنف{% endblock %}
+{% block content %}
+<div class="pa-card"><div class="pa-cardbody">
+<h1>{% if source %}نسخه جدید {{ source.name }}{% else %}صنف جدید{% endif %}</h1>
+<form method="post">
+  {% csrf_token %}
+  <div class="pa-field">
+    <label for="definition">تعریف صنف (JSON)</label>
+    <p class="pa-help">برای زیردسته از کد والد در parent_code استفاده کنید. مقادیر هر ویژگی را در values آن بنویسید. نسخه پس از اعتبارسنجی غیرفعال ذخیره می‌شود.</p>
+    <textarea name="definition" id="definition" dir="ltr" rows="24" required spellcheck="false">{{ definition }}</textarea>
+  </div>
+  <button type="submit" class="pa-btn pa-primary">اعتبارسنجی و ذخیره نسخه</button>
+</form>
+</div></div>
+{% endblock %}
