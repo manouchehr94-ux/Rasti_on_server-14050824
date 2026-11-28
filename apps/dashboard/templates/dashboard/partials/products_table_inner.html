@@ -30,21 +30,27 @@
       <option value="{{ tax_class.pk }}">{{ tax_class.name }}</option>
       {% endfor %}
     </select>
+    <label class="products-select-all"><input type="checkbox" onclick="this.form.querySelectorAll('input[name=product_ids]').forEach(c=>c.checked=this.checked)"> انتخاب همهٔ کالاهای صفحه</label>
     <button type="submit" class="btn btn-sm" hx-confirm="اجرای این اکشن روی همه‌ی کالاهای انتخاب‌شده؟">اعمال</button>
   </div>
   {% endif %}
-  <table class="product-table-responsive">
-    <thead>
-      <tr>
-        <th style="width:32px"><input type="checkbox" onclick="this.closest('table').querySelectorAll('input[name=product_ids]').forEach(c=>c.checked=this.checked)"></th>
-        <th>کالا</th><th>دسته‌بندی</th><th>برند</th><th>نوع</th><th>قیمت</th><th>موجودی</th><th>فروش رفته</th><th>وضعیت</th><th>عملیات</th>
+  <table class="product-table-responsive" role="table" aria-label="فهرست کالاها">
+    <colgroup>
+      <col class="products-col-select"><col><col class="products-col-category"><col class="products-col-brand">
+      <col class="products-col-type"><col class="products-col-price"><col class="products-col-stock">
+      <col class="products-col-sold"><col class="products-col-status"><col class="products-col-actions">
+    </colgroup>
+    <thead role="rowgroup">
+      <tr role="row">
+        <th scope="col" aria-label="انتخاب کالا"></th>
+        <th scope="col">کالا</th><th scope="col">دسته‌بندی</th><th scope="col">برند</th><th scope="col">نوع</th><th scope="col">قیمت</th><th scope="col">موجودی</th><th scope="col">فروش رفته</th><th scope="col">وضعیت</th><th scope="col">عملیات</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody role="rowgroup">
       {% for product in products %}
-      <tr>
-        <td data-label=""><input type="checkbox" name="product_ids" value="{{ product.pk }}"></td>
-        <td data-label="کالا">
+      <tr role="row">
+        <td role="cell" data-label=""><input type="checkbox" name="product_ids" value="{{ product.pk }}" aria-label="انتخاب {{ product.name }}"></td>
+        <td role="cell" data-label="کالا">
           <div class="prod-cell">
             <div class="thumb thumb-fit" style="background:{{ product.tint|default:'var(--primary-soft)' }}">
               {% if product.cover_image %}
@@ -54,50 +60,65 @@
               {{ product.icon|default:"🛍️" }}
               {% endif %}
             </div>
-            <div><b>{{ product.name }}</b><small dir="ltr">SKU: {{ product.sku }}</small></div>
+            <div class="products-identity"><b>{{ product.name }}</b><small dir="ltr">SKU: {{ product.sku }}</small></div>
           </div>
         </td>
-        <td data-label="دسته‌بندی" class="ellipsis-cell" title="{{ product.category|category_chain }}">{{ product.category|category_chain }}</td>
-        <td data-label="برند" class="ellipsis-cell">{{ product.brand.name|default:"—" }}</td>
-        <td data-label="نوع">
-          <span class="badge {{ product.product_type|product_type_badge }}">{{ product.product_type|product_type_label }}</span>
-          {% if product.product_type == "variable" %}
-          <div style="font-size:11px;color:var(--muted);margin-top:4px;white-space:nowrap">
-            {{ product.active_variant_count|fa_number }} از {{ product.variant_count|fa_number }} تنوع فعال
-            {% if product.active_variant_stock %}<br>موجودی تنوع‌ها: {{ product.active_variant_stock|fa_number }}{% endif %}
+        <td role="cell" data-label="دسته‌بندی">
+          <span>{{ product.category|category_chain }}</span>
+        </td>
+        <td role="cell" data-label="برند"><span>{{ product.brand.name|default:"—" }}</span></td>
+        <td role="cell" data-label="نوع">
+          <div>
+            <span class="badge {{ product.product_type|product_type_badge }}">{{ product.product_type|product_type_label }}</span>
+            {% if product.product_type == "variable" %}
+            <div class="products-type-meta">
+              {{ product.active_variant_count|fa_number }} از {{ product.variant_count|fa_number }} تنوع فعال
+              {% if product.active_variant_stock %}<br>موجودی تنوع‌ها: {{ product.active_variant_stock|fa_number }}{% endif %}
+            </div>
+            {% endif %}
           </div>
-          {% endif %}
         </td>
-        <td data-label="قیمت">
-          {% if product|is_price_range %}
-          <b>{{ product|price_range_min|toman }} – {{ product|price_range_max|toman }}</b>
-          {% else %}
-          <b>{{ product.final_price|toman }}</b>
-          {% if product.discount_percent %}<br><small style="color:var(--red-ink);text-decoration:line-through">{{ product.price|toman }}</small>{% endif %}
-          {% endif %}
+        <td role="cell" data-label="قیمت">
+          <div>
+            {% if product|is_price_range %}
+            <b>{{ product|price_range_min|toman }} – {{ product|price_range_max|toman }}</b>
+            {% else %}
+            <b>{{ product.final_price|toman }}</b>
+            {% if product.discount_percent %}<br><small style="color:var(--red-ink);text-decoration:line-through">{{ product.price|toman }}</small>{% endif %}
+            {% endif %}
+          </div>
         </td>
-        <td data-label="موجودی">
+        <td role="cell" data-label="موجودی">
           {% if product.product_type == "variable" %}
           <b>{{ product.active_variant_stock|default:0|fa_number }}</b>
           {% else %}
           <b>{{ product.stock|fa_number }}</b>
           {% endif %}
         </td>
-        <td data-label="فروش رفته">{{ product.sold_count|fa_number }}</td>
-        <td data-label="وضعیت"><span class="badge {{ product|product_status_badge }}">{{ product|product_status_label }}</span></td>
-        <td data-label="عملیات" class="v-actions">
-          <a class="btn btn-sm" title="ویرایش" aria-label="ویرایش" href="{% url 'dashboard:product-edit' product.pk %}">✏️</a>
-          <a class="btn btn-sm" title="پیش‌نمایش" aria-label="پیش‌نمایش" href="{% url 'dashboard:product-preview' product.pk %}" target="_blank" rel="noopener">👁️</a>
-          <button type="button" class="btn btn-sm" title="تصاویر" aria-label="تصاویر" hx-get="{% url 'dashboard:product-images' product.pk %}" hx-target="#admin-modal-content" hx-swap="innerHTML" @click="modalOpen = true">🖼️</button>
-          {% if product.product_type == "variable" %}
-          <a class="btn btn-sm btn-primary" title="پیکربندیِ تنوع‌ها" href="{% url 'dashboard:product-options' product.pk %}">⚙️ تنوع‌ها</a>
-          {% endif %}
-          <button type="button" class="btn btn-sm btn-danger" title="حذف" aria-label="حذف" hx-post="{% url 'dashboard:product-delete' product.pk %}" hx-target="#productsTableWrap" hx-swap="innerHTML" hx-confirm="آیا از حذف «{{ product.name }}» مطمئن هستید؟">🗑️</button>
+        <td role="cell" data-label="فروش رفته">{{ product.sold_count|fa_number }}</td>
+        <td role="cell" data-label="وضعیت"><span class="badge {{ product|product_status_badge }}">{{ product|product_status_label }}</span></td>
+        <td role="cell" data-label="عملیات">
+          <div class="products-actions">
+            <div class="products-primary-actions">
+              <a class="btn btn-sm products-icon-action" title="ویرایش" aria-label="ویرایش" href="{% url 'dashboard:product-edit' product.pk %}">✏️</a>
+              {% if product.product_type == "variable" %}
+              <a class="btn btn-sm btn-primary" title="پیکربندیِ تنوع‌ها" href="{% url 'dashboard:product-options' product.pk %}">⚙️ تنوع‌ها</a>
+              {% endif %}
+            </div>
+            <details class="products-more">
+              <summary class="btn btn-sm" aria-label="عملیات بیشتر برای {{ product.name }}"><span aria-hidden="true">⋯</span> بیشتر</summary>
+              <div class="products-secondary-actions">
+                <a class="btn btn-sm" href="{% url 'dashboard:product-preview' product.pk %}" target="_blank" rel="noopener">👁️ پیش‌نمایش</a>
+                <button type="button" class="btn btn-sm" hx-get="{% url 'dashboard:product-images' product.pk %}" hx-target="#admin-modal-content" hx-swap="innerHTML" @click="modalOpen = true">🖼️ تصاویر</button>
+                <button type="button" class="btn btn-sm btn-danger" hx-post="{% url 'dashboard:product-delete' product.pk %}" hx-target="#productsTableWrap" hx-swap="innerHTML" hx-confirm="آیا از حذف «{{ product.name }}» مطمئن هستید؟">🗑️ حذف</button>
+              </div>
+            </details>
+          </div>
         </td>
       </tr>
       {% empty %}
-      <tr>
-        <td colspan="10">
+      <tr role="row">
+        <td role="cell" colspan="10">
           {% if has_active_filters %}
           <div style="text-align:center;color:var(--muted);padding:30px">
             <p style="margin:0 0 8px">🔍 کالایی با این فیلترها یافت نشد.</p>

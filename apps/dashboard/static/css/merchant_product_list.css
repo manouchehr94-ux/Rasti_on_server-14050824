@@ -1,0 +1,137 @@
+.products-list-card {
+  container: product-list / inline-size;
+  min-inline-size: 0;
+}
+
+#productsTableWrap {
+  padding-inline: 12px;
+}
+
+.products-list-card .inp {
+  max-inline-size: 100%;
+}
+
+.admin-body .product-table-responsive {
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.admin-body .product-table-responsive :is(th, td) {
+  padding-inline: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.products-col-select { width: 2.25rem; }
+.products-col-category { width: 17%; }
+.products-col-brand { width: 7%; }
+.products-col-type { width: 9%; }
+.products-col-price { width: 11%; }
+.products-col-stock, .products-col-sold { width: 5.5%; }
+.products-col-status { width: 8%; }
+.products-col-actions { width: 8.75rem; }
+
+.product-table-responsive .prod-cell {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.products-identity { min-inline-size: 0; }
+.product-table-responsive .prod-cell :is(b, small) {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+.products-type-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-block-start: 4px;
+}
+
+.product-table-responsive .badge {
+  max-inline-size: 100%;
+  padding-inline: 7px;
+}
+.product-table-responsive .badge::before { flex-shrink: 0; }
+
+.products-actions {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-inline-size: 0;
+}
+.products-primary-actions, .products-secondary-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.products-actions .btn {
+  max-inline-size: 100%;
+  min-block-size: 32px;
+  white-space: normal;
+  padding-inline: 7px;
+}
+.products-actions .products-icon-action {
+  min-inline-size: 32px;
+  justify-content: center;
+}
+.products-more {
+  max-inline-size: 100%;
+}
+.products-more summary {
+  display: inline-flex;
+  list-style: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.products-more summary::-webkit-details-marker { display: none; }
+.products-more[open] summary { margin-block-end: 5px; }
+
+@container product-list (width <= 800px) {
+  .product-table-responsive :is(colgroup, thead) { display: none; }
+  .product-table-responsive, .product-table-responsive tbody { display: block; }
+  .product-table-responsive tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 12px;
+    margin-block-end: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .admin-body .product-table-responsive td {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    min-inline-size: 0;
+    gap: 8px;
+    padding: 7px 2px;
+    border: 0;
+    border-block-end: 1px dashed var(--border);
+  }
+  .product-table-responsive td[data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    flex: none;
+  }
+  .product-table-responsive :is(td[colspan], td[data-label="کالا"], td[data-label="دسته‌بندی"], td[data-label="عملیات"]) {
+    grid-column: 1 / -1;
+  }
+  .admin-body .product-table-responsive :is(td[colspan], td[data-label="عملیات"]) { border: 0; }
+  .product-table-responsive .products-actions { justify-items: end; }
+  .product-table-responsive .products-actions .btn { min-block-size: 36px; }
+}
+@container product-list (width <= 420px) {
+  .product-table-responsive tr { grid-template-columns: minmax(0, 1fr); }
+  .product-table-responsive .products-actions .btn { min-block-size: 40px; }
+}
+
+.products-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

@@ -1,9 +1,13 @@
 {% extends "dashboard/base_admin.html" %}
-{% load persian %}
+{% load persian storefront_builder_extras %}
 
 {% block title %}مدیریت کالاها | پنل مدیریت {{ SHOP_NAME }}{% endblock %}
 {% block page_title %}مدیریت کالاها{% endblock %}
 {% block page_sub %}افزودن، ویرایش و مدیریت موجودی محصولات{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static_v 'css/merchant_product_list.css' %}">
+{% endblock %}
 
 {% block content %}
 {% if selected_health %}
@@ -38,7 +42,7 @@
     <div style="font-size:12.5px;color:var(--muted)">کالایِ کم‌موجود</div>
   </div>
 </div>
-<div class="card">
+<div class="card products-list-card">
   <div class="card-head">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <input class="inp" id="prodSearch" name="q" value="{{ q }}" placeholder="جستجوی کالا..." style="width:220px"
@@ -103,7 +107,7 @@
       </a>
     </div>
   </div>
-  <div class="table-wrap" id="productsTableWrap">
+  <div id="productsTableWrap">
     {% include "dashboard/partials/products_table_inner.html" %}
   </div>
 </div>
