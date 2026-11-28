@@ -148,7 +148,17 @@
           <h2>دسته‌بندی</h2>
           <p>گروهِ اصلی، زیرگروه، گروهِ دوم (مجموعه‌ی فروش) و کشورِ سازنده.</p>
         </div>
-        {% include "dashboard/partials/product_category_select.html" with selected_category_id=form.category.value %}
+        {% include "dashboard/partials/product_category_select.html" %}
+        {% if stored_category_needs_leaf %}
+          <p class="field-help">گروه ذخیره‌شده: {{ selected_category_path }}. برای ذخیره، زیرگروه نهایی را انتخاب کنید.</p>
+        {% endif %}
+        {% if imported_specifications %}
+          <dl>
+            {% for spec in imported_specifications %}
+              <dt>{{ spec.label }}</dt><dd>{{ spec.value }}</dd>
+            {% endfor %}
+          </dl>
+        {% endif %}
         {% for err in form.category.errors %}<div class="pe-field-error">{{ err }}</div>{% endfor %}
 
         <div class="grid" style="margin-top:15px">

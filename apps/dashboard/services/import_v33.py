@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.cell import MergedCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.workbook.defined_name import DefinedName
 
 from apps.catalog.models import Attribute, AttributeValue, Brand, Category, Product, ProductVariant
@@ -46,6 +47,13 @@ RS = ImportRowResult.RowStatus
 STATUSES = {"فعال": Product.Status.ACTIVE, "غیرفعال": Product.Status.INACTIVE, "پیش‌نویس": Product.Status.DRAFT}
 NO_TAX_CLASS = "— بدون دسته مالیاتی —"
 OPERATIONS = {"": "auto", "خودکار": "auto", "ایجاد": "create", "به‌روزرسانی": "update"}
+NUMERIC_BOUNDS = {
+    "price": (0, 999_999_999_999),
+    "stock": (0, 2**31 - 1),
+    "weight": (0, 2**31 - 1),
+    "product_id": (1, 2**63 - 1),
+    "variant_id": (1, 2**63 - 1),
+}
 DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
@@ -82,11 +90,23 @@ class References:
         self.children = defaultdict(list)
         for row in self.categories:
             self.children[row.parent_id].append(row)
+        by_id = {row.pk: row for row in self.categories}
+        self.leaves = defaultdict(list)
+        self.ancestors = {}
+        for row in self.categories:
+            if row.parent_id is None or self.children.get(row.pk):
+                continue
+            chain = [row]
+            while chain[-1].parent_id in by_id and chain[-1].parent_id not in {node.pk for node in chain}:
+                chain.append(by_id[chain[-1].parent_id])
+            if chain[-1].parent_id is None and all(node.is_active for node in chain):
+                self.leaves[chain[-1].pk].append(row)
+                self.ancestors[row.pk] = {node.pk for node in chain}
         self.brands = list(Brand.objects.filter(store=store).order_by("name", "pk"))
         self.axes = list(Attribute.objects.filter(store=store).prefetch_related("values").order_by("label", "pk"))
         self.taxes = list(TaxClass.objects.filter(store=store).order_by("name", "pk"))
         self.root_labels = _display(self.roots, "name")
-        self.child_labels = {pk: name for children in self.children.values()
+        self.child_labels = {pk: name for children in self.leaves.values()
                              for pk, name in _display(children, "name").items()}
         self.brand_labels = _display(self.brands, "name")
         self.axis_labels = _display(self.axes, "label")
@@ -159,6 +179,89 @@ def _style_workbook(wb, list_end):
     wb[LIST_SHEET].row_dimensions[4].height = 28
 
 
+def _numeric_validations(product):
+    old = product.data_validations.dataValidation
+    old[:] = [rule for rule in old if rule.type == "list"]
+    for key, (minimum, maximum) in NUMERIC_BOUNDS.items():
+        index = KEYS.index(key) + 1
+        column = get_column_letter(index)
+        if key.endswith("_id"):
+            # Excel rounds numbers over 15 digits. Keep identifiers as text;
+            # upload validates the exact digits, bounds and tenant ownership.
+            for row in range(2, 401):
+                product.cell(row, index).number_format = "@"
+            continue
+        label = headers()[index - 1].removesuffix(" *")
+        validation = DataValidation(
+            type="whole", operator="between", formula1=str(minimum), formula2=str(maximum),
+            allow_blank=True, showErrorMessage=True, errorStyle="stop",
+            errorTitle="عدد صحیح لازم است",
+            error=f"«{label}» باید عدد صحیح بین {minimum} و {maximum} باشد.",
+        )
+        product.add_data_validation(validation)
+        validation.add(f"{column}2:{column}400")
+
+
+def _write_instructions(guide, contract):
+    guide_text = {
+        "A2": "تعریف‌های جدید را در «فهرست‌ها» وارد کنید. در پنل همان فروشگاه از «ورود اطلاعات» پیش‌نمایش بگیرید و سپس ثبت نهایی کنید.",
+        "C6": "در ردیف اول هر گروه، نام، دسته اصلی، زیرگروه نهایی و دیگر اطلاعات مشترک را وارد کنید.",
+        "D6": "در ستون A همه ردیف‌های تنوع، همان کد ردیف اول را تکرار کنید.",
+        "C9": "پس از ثبت، نتیجه و شناسه هر ردیف را در پنل بررسی کنید.",
+        "E13": "برای کالای ساده ستون‌های F تا K را خالی بگذارید.",
+        "D16": "قیمت نهایی همین ردیف به تومان، عدد صحیح از ۰ تا ۹۹۹۹۹۹۹۹۹۹۹۹.",
+        "E16": "برای تنوع، قیمت نهایی مستقل است. اختلاف با قیمت پایه را ننویسید.",
+        "D17": "موجودی نهایی، عدد صحیح از ۰ تا ۲۱۴۷۴۸۳۶۴۷. صفر را فقط برای موجودی واقعاً صفر بنویسید.",
+        "E17": "برای ایجاد، خالی خطاست. برای به‌روزرسانی، خالی یعنی موجودی تغییر نکند.",
+        "D19": "فقط برای عملیات «به‌روزرسانی» و با شناسه واقعی همین فروشگاه؛ به‌صورت متن.",
+        "C21": "نام جدید را اول در شیت «فهرست‌ها» تعریف کنید، سپس در ردیف کالا انتخاب کنید.",
+        "C23": "هر ردیف یک ترکیب است و باید محورهای همان کالا را داشته باشد.",
+        "E25": "دو شیت «ورود محصولات» و «فهرست‌ها» پردازش می‌شوند.",
+        "C26": "دسته‌های مالیاتی از همین فروشگاه می‌آیند.",
+        "E26": "قالب دسته مالیاتی جدید ایجاد نمی‌کند.",
+        "B30": "یک کالای ساده و یک کالای دارای دو تنوع با داده فرضی.",
+        "C31": "محصولات از این شیت و تعاریف از شیت «فهرست‌ها» خوانده می‌شوند.",
+        "B32": "هنگام دانلود، فقط گزینه‌های همان فروشگاه پر می‌شوند.",
+        "B33": "نگاشت ثابت ۲۵ ستون و قواعد اعتبارسنجی برای بررسی فنی.",
+        "C37": "در «فهرست‌ها» دسته اصلی را یک‌بار در ستون A بنویسید.",
+        "D37": "زیرگروه‌ها را در ستون B، از همان ردیف، زیر هم بنویسید.",
+        "C38": "مثال: پوشاک در A5، نخستین زیرگروه در B5، بقیه در B6 و B7.",
+        "D38": "دسته بعدی را بعد از آخرین زیرگروه در ستون A آغاز کنید.",
+        "C40": "در «فهرست‌ها» ویژگی را در E و مقادیرش را در F بنویسید.",
+        "C41": "برند D، مالیات G، وضعیت H و بله/خیر I در شیت «فهرست‌ها».",
+    }
+    contract_text = {
+        "A2": "محصولات و تعاریف در پیش‌نمایش بررسی می‌شوند و فقط پس از تأیید نهایی ثبت می‌شوند.",
+        "D9": "ردیف اول ایجاد یا تغییر دسته",
+        "E9": "زیرگروه نهایی همان فروشگاه و همان گروه اصلی. خالی در به‌روزرسانی یعنی زیرگروه معتبر قبلی حفظ شود.",
+        "E17": "قیمت نهایی صحیح و غیرمنفی به تومان، تا ۹۹۹۹۹۹۹۹۹۹۹۹.",
+        "E18": "موجودی صحیح از صفر تا ۲۱۴۷۴۸۳۶۴۷. برای ایجاد خالی نباشد.",
+        "E21": "وزن صحیح به گرم، از صفر تا ۲۱۴۷۴۸۳۶۴۷. خالی مجاز است.",
+        "E22": "فعال/غیرفعال/پیش‌نویس. پیش‌فرض ایجاد پیش‌نویس است.",
+        "E23": "بله/خیر. در ایجاد، خالی یعنی پیش‌فرض مدل.",
+        "C33": "قیمت نهایی هر تنوع مستقیماً به تومان ثبت می‌شود. قیمت تنوع‌های دیگر تغییر نمی‌کند.",
+        "C40": "واحد قیمت فایل و مقدار ثبت‌شده تومان است. فقط مقدار صحیح پذیرفته می‌شود.",
+        "C45": "شیت نمونه شامل یک کالای ساده و دو ردیف تنوع از یک کالای فرضی است.",
+        "C50": "شکست هر تعریف، محصول، تنوع یا ثبت موجودی همه تغییرات همان ورود را برمی‌گرداند.",
+        "B74": "فهرست‌ها!A5:A",
+        "B75": "فهرست‌ها!A5:B",
+        "C75": "A دسته اصلی، B زیرگروه همان دسته. انتخاب D در ورود محصولات به C وابسته است.",
+        "E75": "هر زیرگروه در محدوده دسته فعال خودش اعتبارسنجی می‌شود.",
+        "B76": "فهرست‌ها!D و E",
+        "C76": "D برند، E نام ویژگی فقط در نخستین ردیف بلوک مقدارها.",
+        "B77": "فهرست‌ها!E5:F",
+        "C77": "E ویژگی، F مقادیرش. کشوهای G/I/K در محصولات به F/H/J وابسته‌اند.",
+    }
+    for sheet, texts in ((guide, guide_text), (contract, contract_text)):
+        for cell, value in texts.items():
+            sheet[cell] = value
+    guide["D39"] = "برای کالای تازه یک زیرگروه نهایی لازم است؛ از میان گزینه‌های ستون D انتخاب کنید."
+    guide["C43"] = "قیمت L، موجودی M و وزن P را به شکل عدد صحیح وارد کنید؛ فرمول و اعشار مجاز نیست."
+    guide["D43"] = "در بارگذاری، متنِ صرفاً رقمی فارسی یا انگلیسی هم خوانده می‌شود."
+    guide["B43"] = "ورود اعداد"
+    guide.row_dimensions[43].height = 38
+
+
 def workbook(store):
     wb = _template()
     ref = References(store)
@@ -166,12 +269,8 @@ def workbook(store):
     contract = wb["قرارداد فنی"]
     product = wb[SHEET]
     guide = wb["راهنما"]
-    guide["A2"] = "تعریف‌های جدید را در «فهرست‌ها» وارد کنید. سپس در «ورود اطلاعات» همین فروشگاه فایل را پیش‌نمایش و ثبت نهایی کنید."
-    guide["C37"] = "در «فهرست‌ها» نام دسته اصلی را یک‌بار در ستون A بنویسید."
-    guide["D37"] = "زیرگروه‌ها را در ستون B از همان ردیف، زیر هم وارد کنید."
-    guide["D38"] = "دسته بعدی را پس از آخرین زیرگروه در ستون A آغاز کنید."
-    guide["C40"] = "در «فهرست‌ها» ویژگی را در E و مقادیرش را در F بنویسید."
-    contract["A2"] = "قالب ورود محصولات ۳.۳. تعریف‌های تازه فقط پس از تأیید نهایی ذخیره می‌شوند."
+    _write_instructions(guide, contract)
+    _numeric_validations(product)
     old_headings = [cell.value for cell in lists[4][:8]]
     for merged in ("A1:H1", "A2:H2"):
         lists.unmerge_cells(merged)
@@ -181,10 +280,8 @@ def workbook(store):
     for col, width in zip("ABCDEFGHI", (25, 28, 5, 24, 21, 23, 24, 17, 14), strict=True):
         lists.column_dimensions[col].width = width
         lists.column_dimensions[col].hidden = False
-    notes = []
     for merged in list(lists.merged_cells.ranges):
         if merged.min_row >= 5:
-            notes.append((merged.min_row, lists.cell(merged.min_row, merged.min_col).value))
             lists.unmerge_cells(str(merged))
     for row in lists.iter_rows(min_row=5, max_col=13):
         for cell in row:
@@ -194,9 +291,16 @@ def workbook(store):
         for cell in row:
             if cell.value is not None:
                 cell.value = None
-    # Independent of any tenant data: a vendor can copy the structure of this demo row.
-    for col, value in {1: "DEMO-001", 2: "کالای نمونه", 3: "دسته نمونه", 12: 250000, 13: 10}.items():
-        wb["نمونه تکمیل‌شده"].cell(2, col, value)
+    # Independent of tenant data; merchants can copy the row structure.
+    examples = (
+        {1: "DEMO-001", 2: "کالای ساده نمونه", 3: "دسته نمونه", 4: "زیرگروه نمونه", 12: 250000, 13: 10},
+        {1: "DEMO-002", 2: "کالای چندتنوعی نمونه", 3: "دسته نمونه", 4: "زیرگروه نمونه",
+         6: "اندازه", 7: "کوچک", 12: 350000, 13: 12},
+        {1: "DEMO-002", 6: "اندازه", 7: "بزرگ", 12: 410000, 13: 0},
+    )
+    for row, example in enumerate(examples, 2):
+        for col, value in example.items():
+            wb["نمونه تکمیل‌شده"].cell(row, col, value)
 
     def write(col, values):
         for i, value in enumerate(values, 5):
@@ -215,7 +319,7 @@ def workbook(store):
     axes = [obj for obj in ref.axes if obj.is_active and obj.is_variant_axis
             and (obj.category_id is None or obj.category_id in active_ids)]
     category_rows = list(grouped(roots, ref.root_labels,
-                                 lambda root: (ref.child_labels[x.pk] for x in ref.children[root.pk] if x.is_active)))
+                                 lambda root: (ref.child_labels[x.pk] for x in ref.leaves[root.pk])))
     axis_rows = list(grouped(axes, ref.axis_labels,
                              lambda axis: (value.label for value in axis.values.all() if value.is_active)))
     last = max(write(8, list(STATUSES)), write(9, ["بله", "خیر"]),
@@ -224,12 +328,9 @@ def workbook(store):
                write(5, [row[0] for row in axis_rows]), write(6, [row[1] for row in axis_rows]),
                write(7, [ref.tax_labels[t.pk] for t in ref.taxes if t.is_active] + [NO_TAX_CLASS]))
     limit = max(120, last + 40)
-    # Notes belong in the guide: column A of Lists now carries actual categories.
-    for index, (_, note) in enumerate(sorted(notes), guide.max_row + 2):
-        if note:
-            xlsx_utils.set_value(guide.cell(index, 1), note)
-            guide.merge_cells(start_row=index, start_column=1, end_row=index, end_column=6)
-            guide.row_dimensions[index].height = 32
+    for row in range(LIST_FIRST_ROW, limit + 1):
+        for column in LIST_COLUMNS.values():
+            lists.cell(row, column).number_format = "@"
     helper_end = limit
     for source, detail, label, start, count, packed, packed_start in (
         ("A", "B", "H", "I", "J", "T", "V"),
@@ -250,11 +351,11 @@ def workbook(store):
             contract[f"{start}{row}"] = f'=IF({label}{row}="","",MATCH({_excel_literal(f"{label}{row}")},{span},0))'
             contract[f"{packed_start}{row}"] = (
                 f'=IF({label}{row}="","",IF({start}{row}=1,1,1+'
-                f'COUNTIF(INDEX({children},1):INDEX({children},{start}{row}-1),"?*")))'
+                f'COUNTA(INDEX({children},1):INDEX({children},{start}{row}-1))))'
             )
             contract[f"{count}{row}"] = (
-                f'=IF({label}{row}="","",COUNTIF(INDEX({children},{start}{row}):'
-                f'INDEX({children},IF({label}{row+1}="",ROWS({children}),{start}{row+1}-1)),"?*"))'
+                f'=IF({label}{row}="","",COUNTA(INDEX({children},{start}{row}):'
+                f'INDEX({children},IF({label}{row+1}="",ROWS({children}),{start}{row+1}-1))))'
             )
     blank_cell = "'قرارداد فنی'!$O$5"
 
@@ -272,8 +373,8 @@ def workbook(store):
     for root in roots:
         root_label = ref.root_labels[root.pk]
         contexts.append((root_label, "", {root.pk}))
-        contexts.extend((root_label, ref.child_labels[child.pk], {root.pk, child.pk})
-                        for child in ref.children[root.pk] if child.is_active)
+        contexts.extend((root_label, ref.child_labels[child.pk], ref.ancestors[child.pk])
+                        for child in ref.leaves[root.pk])
     # Detect axis names first entered in this workbook. An existing axis
     # retains its store category restriction even if its row is moved.
     for row, axis in enumerate(axes, 5):
@@ -311,6 +412,15 @@ def workbook(store):
     for col in "HIJKLMNOPQRSTUVWXYZ":
         contract.column_dimensions[col].hidden = True
     contract.column_dimensions["AA"].hidden = True
+    flat_lists = {"E": ("D", "AB"), "Q": ("H", "AC"), "R": ("I", "AD"), "S": ("G", "AE")}
+    for source, packed in flat_lists.values():
+        contract.column_dimensions[packed].hidden = True
+        span = f"'فهرست‌ها'!${source}$5:${source}${limit}"
+        for row in range(5, limit + 1):
+            contract[f"{packed}{row}"] = (
+                f'=IFERROR(INDEX({span},_xlfn.AGGREGATE(15,6,(ROW({span})-4)/'
+                f'({span}<>""),ROWS(${packed}$5:{packed}{row})))&"","")'
+            )
 
     def input_column(column, first=1):
         return f"'{SHEET}'!${column}${first}:${column}$400"
@@ -319,8 +429,10 @@ def workbook(store):
         return f"INDEX({input_column(column)},ROW())"
 
     def picked(column):
-        position = f"MATCH({_excel_literal(current("A"))},{input_column('A', 2)},0)"
-        return f'IF({current(column)}<>"",{current(column)},IFERROR(INDEX({input_column(column, 2)},{position}),""))'
+        group = _excel_literal(current("A"))
+        codes = input_column("A", 2)
+        position = f'MATCH({group},INDEX({codes}&"",0),0)'
+        return f'IF({current(column)}<>"",{current(column)},IFERROR(INDEX({input_column(column, 2)},{position})&"",""))'
 
     def technical(column, last):
         address = f"'قرارداد فنی'!${column}$5:${column}${last}"
@@ -340,10 +452,11 @@ def workbook(store):
         column = str(dv.sqref).split("2", 1)[0]
         formula = dv.formula1.replace("$120", f"${limit}").replace("$64", f"${helper_end}")
         named = column in {"D", "F", "G", "H", "I", "J", "K"}
-        list_column = {"E": "D", "Q": "H", "R": "I", "S": "G"}.get(column)
-        if list_column:
-            address = f"'فهرست‌ها'!${list_column}$5"
-            formula = f'OFFSET(INDIRECT("{address}"),0,0,MAX(1,COUNTA(INDIRECT("{address}:${list_column}${limit}"))),1)'
+        if column in flat_lists:
+            _, packed = flat_lists[column]
+            address = f"'قرارداد فنی'!${packed}$5"
+            span = technical(packed, helper_end)
+            formula = f'OFFSET(INDIRECT("{address}"),0,0,MAX(1,COUNTIF({span},"?*")),1)'
         elif column == "D":
             formula = category_rule
         elif column in {"F", "H", "J"}:
@@ -465,12 +578,21 @@ def plan_lists(store, rows):
                         raise InvalidRow(kind, "ابتدا والد این گزینه را در ستون مجاور تعریف کنید.")
                     parent, parent_record = contexts[parent_kind]
                     if kind == "child":
-                        records = ref.children[parent_record.pk] if parent_record else []
+                        records = ref.leaves[parent_record.pk] if parent_record else []
                         display = ref.child_labels
+                        # Older generated files listed a root's direct children,
+                        # including intermediate nodes. Recognize existing
+                        # declarations without making those nodes assignable.
+                        if parent_record and not any(
+                            normalization_key(label) == normalization_key(name)
+                            for obj in records for label in (obj.name, display[obj.pk])
+                        ):
+                            records = ref.children[parent_record.pk]
+                            display = _display(records, "name")
                     else:
                         records = list(parent_record.values.all()) if parent_record else []
                         display = _display(records, "label")
-                record = lookup(name, records, display, kind, create=True)
+                record = lookup(name, records, display, kind, create=True, numeric_labels=kind == "value1")
                 if kind == "axis1" and record and not record.is_variant_axis:
                     raise InvalidRow(kind, "این ویژگی محور تنوع نیست.")
                 if kind == "value1" and record is None and parent_record and parent_record.data_type not in Attribute.CHOICE_DATA_TYPES:
@@ -478,16 +600,16 @@ def plan_lists(store, rows):
                 if kind == "child" and record is None and any(
                     c.parent_id and normalization_key(c.name) == normalization_key(name) for c in ref.categories
                 ):
-                    raise InvalidRow(kind, "این زیرگروه به دسته اصلی دیگری تعلق دارد.")
+                    raise InvalidRow(kind, "این زیرگروه زیر دسته دیگری ثبت شده است؛ دسته درست را در ستون مجاور انتخاب کنید.")
                 parent_identity = parent_record.pk if parent_record else (parent[2] if parent else None)
                 key = (kind, parent_identity, identity(record, name))
-                if key in seen:
-                    raise InvalidRow(kind, "تعریف تکراری در شیت «فهرست‌ها».")
                 if record is None:
                     text_value(row, kind, 120)
-                seen.add(key)
                 if kind in ("category", "axis1"):
                     contexts[kind] = (definition_key(kind, name), record)
+                if key in seen:
+                    raise InvalidRow(kind, "تعریف تکراری است؛ نام والد را یک‌بار وارد کنید و مقادیرش را زیر هم بنویسید.")
+                seen.add(key)
                 if record is None:
                     declared.add(definition_key(kind, name, parent_identity))
                     additions.append((kind, name, parent, getattr(parent_record, "pk", None)))
@@ -538,21 +660,22 @@ def text_value(row, key, size, required=False):
     return value
 
 
-def integer(row, key, maximum, required=False):
+def integer(row, key, required=False):
+    minimum, maximum = NUMERIC_BOUNDS[key]
     raw = row.get(key, "").strip().translate(DIGITS)
     if not raw and not required:
         return None
-    if not re.fullmatch(r"[0-9]{1,19}", raw) or int(raw) > maximum:
-        raise InvalidRow(key, f"عدد صحیح بین صفر و {maximum} لازم است.")
+    if not re.fullmatch(r"[0-9]{1,19}", raw) or not minimum <= int(raw) <= maximum:
+        raise InvalidRow(key, f"عدد صحیح بین {minimum} و {maximum} لازم است.")
     return int(raw)
 
 
-def lookup(name, records, labels, column, *, create=False):
+def lookup(name, records, labels, column, *, create=False, numeric_labels=False):
     key = normalization_key(name)
     matching = [obj for obj in records if normalization_key(labels[obj.pk]) == key]
     if not matching:
         matching = [obj for obj in records if normalization_key(getattr(obj, "label", None) or obj.name) == key]
-    if not matching:
+    if not matching and not (numeric_labels and name.isdecimal()):
         matching = [obj for obj in records if key in {
             normalization_key(getattr(obj, "slug", "")), normalization_key(getattr(obj, "code", "")),
         } or name == str(obj.pk)]
@@ -560,7 +683,7 @@ def lookup(name, records, labels, column, *, create=False):
         return matching[0]
     if matching or not create:
         raise InvalidRow(column, "گزینه یکتا، فعال و متعلق به همین فروشگاه نیست.")
-    if name.isdecimal() or re.search(r"\s\[[0-9]+\]$", name):
+    if (name.isdecimal() and not numeric_labels) or re.search(r"\s\[[0-9]+\]$", name):
         raise InvalidRow(column, "شناسه این گزینه برای این فروشگاه یا وابستگی معتبر نیست.")
     return None
 
@@ -616,19 +739,21 @@ def _specs(text):
 def _common(group, ref, declared):
     data, product = group.common, group.product
     if not product and not data.get("name"):
-        raise InvalidRow("name", "نام کالای جدید الزامی است.")
+        raise InvalidRow("name", "نام کالا در نخستین ردیف هر کد گروه لازم است؛ کد ستون A را بررسی کنید.")
     category_name, child_name, brand_name = (data.get(k, "") for k in ("category", "child", "brand"))
     if category_name:
         group.root = lookup(category_name, ref.roots, ref.root_labels, "category", create=True)
         if not group.root:
             require_definition(declared, "category", category_name)
         if child_name:
-            siblings = ref.children[group.root.pk] if group.root else []
+            siblings = ref.leaves[group.root.pk] if group.root else []
             group.child = lookup(child_name, siblings, ref.child_labels, "child", create=True)
             if not group.child:
                 if any(c.parent_id and normalization_key(c.name) == normalization_key(child_name) for c in ref.categories):
-                    raise InvalidRow("child", "این زیرگروه به دسته انتخاب‌شده تعلق ندارد.")
+                    raise InvalidRow("child", "این گزینه زیرگروه نهاییِ فعالِ دسته ستون C نیست؛ ستون D را دوباره انتخاب کنید.")
                 require_definition(declared, "child", child_name, identity(group.root, category_name))
+        elif not product:
+            raise InvalidRow("child", "برای کالای جدید، زیرگروه نهایی را در ستون D انتخاب کنید.")
     elif not product or child_name:
         raise InvalidRow("category", "دسته اصلی الزامی است.")
     if brand_name:
@@ -646,7 +771,11 @@ def _common(group, ref, declared):
 
 def _axis_pairs(row, group, ref, declared):
     pairs = []
-    category = group.child or group.root or (group.product.category if group.product and not group.common.get("category") else None)
+    category = group.child or group.root
+    if not group.common["child"] and group.product and group.product.category_id:
+        current = group.product.category
+        if not group.common["category"] or (group.root and group.root.pk in ref.ancestors.get(current.pk, ())):
+            category = current
     allowed_category_ids = set()
     while category and category.pk not in allowed_category_ids:
         allowed_category_ids.add(category.pk)
@@ -667,11 +796,13 @@ def _axis_pairs(row, group, ref, declared):
         value = None
         if axis:
             options = list(axis.values.all())
-            value = lookup(value_name, options, _display(options, "label"), value_key, create=True)
+            value = lookup(value_name, options, _display(options, "label"), value_key, create=True, numeric_labels=True)
             if not value and axis.data_type not in Attribute.CHOICE_DATA_TYPES:
                 raise InvalidRow(value_key, "افزودن مقدار به این نوع ویژگی مجاز نیست.")
         else:
             require_definition(declared, axis_key, axis_name)
+            if re.search(r"\s\[[0-9]+\]$", value_name):
+                raise InvalidRow(value_key, "شناسه این مقدار برای ویژگی جدید معتبر نیست.")
         if not value:
             require_definition(declared, value_key, value_name, identity(axis, axis_name))
         pairs.append((axis_identity, axis, axis_name, value, value_name))
@@ -705,15 +836,18 @@ def plan(store, rows, mode, declared):
         if line.errors:
             continue
         try:
-            code = text_value(row, "group", 40, required=True)
+            code = text_value(row, "group", 40)
+            if not code:
+                raise InvalidRow("group", "کد گروه لازم است. برای هر تنوع همان کد ستون A ردیف اول کالا را تکرار کنید.")
             line.group = code
             operation = OPERATIONS.get(row.get("operation", ""))
             if operation is None:
                 raise InvalidRow("operation", "عملیات معتبر نیست.")
-            product_id = integer(row, "product_id", 2**63 - 1)
-            variant_id = integer(row, "variant_id", 2**63 - 1)
+            product_id = integer(row, "product_id")
+            variant_id = integer(row, "variant_id")
             if (product_id is not None or variant_id is not None) and operation != "update":
-                raise InvalidRow("operation", "شناسه داخلی فقط با عملیات به‌روزرسانی مجاز است.")
+                raise InvalidRow("product_id" if product_id is not None else "variant_id",
+                                 "شناسه داخلی را برای ایجاد خالی بگذارید؛ فقط با عملیات به‌روزرسانی مجاز است.")
             if code not in product_cache:
                 product_cache[code] = Product.objects.filter(store=store, sku=code).first()
             product = product_cache[code]
@@ -738,7 +872,7 @@ def plan(store, rows, mode, declared):
                 row.get(f"axis{i}") or row.get(f"value{i}") for i in range(1, 4)
             ) and product.product_type == Product.ProductType.VARIABLE:
                 variants = ProductVariant.objects.filter(store=store, product=product)
-                identified = variants.filter(pk=variant_id).first() if variant_id is not None else variants.filter(sku=line.sku).first()
+                identified = variants.filter(pk=variant_id).first() if variant_id is not None else variants.filter(sku=line.sku.translate(DIGITS)).first()
                 if not identified:
                     raise InvalidRow("variant_id" if variant_id is not None else "sku", "تنوع برای این کالا پیدا نشد.")
                 links = list(identified.option_values.select_related("option", "option_value").order_by("option__position"))
@@ -750,6 +884,8 @@ def plan(store, rows, mode, declared):
                     axis_row[f"value{i}"] = link.option_value.label
             line.pairs = _axis_pairs(axis_row, group, ref, declared)
             combo = _combination(line.pairs)
+            if combo:
+                line.sku = line.sku.translate(DIGITS)
             for key, labels in (
                 ("axis1", [axis.label if axis else name for _, axis, name, _, _ in line.pairs]),
                 ("value1", [value.label if value else name for _, _, _, value, name in line.pairs]),
@@ -792,11 +928,18 @@ def plan(store, rows, mode, declared):
                 raise InvalidRow("operation", "عملیات با رکورد موجود یا حالت ورود سازگار نیست.")
             line.action = "update" if target and operation == "update" else ("skip" if target else "create")
             line.target = target
-            line.price = integer(row, "price", 999_999_999_999, required=line.action == "create")
+            if not group.common["child"] and product:
+                ancestors = ref.ancestors.get(product.category_id, ())
+                if (line.action == "create" and not ancestors) or (
+                    line.action == "update" and group.common["category"]
+                    and (not group.root or group.root.pk not in ancestors)
+                ):
+                    raise InvalidRow("child", "زیرگروه نهایی را در ستون D انتخاب کنید.")
+            line.price = integer(row, "price", required=line.action == "create")
             if line.action == "update" and not combo and line.price is not None and product.active_discount_percent():
                 raise InvalidRow("price", "ابتدا تخفیف فعلی کالای ساده را در پنل تعیین تکلیف کنید.")
-            line.stock = integer(row, "stock", 2**31 - 1, required=line.action == "create")
-            line.weight = integer(row, "weight", 2**31 - 1)
+            line.stock = integer(row, "stock", required=line.action == "create")
+            line.weight = integer(row, "weight")
             line.barcode = text_value(row, "barcode", 64)
             signatures[code].add(combo)
             if combo and line.sku:
@@ -843,8 +986,8 @@ def _save_parent(store, group, first):
             slug=generate_unique_slug(Product, data["name"], store=store),
             status=Product.Status.DRAFT,
         )
-    if data["category"]:
-        product.category = group.child or group.root
+    if data["child"]:
+        product.category = group.child
     if data["brand"]:
         product.brand = group.brand
     if data["tax"]:
@@ -931,7 +1074,9 @@ def outcomes(groups, lines, *, apply=False, store=None, actor=None):
             if apply and line.action != "skip":
                 group = groups[line.group]
                 if group.code not in current:
-                    current[group.code] = _save_parent(store, group, group.lines[0])
+                    parent_line = next((candidate for candidate in group.lines if candidate.action == "update"),
+                                       group.lines[0])
+                    current[group.code] = _save_parent(store, group, parent_line)
                 product = current[group.code]
                 target = _save_variant(store, product, line) if line.pairs else product
                 if line.stock is not None:
@@ -952,6 +1097,8 @@ def outcomes(groups, lines, *, apply=False, store=None, actor=None):
         result.append(RowOutcome(
             row_number=line.number, source_identifier=(getattr(target, "sku", "") or line.sku or line.group),
             status=status, errors=errors,
+            warnings=["عملیات خودکار رکورد موجود را تغییر نمی‌دهد؛ برای تغییر عمدی «به‌روزرسانی» را انتخاب کنید."]
+            if status == RS.SKIPPED else [],
             target_object_type=type(target).__name__ if target else "",
             target_object_id=target.pk if target else None,
             normalized_data_summary={"action": line.action, "product_name": line.name, "v33": True},
