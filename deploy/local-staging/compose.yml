@@ -1,0 +1,95 @@
+name: rastisi-local-p0
+x-app: &app
+  image: rastisi-local-p0:5732e12
+  pull_policy: never
+  environment:
+    DJANGO_DEBUG: "True"
+    DJANGO_CSRF_TRUSTED_ORIGINS: "http://localhost:18080,http://127.0.0.1:18080,http://rastisi.localhost:18080"
+    DJANGO_ALLOWED_HOSTS: "rastisi.localhost"
+    RASTISI_PLATFORM_HOSTS: "rastisi.localhost"
+    DATABASE_URL: "postgresql://staging@postgres:5432/staging"
+    PGPASSWORD: "synthetic-local"
+    RASTISI_RATE_LIMIT_CACHE_URL: "redis://redis:6379/0"
+    DJANGO_EMAIL_BACKEND: "django.core.mail.backends.dummy.EmailBackend"
+    RASTISI_OWNER_SMS_BACKEND: "console"
+    PAYMENTS_SIMULATION_ENABLED: "True"
+    DJANGO_MEDIA_ROOT: "/staging/public"
+    DJANGO_PRIVATE_MEDIA_ROOT: "/staging/private"
+    DJANGO_STATIC_ROOT: "/staging/static"
+  networks: [isolated]
+  dns: ["127.0.0.1"]
+  volumes:
+    - public:/staging/public
+    - private:/staging/private
+    - static:/staging/static
+x-web: &web
+  <<: *app
+  command: ["gunicorn", "--config", "deploy/release/examples/gunicorn-availability.py", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "2", "--timeout", "10", "--no-control-socket", "--pid", "/tmp/gunicorn.pid", "shop_core.wsgi:application"]
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD", "python", "/usr/local/share/staging-smoke.py", "direct"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: staging
+      POSTGRES_PASSWORD: synthetic-local
+      POSTGRES_DB: staging
+    networks: [isolated]
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "staging", "-d", "staging"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    networks: [isolated]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  initializer:
+    <<: *app
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    command: ["sh", "-ec", "install -d -m 0700 /staging/private; mkdir -p /staging/public /staging/static; python manage.py migrate --noinput; printf 'Synthetic staging media\n' > /staging/public/staging.txt; python manage.py collectstatic --noinput"]
+  app-a: *web
+  app-b: *web
+  nginx:
+    image: nginx:1.28-alpine
+    depends_on:
+      app-a: { condition: service_healthy }
+      app-b: { condition: service_healthy }
+    networks: [isolated, edge]
+    dns: ["127.0.0.1"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports: ["127.0.0.1:18080:8080"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./.build/source/deploy/release/examples/nginx-availability-http.conf:/etc/nginx/availability.conf:ro
+      - public:/staging/public:ro
+      - static:/staging/static:ro
+
+networks:
+  isolated:
+    internal: true
+  edge: {}
+volumes:
+  database:
+  public:
+  private:
+  static:

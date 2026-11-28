@@ -1,0 +1,38 @@
+name: Laptop staging rehearsal
+on:
+  pull_request:
+    paths:
+      - 'deploy/local-staging/**'
+      - '.github/workflows/local-staging.yml'
+permissions:
+  contents: read
+jobs:
+  staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: deploy/local-staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash stage.sh check
+      - run: bash stage.sh prepare
+      - run: bash stage.sh up --approve-local
+      - name: Verify the laptop loopback entry point
+        run: |
+          code="$(curl --noproxy '*' --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/)"
+          echo "Loopback HTTP $code"
+          test "$code" = 200
+      - name: Stop one entire Gunicorn instance, verify health, recover a stopped worker and confirm telemetry
+        run: bash stage.sh test
+      - name: Capture fixture status on failure
+        if: failure()
+        run: |
+          bash stage.sh status
+          docker compose --env-file compose.empty.env -f compose.yml logs --tail=25 nginx app-a app-b || true
+      - name: Stop the disposable staging stack
+        if: always()
+        run: bash stage.sh stop
