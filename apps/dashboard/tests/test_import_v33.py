@@ -35,6 +35,9 @@ class UnifiedImportFlow(ImportViewTestCase):
         return load_workbook(BytesIO(response.content))
 
     def upload(self, rows, definitions=()):
+        return self.upload_bytes(self.workbook_bytes(rows, definitions))
+
+    def workbook_bytes(self, rows, definitions=()):
         wb = self.download()
         sheet = wb[import_v33.SHEET]
         for index, row in enumerate(rows, 2):
@@ -46,7 +49,7 @@ class UnifiedImportFlow(ImportViewTestCase):
                 lists.cell(index, import_v33.LIST_COLUMNS[key], value)
         data = BytesIO()
         wb.save(data)
-        return self.upload_bytes(data.getvalue())
+        return data.getvalue()
 
     def upload_bytes(self, data):
         response = self.client.post(reverse("dashboard:import-upload"), {
@@ -124,6 +127,148 @@ class UnifiedImportFlow(ImportViewTestCase):
         if destination := os.getenv("RASTISI_V33_SYNTHETIC_SAMPLE"):
             wb.save(Path(destination))
 
+    def test_merchant_shape_two_simple_and_two_five_variant_groups(self):
+        roots = [Category.objects.create(store=self.store, name=f"گروه فرضی {n}", slug=f"fixture-root-{n}")
+                 for n in range(2)]
+        children = [Category.objects.create(store=self.store, parent=root, name="برگ هم‌نام",
+                                            slug=f"fixture-leaf-{n}") for n, root in enumerate(roots)]
+        axis = Attribute.objects.create(store=self.store, category=roots[1], label="اندازه فرضی", code="fixture-axis",
+                                        is_variant_axis=True, data_type=Attribute.DataType.SELECT)
+        # The merchant workbook mixes digit-only price text with numeric prices
+        # and has Excel numbers in the list of proposed attribute values.
+        rows = [
+            dict(group=f"FIX-S{n}", name=f"کالای ساده {n}", category=roots[0].name,
+                 child=children[0].name, price=price, stock=stock)
+            for n, (price, stock) in enumerate((("۱۵۰۱۲۳", 12), ("250123", "۰")))
+        ]
+        definitions = [dict(value1=n) for n in (5, 10, 15, 20, 25)]
+        for group in range(2):
+            for index, value in enumerate((5, 10, 15, 20, 25)):
+                row = dict(group=f"FIX-V{group}", axis1=axis.label, value1=value,
+                           price=700123 + 1000 * group + index, stock=index)
+                if index == 0:
+                    row.update(name=f"کالای چندتنوعی {group}", category=roots[1].name, child=children[1].name)
+                rows.append(row)
+        workbook = self.workbook_bytes(rows, definitions)
+        if destination := os.getenv("RASTISI_V33_MERCHANT_FIXTURE"):
+            Path(destination).write_bytes(workbook)
+        job = self.upload_bytes(workbook)
+        self.assertEqual(job.invalid_rows, 0, list(job.row_results.values("errors")))
+        self.assertFalse(Product.objects.filter(store=self.store, sku__startswith="FIX-").exists())
+        self.assertFalse(axis.values.exists())
+        self.confirm(job)
+        self.assertEqual(job.status, ImportJob.Status.COMPLETED, list(job.row_results.values("errors")))
+        products = Product.objects.filter(store=self.store, sku__startswith="FIX-")
+        self.assertEqual(products.count(), 4)
+        self.assertEqual((products.get(sku="FIX-S0").price, products.get(sku="FIX-S0").stock), (150123, 12))
+        for group in range(2):
+            product = products.get(sku=f"FIX-V{group}")
+            self.assertEqual(product.category, children[1])
+            self.assertEqual(list(product.variants.order_by("price").values_list("price", "stock")),
+                             [(700123 + 1000 * group + index, index) for index in range(5)])
+        self.assertCountEqual(axis.values.values_list("label", flat=True), ("5", "10", "15", "20", "25"))
+        replay = self.upload_bytes(workbook)
+        self.confirm(replay)
+        self.assertEqual((replay.status, replay.skipped_rows), (ImportJob.Status.COMPLETED, replay.total_rows),
+                         list(replay.row_results.values("errors")))
+
+    def test_every_column_survives_confirm_edit_and_reimport(self):
+        middle = Category.objects.create(store=self.store, parent=self.category, name="دسته میانی", slug="fixture-middle")
+        leaf = Category.objects.create(store=self.store, parent=middle, name="برگ نهایی", slug="fixture-final")
+        tax = TaxClass.objects.create(store=self.store, name="مالیات فرضی", code="fixture-tax")
+        row = dict(group="ROUNDTRIP", name="نام فرضی", category=self.category.name, child=leaf.name,
+                   brand=self.brand.name, axis1="طرح فرضی", value1="مقدار طرح", axis2="جنس فرضی",
+                   value2="مقدار جنس", axis3="نوع فرضی", value3="مقدار نوع", price=654321,
+                   stock=12, sku="ROUNDTRIP-SKU", barcode="001122", weight=0, status="فعال",
+                   shipping="خیر", tax=tax.name, specs="برچسب فرضی: مقدار مشخصه",
+                   seo_title="عنوان فرضی سئو", seo_description="توضیحات فرضی سئو", operation="ایجاد")
+        definitions = [dict(axis1=row[f"axis{i}"], value1=row[f"value{i}"]) for i in range(1, 4)]
+        job = self.upload([row], definitions)
+        self.assertEqual(job.invalid_rows, 0, list(job.row_results.values("errors")))
+        self.confirm(job)
+        self.assertEqual(job.status, ImportJob.Status.COMPLETED, list(job.row_results.values("errors")))
+        item = Product.objects.get(store=self.store, sku=row["group"])
+        variant = item.variants.get()
+        self.assertEqual(
+            (item.name, item.category, item.brand, item.status, item.requires_shipping, item.tax_class,
+             item.seo_title, item.seo_description, item.specifications.get().value),
+            (row["name"], leaf, self.brand, Product.Status.ACTIVE, False, tax,
+             row["seo_title"], row["seo_description"], "مقدار مشخصه"),
+        )
+        self.assertEqual((variant.price, variant.stock, variant.sku, variant.barcode, variant.weight_grams),
+                         (row["price"], row["stock"], row["sku"], row["barcode"], 0))
+        self.assertCountEqual(
+            variant.option_values.values_list("option__label", "option_value__label"),
+            [(row[f"axis{i}"], row[f"value{i}"]) for i in range(1, 4)],
+        )
+        page = self.client.get(reverse("dashboard:product-edit", args=[item.pk]))
+        self.assertEqual(page.context["selected_category_group_id"], self.category.pk)
+        self.assertEqual(page.context["selected_category_id"], leaf.pk)
+        form = page.context["form"]
+        self.assertEqual((form["brand"].value(), form["status"].value(), form["requires_shipping"].value(),
+                          form["tax_class"].value()), (self.brand.pk, Product.Status.ACTIVE, False, tax.pk))
+        for value in (row["name"], row["group"], row["seo_title"], row["seo_description"],
+                      "مقدار مشخصه", row["sku"], row["barcode"], "مقدار نوع"):
+            self.assertContains(page, value)
+        self.assertContains(page, f'name="variant_{variant.pk}_weight_grams" value="0"')
+
+        invalid = self.upload([dict(row, operation="به‌روزرسانی", product_id=item.pk, variant_id=variant.pk + 1)])
+        self.assertTrue(invalid.row_results.get(row_number=2).errors[0].startswith("X:"))
+        update = self.upload([dict(group=item.sku, product_id=item.pk, variant_id=variant.pk,
+                                   stock=14, operation="به‌روزرسانی")])
+        self.confirm(update)
+        self.assertEqual(update.status, ImportJob.Status.COMPLETED, list(update.row_results.values("errors")))
+        replay = self.upload([dict(row, operation="خودکار")])
+        self.confirm(replay)
+        variant.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(replay.row_results.get(row_number=2).status, "skipped")
+        self.assertEqual((variant.stock, variant.price, item.category), (14, row["price"], leaf))
+
+    def test_reject_root_only_create_but_show_existing_root_in_editor(self):
+        row = dict(group="ROOTFIX", name="کالای فرضی", category=self.category.name, price=100, stock=12)
+        invalid = self.upload([row])
+        self.assertTrue(invalid.row_results.get(row_number=2).errors[0].startswith("D:"))
+        self.confirm(invalid)
+        self.assertFalse(Product.objects.filter(store=self.store, sku="ROOTFIX").exists())
+        item = Product.objects.create(store=self.store, vendor=self.vendor, category=self.category,
+                                      sku="ROOTFIX", slug="fixture-root-only", name=row["name"], price=100, stock=12)
+        page = self.client.get(reverse("dashboard:product-edit", args=[item.pk]))
+        self.assertEqual(page.context["selected_category_group_id"], self.category.pk)
+        self.assertIsNone(page.context["selected_category_id"])
+        self.assertContains(page, "گروه ذخیره‌شده")
+        replay = self.upload([row])
+        self.confirm(replay)
+        self.assertEqual(replay.row_results.get(row_number=2).status, "skipped")
+        item.refresh_from_db()
+        self.assertEqual(item.category, self.category)
+
+    def test_numeric_contract_blank_stock_and_invalid_group(self):
+        wb = self.download()
+        product_sheet = wb[import_v33.SHEET]
+        numeric = {str(rule.sqref): rule for rule in product_sheet.data_validations.dataValidation
+                   if rule.type != "list"}
+        for col, key in (("L", "price"), ("M", "stock"), ("P", "weight")):
+            rule = numeric[f"{col}2:{col}400"]
+            self.assertEqual((rule.type, rule.operator, int(rule.formula1), int(rule.formula2)),
+                             ("whole", "between", *import_v33.NUMERIC_BOUNDS[key]))
+            self.assertTrue(rule.allow_blank and rule.showErrorMessage)
+        self.assertEqual(product_sheet["W2"].number_format, "@")
+        self.assertEqual(product_sheet["X2"].number_format, "@")
+        self.assertIn("A5", wb["راهنما"]["C38"].value)
+        self.assertIn("برند D", wb["راهنما"]["C41"].value)
+        row = dict(group="FIX-INVALID", name="نمونه", category=self.category.name, child=self.leaf.name, price=100, stock=12)
+        for edits, column in (({"stock": None}, "M"), ({"stock": -1}, "M"), ({"stock": 1.5}, "M"),
+                              ({"stock": 2**31}, "M"), ({"price": 1.25}, "L"), ({"weight": -1}, "P"),
+                              ({"group": ""}, "A"), ({"group": "90000", "name": ""}, "B"),
+                              ({"product_id": 0}, "W"), ({"variant_id": "9999999999999999999"}, "X"),
+                              ({"variant_id": 10}, "X")):
+            with self.subTest(edits=edits):
+                job = self.upload([dict(row, **edits)])
+                self.assertEqual(job.invalid_rows, 1)
+                self.assertTrue(job.row_results.get(row_number=2).errors[0].startswith(column + ":"))
+        self.assertFalse(Product.objects.filter(store=self.store, sku="FIX-INVALID").exists())
+
     def test_preview_confirm_exact_variants_and_replay(self):
         rows = self.synthetic_rows()
         job = self.upload(rows, self.synthetic_definitions())
@@ -184,7 +329,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         self.assertFalse(Attribute.objects.filter(store=self.store, label="رنگ").exists())
 
     def test_simple_and_duplicate_combination(self):
-        simple = self.upload([dict(group="S33", name="ساده", category=self.category.name, price=99, stock=4)])
+        simple = self.upload([dict(group="S33", name="ساده", category=self.category.name, child=self.leaf.name, price=99, stock=4)])
         self.confirm(simple)
         self.assertEqual(simple.status, ImportJob.Status.COMPLETED, list(simple.row_results.values("errors")))
         product = Product.objects.get(store=self.store, sku="S33")
@@ -213,7 +358,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         foreign = Brand.objects.create(store=other, name="برند خصوصی", slug="foreign-v33")
         original = Category.objects.get(pk=self.category.pk)
         job = self.upload(
-            [dict(group="SAFE33", name="ساده", category=self.category.name, price=99, stock=4)],
+            [dict(group="SAFE33", name="ساده", category=self.category.name, child=self.leaf.name, price=99, stock=4)],
             [dict(brand="برند پیشنهادی", category="ریشه دیگر", child="زیردسته"),
              dict(brand="برند پیشنهادی"), dict(brand=str(foreign.pk)), dict(axis1="=1+1")],
         )
@@ -257,7 +402,7 @@ class UnifiedImportFlow(ImportViewTestCase):
     def test_all_definition_errors_report_original_sheet_row_and_excel_column(self):
         kinds = ("category", "child", "brand", "axis1", "value1")
         job = self.upload(
-            [dict(group="TRACE33", name="ساده", category=self.category.name, price=99, stock=4)],
+            [dict(group="TRACE33", name="ساده", category=self.category.name, child=self.leaf.name, price=99, stock=4)],
             [{kind: "=1+1"} for kind in kinds],
         )
         self.assertEqual(job.invalid_rows, len(kinds))
@@ -280,7 +425,7 @@ class UnifiedImportFlow(ImportViewTestCase):
         from apps.dashboard.templatetags.dashboard_extras import product_status_badge, product_status_label
 
         job = self.upload(
-            [dict(group="QA-103", name="شلوار آزمایشی", category=self.category.name, axis1="رنگ",
+            [dict(group="QA-103", name="شلوار آزمایشی", category=self.category.name, child=self.leaf.name, axis1="رنگ",
                   value1="آبی", axis2="سایز", value2="M", stock=10, price=300000, status="فعال")],
             [dict(axis1="رنگ", value1="آبی"), dict(axis1="سایز", value1="M")],
         )

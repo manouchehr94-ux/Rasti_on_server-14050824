@@ -983,22 +983,20 @@ def _product_form_extra_context(store, product, *, form=None, request=None, cate
     # وصل است، گروهِ اصلیِ آن (بالاترین جدِ درخت) را پیدا می‌کند تا مودالِ
     # ساختِ دسته‌بندی بتواند مستقیماً در مرحله‌ی ۲ با همان گروه از پیش‌پرشده
     # باز شود، بدونِ اینکه مدیرِ فروشگاه دوباره گروه را انتخاب کند.
+    submitted_group_id = request.POST.get("category_group", "").strip() if request and request.method == "POST" else ""
+    root_ids = {str(row["category"].pk) for row in tree_rows}
+    def root_of(category):
+        while category.parent_id is not None:
+            category = category.parent
+        return category
+
     selected_category_group_id = None
     if resolved_category is not None and resolved_category.parent_id is not None:
-        ancestor = resolved_category
-        while ancestor.parent_id is not None:
-            ancestor = ancestor.parent
-        selected_category_group_id = ancestor.pk
-    elif request is not None and request.method == "POST":
-        # اگر merchant «گروهِ اصلی» را انتخاب کرده اما هنوز «زیرگروه» را
-        # انتخاب نکرده (یا هر خطایِ دیگری در فرم باعثِ نامعتبر شدن شده)،
-        # ``resolved_category`` چیزی نمی‌دهد که بشود گروه را از رویِ آن
-        # حدس زد. بدونِ این fallback، سلکتِ «گروهِ اصلی» با هر بار خطا خالی
-        # می‌شد و merchant باید دوباره گروه (و بعد زیرگروه) را انتخاب می‌کرد —
-        # این حلقه اغلب باعث می‌شد ذخیره هیچ‌وقت موفق نشود.
-        submitted_group_id = request.POST.get("category_group", "").strip()
-        if submitted_group_id and submitted_group_id in {str(row["category"].pk) for row in tree_rows}:
-            selected_category_group_id = int(submitted_group_id)
+        selected_category_group_id = root_of(resolved_category).pk
+    elif submitted_group_id in root_ids:
+        selected_category_group_id = int(submitted_group_id)
+    elif resolved_category is not None:
+        selected_category_group_id = resolved_category.pk
 
     # برایِ دو ‌سلکتِ سادّه‌ی «گروهِ اصلی»/«زیرگروه» (پروتوتایپِ نهاییِ
     # تأییدشده): برخلافِ ``categories_by_group`` (که فقط فرزندانِ مستقیم را
@@ -1009,10 +1007,17 @@ def _product_form_extra_context(store, product, *, form=None, request=None, cate
     # می‌شود؛ نگاه کنید به ``leaf_categories``.
     group_leaf_options: dict[str, list[dict]] = {str(row["category"].pk): [] for row in tree_rows}
     for leaf in leaf_categories(store):
-        root = leaf.parent if leaf.parent.parent_id is None else leaf.parent.parent
+        root = root_of(leaf)
         group_leaf_options.setdefault(str(root.pk), []).append({"id": leaf.pk, "name": leaf.name})
 
+    selected_is_leaf = resolved_category is not None and any(
+        leaf["id"] == resolved_category.pk
+        for leaf in group_leaf_options.get(str(selected_category_group_id), [])
+    )
     context = {
+        "stored_category_needs_leaf": resolved_category is not None and not selected_is_leaf,
+        "selected_category_id": resolved_category.pk if selected_is_leaf else None,
+        "imported_specifications": product.specifications.all() if product else (),
         "checklist": build_completion_checklist(product) if product else [],
         "completion_pct": completion_percent(product) if product else 0,
         "existing_tags_list": existing_tags_list,

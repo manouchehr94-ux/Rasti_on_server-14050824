@@ -418,7 +418,7 @@
                 </div>
                 <div class="field" style="margin-bottom:0;min-width:90px">
                   <label>وزن (گرم)</label>
-                  <input name="variant_{{ variant.pk }}_weight_grams" value="{% if variant.weight_grams %}{{ variant.weight_grams|stringformat:'d' }}{% endif %}" dir="ltr" inputmode="numeric" placeholder="کالا">
+                  <input name="variant_{{ variant.pk }}_weight_grams" value="{{ variant.weight_grams|default_if_none:''|stringformat:'s' }}" dir="ltr" inputmode="numeric" placeholder="کالا">
                 </div>
                 <div class="field" style="margin-bottom:0;min-width:150px">
                   <label>محدودیتِ فروش</label>

@@ -59,7 +59,8 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
         store.admin_subdomain = "import-v33-browser"
         store.save(update_fields=["admin_subdomain"])
         Vendor.objects.create(store=store, name="نمونه", slug="v33-browser")
-        Category.objects.create(store=store, name="دسته مرورگر", slug="v33-browser")
+        root = Category.objects.create(store=store, name="دسته مرورگر", slug="v33-browser")
+        leaf = Category.objects.create(store=store, name="زیرگروه مرورگر", slug="v33-browser-leaf", parent=root)
         user = get_user_model().objects.create_user(username="v33-browser", is_staff=True)
         StoreMembership.objects.create(store=store, user=user, role=StoreMembership.Role.OWNER,
                                        status=StoreMembership.MembershipStatus.ACTIVE, accepted_at=timezone.now())
@@ -90,7 +91,7 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
             self.assertEqual(len(wb.sheetnames), 5)
             self.assertTrue(all(sheet.sheet_view.rightToLeft for sheet in wb))
             sheet = wb[SHEET]
-            for col, value in {1: "BROWSER33", 2: "کالای مرورگر", 3: "دسته مرورگر", 5: "برند جدید مرورگر",
+            for col, value in {1: "BROWSER33", 2: "کالای مرورگر", 3: "دسته مرورگر", 4: leaf.name, 5: "برند جدید مرورگر",
                                12: 120001, 13: 3}.items():
                 sheet.cell(2, col, value)
             wb["فهرست‌ها"]["D20"] = "برند جدید مرورگر"
@@ -117,6 +118,11 @@ class UnifiedImportBrowser(StaticLiveServerTestCase):
             self.assertEqual((product.price, product.stock, product.brand.name), (120001, 3, "برند جدید مرورگر"))
             if output:
                 page.screenshot(path=output / "excel-confirmed.png")
+            page.goto(base + reverse("dashboard:product-edit", args=[product.pk]))
+            page.wait_for_function(
+                "(ids) => document.querySelector('[name=category_group]')?.value === ids[0] && "
+                "document.querySelector('#id_category')?.value === ids[1]", arg=[str(root.pk), str(leaf.pk)],
+            )
             page.goto(base + reverse("dashboard:import-upload"))
             upload = page.locator('input[name="file"]')
             upload.set_input_files({"name": "browser.xlsx", "mimeType": "application/octet-stream", "buffer": binary.getvalue()})
