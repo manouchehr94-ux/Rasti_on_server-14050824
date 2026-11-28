@@ -12,6 +12,8 @@
 ``_validate_inventory_row`` هیچ‌گاه دو نسخه ندارند؛ فقط پارامترِ
 ``dry_run`` تعیین می‌کند که آیا در انتها چیزی در دیتابیس نوشته شود یا نه."""
 
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, field as dataclass_field
@@ -100,12 +102,28 @@ class RowOutcome:
 
 # ================================================================== کالا (Product)
 
+def _automatic_import_sku(row: dict) -> str:
+    """Give an unidentified row a stable SKU without matching by product name."""
+    if normalize_import_text(row.get("product_id")) or normalize_import_text(row.get("sku")):
+        return ""
+    # XLSX reference mapping can replace a cell with a current catalog slug.
+    # Use the original cells so changing a catalog slug cannot create a duplicate.
+    source_cells = row.get("__raw__") or row.items()
+    fields = sorted(
+        (key, text) for key, value in source_cells
+        if not key.startswith("__") and (text := normalize_import_text(value))
+    )
+    encoded = json.dumps(fields, ensure_ascii=False).encode("utf-8")
+    return "IMP-" + hashlib.sha256(encoded).hexdigest()[:32]
+
+
 def _product_lookup_cache(store, rows: list[dict]) -> dict:
     """پیش‌واکشیِ یک‌جای مرجع‌هایِ Store-scoped — به‌جایِ یک کوئری به‌ازایِ
     هر سلولِ CSV (checkpoint 4B §26). فقط شناسه‌هایی که واقعاً در فایل
     ارجاع شده‌اند واکشی می‌شوند، نه کلِ کاتالوگ."""
     product_ids = set()
     skus = set()
+    automatic_skus = set()
     for row in rows:
         raw_id = normalize_import_text(row.get("product_id"))
         if raw_id.isdigit():
@@ -113,12 +131,14 @@ def _product_lookup_cache(store, rows: list[dict]) -> dict:
         sku = normalize_import_text(row.get("sku"))
         if sku:
             skus.add(sku)
+        elif (automatic_sku := _automatic_import_sku(row)):
+            automatic_skus.add(automatic_sku)
 
     products_by_id = {
         p.pk: p for p in Product.objects.filter(store=store, pk__in=product_ids).select_related("brand", "category", "tax_class")
     }
     products_by_sku = {
-        p.sku: p for p in Product.objects.filter(store=store, sku__in=skus).select_related("brand", "category", "tax_class")
+        p.sku: p for p in Product.objects.filter(store=store, sku__in=skus | automatic_skus).select_related("brand", "category", "tax_class")
     }
     foreign_product_ids = set(
         Product.objects.filter(pk__in=product_ids).exclude(store=store).values_list("pk", flat=True)
@@ -126,6 +146,8 @@ def _product_lookup_cache(store, rows: list[dict]) -> dict:
     return {
         "products_by_id": products_by_id,
         "products_by_sku": products_by_sku,
+        "explicit_skus": skus,
+        "seen_automatic_skus": set(),
         "foreign_product_ids": foreign_product_ids,
         "brands_by_slug": {b.slug: b for b in Brand.objects.filter(store=store)},
         "categories_by_slug": {c.slug: c for c in Category.objects.filter(store=store, parent__isnull=False)},
@@ -1032,7 +1054,30 @@ def _execute_product_batch(store, batch, *, mode, cache, actor, dry_run: bool) -
 
     outcomes = []
     for row_number, row in batch:
+        automatic_sku = _automatic_import_sku(row) if mode != ImportJob.Mode.UPDATE_ONLY else ""
+        if automatic_sku:
+            existing = cache["products_by_sku"].get(automatic_sku)
+            if existing is not None or automatic_sku in cache["seen_automatic_skus"]:
+                outcomes.append(RowOutcome(
+                    row_number=row_number, source_identifier=automatic_sku, status=ImportRowResult.RowStatus.SKIPPED,
+                    warnings=["این ردیفِ بدون کد قبلاً وارد شده یا در همین فایل تکرار شده است؛ هیچ تغییری اعمال نشد."],
+                    target_object_type="Product" if existing else "",
+                    target_object_id=existing.pk if existing else None,
+                    normalized_data_summary={"product_name": normalize_import_text(row.get("name"))[:150]},
+                ))
+                continue
+            if automatic_sku in cache["explicit_skus"]:
+                outcomes.append(RowOutcome(
+                    row_number=row_number, source_identifier=automatic_sku, status=ImportRowResult.RowStatus.INVALID,
+                    errors=["کدِ خودکار با «sku» صریحِ ردیفِ دیگری تداخل دارد؛ برای این ردیف یک کد یکتا وارد کنید."],
+                ))
+                continue
+
         outcome, normalized, existing_product = _validate_product_row(row_number, row, store=store, mode=mode, cache=cache)
+        if automatic_sku and normalized is not None:
+            cache["seen_automatic_skus"].add(automatic_sku)
+            normalized["sku"] = automatic_sku
+            outcome.source_identifier = automatic_sku
         if normalized is None:
             outcomes.append(outcome)
             continue
@@ -1074,8 +1119,14 @@ def _execute_product_batch(store, batch, *, mode, cache, actor, dry_run: bool) -
             cache["products_by_id"][product.pk] = product
         except ValidationError as exc:
             outcome.status = ImportRowResult.RowStatus.FAILED
-            messages = sum(exc.message_dict.values(), []) if hasattr(exc, "message_dict") else exc.messages
-            outcome.errors.extend(messages)
+            if hasattr(exc, "message_dict"):
+                column_keys = {"brand": "brand_code", "category": "category_code", "tax_class": "tax_class_code"}
+                outcome.errors.extend(
+                    f"«{column_keys.get(field, field)}»: {message}" if field != "__all__" else message
+                    for field, messages in exc.message_dict.items() for message in messages
+                )
+            else:
+                outcome.errors.extend(exc.messages)
         except Exception as exc:  # noqa: BLE001 — یک ردیفِ ناموفق نباید کل Job را متوقف کند
             outcome.status = ImportRowResult.RowStatus.FAILED
             outcome.errors.append(str(exc))

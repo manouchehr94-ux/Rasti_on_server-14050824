@@ -115,6 +115,56 @@ class FiveNewBrandsScenario(ProposalFlowBase):
         self.assertEqual(self.brands().count(), before + 5)                                # still exactly five
         self.assertEqual(Product.objects.filter(store=self.store, sku__startswith="NB-").count(), 5)
 
+    def test_blank_sku_with_new_brand_can_be_confirmed_without_duplicate_or_overwrite(self):
+        rows = [
+            row("کالای مصنوعی بدون کد", "", price="100000", brand="برند مصنوعی"),
+            row("کالای مصنوعی دوم", "", price="120000", brand="برند مصنوعی"),
+        ]
+        job = self.upload(rows)
+        self.assertEqual(job.proposals.get().kind, ImportProposal.Kind.BRAND)
+        self.approve_all(job)
+        self.assertTrue(self.brands().filter(name="برند مصنوعی").exists())
+        self.assertTrue(self.detail(job).context["can_execute"])
+
+        done = self.execute(job)
+        self.assertEqual(done.status, ImportJob.Status.COMPLETED, done.error_summary)
+        self.assertEqual(done.created_rows, 2)
+        products = Product.objects.filter(store=self.store, brand__name="برند مصنوعی")
+        self.assertEqual(products.count(), 2)
+        first = products.get(name="کالای مصنوعی بدون کد")
+        self.assertTrue(first.sku)
+        Product.objects.filter(pk=first.pk).update(price=Decimal("130000"))
+        self.brands().filter(pk=first.brand_id).update(slug="renamed-synthetic-brand")
+
+        done = self.execute(self.upload(rows))
+        self.assertEqual((done.status, done.created_rows, done.updated_rows, done.skipped_rows),
+                         (ImportJob.Status.COMPLETED, 0, 0, 2))
+        self.assertEqual(products.count(), 2)
+        first.refresh_from_db()
+        self.assertEqual(first.price, Decimal("130000"))
+
+    def test_identical_blank_sku_rows_create_one_product(self):
+        product_row = row("کالای مصنوعی تکراری", "", brand="برند")
+        done = self.execute(self.upload([product_row, product_row]))
+        self.assertEqual((done.created_rows, done.skipped_rows), (1, 1))
+        self.assertEqual(done.row_results.get(row_number=3).status, "skipped")
+
+    def test_final_xlsx_write_validation_reports_the_column_and_rolls_back(self):
+        rows = [
+            row("کالای معتبر مصنوعی", "", brand="برند"),
+            row("کالای نامعتبر مصنوعی", "test-" + "x" * 40, brand="برند"),
+        ]
+        job = self.upload(rows)
+        self.assertTrue(self.detail(job).context["can_execute"])
+        done = self.execute(job)
+        self.assertEqual(done.status, ImportJob.Status.FAILED)
+        self.assertEqual(done.created_rows, 0)
+        self.assertFalse(Product.objects.filter(store=self.store, name="کالای معتبر مصنوعی").exists())
+        self.assertEqual(done.row_results.get(row_number=3).status, "failed")
+        failed = next(result for result in self.detail(done).context["row_results"] if result.row_number == 3)
+        self.assertEqual(failed.described_errors[0]["column"], "SKU")
+        self.assertTrue(failed.described_errors[0]["message"])
+
     def test_rejected_names_are_never_created_or_linked(self):
         before = self.brands().count()
         rows = self._file()

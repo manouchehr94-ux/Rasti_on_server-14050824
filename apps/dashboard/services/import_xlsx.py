@@ -113,7 +113,7 @@ PRODUCT_COLUMNS = [
                  accepted="عددِ صحیح", example="125", blank="کالا با SKU شناسایی می‌شود؛ اگر SKU هم نباشد، کالایِ تازه ساخته می‌شود.",
                  aliases=("product id", "id", "شناسه"), width=12),
     ImportColumn("sku", "SKU", help="کدِ یکتایِ کالا در این فروشگاه؛ برایِ شناساییِ کالایِ موجود هم استفاده می‌شود.",
-                 accepted="متن (بدونِ تکرار)", example="TSH-001", blank="کالایِ تازه بدونِ SKU ساخته می‌شود.", width=16, text_format=True),
+                 accepted="متن (بدونِ تکرار)", example="TSH-001", blank="کد خودکار ساخته می‌شود. برای به‌روزرسانی بعدی، همین کد یا شناسه کالا را در فایل وارد کنید.", width=16, text_format=True),
     ImportColumn("name", "نام کالا", required="create", help="نامی که مشتری در فروشگاه می‌بیند.",
                  accepted="متن", example="تیشرت نخی", blank="برایِ کالایِ موجود همان نامِ فعلی می‌ماند؛ برایِ کالایِ تازه خطاست.",
                  aliases=("نام", "عنوان کالا", "name"), width=32),
